@@ -1,11 +1,23 @@
 import 'dart:async';
 
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:sora_flutter_sdk/sora_flutter_sdk.dart';
 
 import 'environment.dart';
 
-void main() {
+void main() async {
+  // 映像キャプチャーデバイス一覧
+  WidgetsFlutterBinding.ensureInitialized();
+  final devices = await DeviceList.videoCapturers();
+  for (final device in devices) {
+    print('device => ${device.device}, ${device.unique}');
+  }
+  final frontCamera = await DeviceList.frontCamera();
+  final backCamera = await DeviceList.backCamera();
+  print('front camera => $frontCamera');
+  print('back camera => $backCamera');
+
   runApp(const MyApp());
 }
 
@@ -19,11 +31,17 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   SoraClient? _soraClient;
   var _isConnected = false;
+  List<DeviceName> _capturers = List<DeviceName>.empty();
+  var _capturerNum = 0;
+
+  // 接続時に使用するカメラ、または使用中のカメラ
+  String? _connectDevice;
 
   @override
   void initState() {
     super.initState();
     initPlatformState();
+    initAppState();
   }
 
   Future<void> initPlatformState() async {
@@ -35,10 +53,19 @@ class _MyAppState extends State<MyApp> {
     }
   }
 
+  Future<void> initAppState() async {
+    _capturers = await DeviceList.videoCapturers();
+    setState(() {
+      _connectDevice = _capturers.firstOrNull?.device;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      home: Builder(builder: _buildMain),
+      home: Scaffold(
+        body: Builder(builder: _buildMain),
+      ),
     );
   }
 
@@ -63,6 +90,7 @@ class _MyAppState extends State<MyApp> {
             Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                _buildDeviceList(),
                 Center(
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -79,6 +107,14 @@ class _MyAppState extends State<MyApp> {
                           await _disconnect();
                         },
                         child: const Text('切断する'),
+                      ),
+                      const SizedBox(width: 20),
+                      ElevatedButton(
+                        // カメラの切替中はボタンを無効にする
+                        onPressed: _soraClient?.switchingVideoDevice == true
+                            ? null
+                            : _switchCamera,
+                        child: Icon(Icons.flip_camera_ios),
                       ),
                     ],
                   ),
@@ -112,6 +148,26 @@ class _MyAppState extends State<MyApp> {
     );
   }
 
+  Widget _buildDeviceList() => Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Text('カメラ: '),
+          DropdownButton(
+            value: _connectDevice,
+            items: _capturers
+                .map((DeviceName name) => DropdownMenuItem(
+                      child: Text(name.device),
+                      value: name.device,
+                    ))
+                .toList(),
+
+            // カメラの切替中はボタンを無効にする
+            onChanged:
+                _soraClient?.switchingVideoDevice == true ? null : _setCamera,
+          ),
+        ],
+      );
+
   Future<void> _connect() async {
     if (_isConnected) {
       return;
@@ -124,9 +180,9 @@ class _MyAppState extends State<MyApp> {
       signalingUrls: Environment.urlCandidates,
       channelId: Environment.channelId,
       role: SoraRole.sendrecv,
-    );
-
-    config.metadata = Environment.signalingMetadata;
+    )
+      ..metadata = Environment.signalingMetadata
+      ..videoDeviceName = _connectDevice;
 
     final soraClient = await SoraClient.create(config)
       ..onDisconnect = (String errorCode, String message) {
@@ -137,6 +193,9 @@ class _MyAppState extends State<MyApp> {
       }
       ..onNotify = (String text) {
         print("OnNotify: $text");
+      }
+      ..onSwitchTrack = (SoraVideoTrack track) {
+        setState(() {/* カメラのトラックが交換されたので描画し直す */});
       }
       ..onAddTrack = (SoraVideoTrack track) {
         setState(() {/* soraClient.tracks の数が変動したので描画し直す */});
@@ -173,5 +232,65 @@ class _MyAppState extends State<MyApp> {
       _soraClient = null;
       _isConnected = false;
     });
+  }
+
+  Future<void> _setCamera(String? name) async {
+    if (name == null) {
+      return;
+    }
+
+    if (_soraClient != null) {
+      // 接続済みであれば切り替える
+      await _doSwitchCamera(name);
+    } else {
+      // 接続済みでなければ接続設定にする
+      setState(() {
+        _connectDevice = name;
+      });
+    }
+  }
+
+  Future<void> _switchCamera() async {
+    if (_soraClient == null || _capturers.isEmpty) {
+      return;
+    }
+
+    // 次に使用するカメラを決める
+    var next = _capturerNum + 1;
+    if (next >= _capturers.length) {
+      next = 0;
+    }
+    final name = _capturers[next].device;
+    final result = await _doSwitchCamera(name);
+    if (result) {
+      setState(() {
+        _capturerNum = next;
+      });
+    }
+  }
+
+  Future<bool> _doSwitchCamera(String name) async {
+    print('switch => ${name}');
+
+    // カメラの切替中は切替ボタンを無効にしたいので、
+    // switchVideoDevice を非同期で呼んでから画面を更新する。
+    // 切替中は _soraClient.switchingVideoDevice が true になる
+    final future = _soraClient!.switchVideoDevice(name: name);
+
+    // _soraClient.switchingVideoDevice で有効・無効を判断するボタンは
+    // この更新で無効になる
+    setState(() {});
+
+    // 切替終了まで待って残りの処理を行う
+    final result = await future;
+    setState(() {
+      if (result) {
+        print('switched device => $name, ${_soraClient!.switchingVideoDevice}');
+        _connectDevice = name;
+      } else {
+        print('switch failed');
+      }
+    });
+    return result;
   }
 }

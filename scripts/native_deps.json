@@ -1,0 +1,27 @@
+{
+  "libwebrtc_c": {
+    "version": "0.148.1-canary.1",
+    "base_url": "https://github.com/shiguredo/webrtc-rs/releases/download",
+    "apple_xcframework": {
+      "base_url": "https://github.com/shiguredo/webrtc-rs/releases/download",
+      "artifact": "libwebrtc_c.xcframework.zip",
+      "checksum": "b021c7d78aaffa6af8e6ccf960991db69c9d57823c3f640ca3d3d4a904c76bed"
+    },
+    "archives": {
+      "android_arm64": {
+        "file": "libwebrtc_c-android_arm64.tar.gz",
+        "sha256": "88e8ca552ec454ef950eadf99b052843c3fbf703bb4c279eaefea8dc319ad647"
+      }
+    }
+  },
+  "webrtc": {
+    "version": "m148.7778.7.0",
+    "base_url": "https://github.com/shiguredo-webrtc-build/webrtc-build/releases/download",
+    "archives": {
+      "android_arm64": {
+        "file": "webrtc.android.tar.gz",
+        "sha256": "cc81996d8f3f2e73277f3ee8e1fdf14eb90be7e015d36032d18f0ce3cc11b5a0"
+      }
+    }
+  }
+}

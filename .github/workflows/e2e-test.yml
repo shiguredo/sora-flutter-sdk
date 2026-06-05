@@ -1,0 +1,131 @@
+# recvonly の接続 E2E（integration_test）。
+# Linux 向け MethodChannel が未実装のため、現状は macOS デスクトップで実行する。
+# 将来 Linux が揃ったら matrix で ubuntu + `flutter test ... -d linux` を追加する。
+name: E2E Test
+
+on:
+  # secrets 必須のため既定は手動のみ。push でも回したい場合は paths 付きの push を追加する。
+  workflow_dispatch:
+  push:
+    # E2E は重いため、実行対象は関連ファイルの変更に絞る。
+    paths:
+      - ".github/workflows/e2e-test.yml"
+      - "e2e_test_app/**"
+      - "pubspec.yaml"
+      - "pubspec.lock"
+      - "scripts/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_CHANNEL: stable
+  FLUTTER_VERSION: 3.44.0
+
+jobs:
+  recvonly-macos:
+    name: recvonly (macOS)
+    runs-on: macos-26
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Select Xcode Version
+        run: sudo xcode-select -s '/Applications/Xcode_26.2.app/Contents/Developer'
+
+      - name: Restore Flutter SDK cache
+        id: flutter-sdk-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/flutter
+          key: ${{ runner.os }}-flutter-sdk-${{ env.FLUTTER_CHANNEL }}-${{
+            env.FLUTTER_VERSION }}
+
+      - name: Install Flutter SDK
+        if: steps.flutter-sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          releases_json="${RUNNER_TEMP}/releases_macos.json"
+          curl -fsSL \
+            "https://storage.googleapis.com/flutter_infra_release/releases/releases_macos.json" \
+            -o "${releases_json}"
+          release_info="$(jq -r \
+            --arg version "${FLUTTER_VERSION}" \
+            --arg channel "${FLUTTER_CHANNEL}" \
+            '.releases[]
+            | select(.version == $version and .channel == $channel)
+            | [.archive, .sha256]
+            | @tsv' \
+            "${releases_json}" \
+            | head -n 1)"
+          if [[ -z "${release_info}" ]]; then
+            echo "Flutter release ${FLUTTER_VERSION} (${FLUTTER_CHANNEL}) was not found." >&2
+            exit 1
+          fi
+          IFS=$'\t' read -r archive_path archive_sha256 <<< "${release_info}"
+          archive_file="${RUNNER_TEMP}/$(basename "${archive_path}")"
+          curl -fsSL \
+            "https://storage.googleapis.com/flutter_infra_release/releases/${archive_path}" \
+            -o "${archive_file}"
+          echo "${archive_sha256}  ${archive_file}" | shasum -a 256 -c -
+          rm -rf "${HOME}/flutter"
+          case "${archive_file}" in
+            *.zip)
+              unzip -q "${archive_file}" -d "${HOME}"
+              ;;
+            *.tar.xz)
+              tar -xJf "${archive_file}" -C "${HOME}"
+              ;;
+            *)
+              echo "Unsupported Flutter archive format: ${archive_file}" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Add Flutter to PATH
+        run: echo "${HOME}/flutter/bin" >> "${GITHUB_PATH}"
+
+      - name: Restore Pub cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-pub-e2e-${{ env.FLUTTER_VERSION }}-${{
+            hashFiles('pubspec.yaml', 'pubspec.lock',
+            'e2e_test_app/pubspec.yaml', 'e2e_test_app/pubspec.lock') }}
+
+      - name: Restore native dependency cache
+        uses: actions/cache@v5
+        with:
+          path: third_party/libwebrtc-c
+          key: ${{ runner.os }}-native-deps-${{ hashFiles('scripts/native_deps.json') }}
+
+      - name: Resolve e2e_test_app dependencies
+        working-directory: e2e_test_app
+        run: |
+          set -euo pipefail
+          flutter pub get
+
+      - name: Run recvonly integration test
+        working-directory: e2e_test_app
+        env:
+          TEST_SECRET_KEY: ${{ secrets.TEST_SECRET_KEY }}
+          TEST_SIGNALING_URLS: ${{ secrets.TEST_SIGNALING_URLS }}
+          TEST_CHANNEL_ID_PREFIX: ${{ secrets.TEST_CHANNEL_ID_PREFIX }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TEST_SECRET_KEY:-}" || -z "${TEST_SIGNALING_URLS:-}" || -z "${TEST_CHANNEL_ID_PREFIX:-}" ]]; then
+            echo "Missing secrets TEST_SECRET_KEY, TEST_SIGNALING_URLS, or TEST_CHANNEL_ID_PREFIX." >&2
+            exit 1
+          fi
+          flutter precache --macos
+          flutter test integration_test/recvonly_e2e_test.dart -d macos

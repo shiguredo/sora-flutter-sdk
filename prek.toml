@@ -1,0 +1,123 @@
+exclude = { glob = [
+  "build/**",
+  "devtools/build/**",
+  ".dart_tool/**",
+  ".artifacts/**",
+  "android/.cxx/**",
+  "third_party/**",
+] }
+
+[[repos]]
+repo = "builtin"
+hooks = [
+  { id = "trailing-whitespace" },
+  { id = "end-of-file-fixer" },
+  { id = "check-yaml", args = ["--allow-multiple-documents"] },
+  { id = "check-toml" },
+]
+
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "dart-format"
+name = "dart format"
+language = "system"
+entry = "dart format"
+files = "^(lib|test)/.*\\.dart$"
+
+[[repos.hooks]]
+id = "dart-analyze"
+name = "dart analyze"
+language = "system"
+entry = "dart analyze --fatal-infos lib test"
+pass_filenames = false
+files = "^(lib|test)/.*\\.dart$"
+
+[[repos.hooks]]
+id = "dart-format-scripts"
+name = "dart format (scripts)"
+language = "system"
+entry = "dart format"
+files = "^scripts/.*\\.dart$"
+
+[[repos.hooks]]
+id = "dart-analyze-scripts"
+name = "dart analyze (scripts)"
+language = "system"
+entry = "dart analyze --fatal-infos scripts"
+pass_filenames = false
+files = "^scripts/.*\\.dart$"
+
+[[repos.hooks]]
+id = "dart-format-devtools"
+name = "dart format (devtools)"
+language = "system"
+entry = "dart format"
+files = "^devtools/(lib|test)/.*\\.dart$"
+
+[[repos.hooks]]
+id = "dart-analyze-devtools"
+name = "dart analyze (devtools)"
+language = "system"
+entry = "bash -euo pipefail -c 'cp devtools/lib/configs/environment.example.dart devtools/lib/configs/environment.dart && trap \"rm -f devtools/lib/configs/environment.dart\" EXIT && cd devtools && dart analyze --fatal-infos lib test'"
+pass_filenames = false
+files = "^devtools/(lib|test)/.*\\.dart$"
+
+[[repos.hooks]]
+id = "swift-format"
+name = "swift format"
+language = "system"
+entry = "swift format --in-place"
+files = "\\.swift$"
+exclude = { glob = [
+  "devtools/macos/Flutter/**",
+  "**/GeneratedPluginRegistrant.swift",
+] }
+
+[[repos.hooks]]
+id = "swift-format-lint"
+name = "swift format lint"
+language = "system"
+entry = "swift format lint --strict"
+files = "\\.swift$"
+exclude = { glob = [
+  "devtools/macos/Flutter/**",
+  "**/GeneratedPluginRegistrant.swift",
+] }
+
+[[repos.hooks]]
+id = "swiftlint"
+name = "swiftlint"
+language = "system"
+entry = "swiftlint lint --strict --config .swiftlint.yml"
+pass_filenames = false
+files = "\\.swift$"
+
+[[repos.hooks]]
+id = "ktlint-format"
+name = "ktlint format"
+language = "system"
+entry = "ktlint --relative --format"
+files = "\\.(kt|kts)$"
+
+[[repos.hooks]]
+id = "ktlint-check"
+name = "ktlint check"
+language = "system"
+entry = "ktlint --relative"
+files = "\\.(kt|kts)$"
+
+[[repos.hooks]]
+id = "clang-format"
+name = "clang format"
+language = "system"
+entry = "clang-format -i -style=file -fallback-style=none"
+files = "\\.(cc|h)$"
+
+[[repos.hooks]]
+id = "clang-format-check"
+name = "clang format check"
+language = "system"
+entry = "clang-format --dry-run --Werror -style=file -fallback-style=none"
+files = "\\.(cc|h)$"

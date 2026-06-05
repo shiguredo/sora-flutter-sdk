@@ -1,0 +1,107 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to include in version control, so this line is
+# commented out by default.
+# .vscode/
+
+# Flutter / Dart / Pub related
+**/doc/api/
+.dart_tool/
+.artifacts/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+coverage/
+
+# iOS / macOS generated files
+**/dgph
+*.mode1v3
+*.mode2v3
+*.moved-aside
+*.pbxuser
+*.perspectivev3
+**/*sync/
+**/.generated/
+**/.symlinks/
+**/DerivedData/
+**/Pods/
+**/xcuserdata/
+**/ios/Flutter/.last_build_id
+**/ios/Flutter/App.framework
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/ephemeral/
+**/ios/Flutter/flutter_export_environment.sh
+**/macos/Flutter/ephemeral/
+
+# Android generated files
+**/android/.gradle/
+**/android/local.properties
+**/android/app/debug
+**/android/app/profile
+**/android/app/release
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+
+# Local libwebrtc-c symlink
+sora_sdk/third_party/libwebrtc-c
+
+
+# Agents
+.codex/
+.claude/
+.cursor/
+# Dart / Flutter
+.dart_tool/
+.artifacts/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+build/
+
+# Android
+android/.gradle/
+android/.cxx/
+android/local.properties
+
+# iOS / macOS
+ios/Pods/
+ios/.symlinks/
+macos/Pods/
+
+# ビルド生成物
+*.o
+
+# libwebrtc-c (シンボリックリンク)
+third_party/libwebrtc-c
+
+.env

@@ -1,7 +1,8 @@
 import AVFoundation
-@_implementationOnly import CWebrtc
 import CoreImage
 import FlutterMacOS
+
+@_implementationOnly import CWebrtc
 
 /// カメラ映像のキャプチャと dart:ffi へのフレーム送出を担当するクラス。
 ///

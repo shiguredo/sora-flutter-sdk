@@ -11,4 +11,7 @@
 
 ## develop
 
+- [UPDATE] libwebrtc-c を 0.149.0 に更新する
+  - @zztkm
+
 ### misc

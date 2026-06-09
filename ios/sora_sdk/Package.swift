@@ -6,9 +6,9 @@ import PackageDescription
 let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 let exportedSymbolsPath = "\(packageRoot)/exported_symbols.exp"
 let libwebrtcCXCFrameworkURL =
-  "https://github.com/shiguredo/webrtc-rs/releases/download/0.149.0/libwebrtc_c.xcframework.zip"
+  "https://github.com/shiguredo/webrtc-rs/releases/download/0.150.0/libwebrtc_c.xcframework.zip"
 let libwebrtcCXCFrameworkChecksum =
-  "111e47b3643d72582a96beb7393418692fd1b611683c017070c472936bfe764c"
+  "28fe87e5368bde34acacd4dc409f3b98d9bd60898ae37af2e8dda009787dc7cf"
 
 let package = Package(
   name: "sora_sdk",

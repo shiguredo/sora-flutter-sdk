@@ -17,7 +17,7 @@ void main() {
     WidgetTester tester,
   ) async {
     final env = loadE2eEnvironment();
-    final channelId = buildChannelId(env.channelPrefix);
+    final channelId = buildChannelId(env.channelPrefix, suffix: '-twoparty');
 
     final receiverConfig = SoraConnectionConfig(
       signalingUrls: env.signalingUrls,

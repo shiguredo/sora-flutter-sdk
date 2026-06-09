@@ -20,7 +20,7 @@ void main() {
     'track_event: sender 接続前後の remote track 追加/削除を検証する',
     (WidgetTester tester) async {
       final env = loadE2eEnvironment();
-      final channelId = buildChannelId(env.channelPrefix);
+      final channelId = buildChannelId(env.channelPrefix, suffix: '-trackevent');
 
       final receiverConfig = SoraConnectionConfig(
         signalingUrls: env.signalingUrls,

@@ -42,7 +42,7 @@ void main() {
       reason: 'TEST_SIGNALING_URLS には 1 件以上の URL が必要です。',
     );
 
-    final channelId = buildChannelId(channelPrefix!);
+    final channelId = buildChannelId(channelPrefix!, suffix: '-sendonly');
     final metadata = metadataFromSecretKey(secretKey);
 
     final config = SoraConnectionConfig(

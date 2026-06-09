@@ -44,7 +44,7 @@ void main() {
       reason: 'TEST_SIGNALING_URLS には 1 件以上の URL が必要です。',
     );
 
-    final channelId = buildChannelId(channelPrefix!);
+    final channelId = buildChannelId(channelPrefix!, suffix: '-sendrecv');
     final metadata = metadataFromSecretKey(secretKey);
 
     // sendrecv で external video track を使う場合、connect(stream) が

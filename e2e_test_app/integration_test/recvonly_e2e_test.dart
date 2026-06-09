@@ -39,7 +39,7 @@ void main() {
       reason: 'TEST_SIGNALING_URLS must contain at least one URL.',
     );
 
-    final channelId = buildChannelId(channelPrefix!);
+    final channelId = buildChannelId(channelPrefix!, suffix: '-recvonly');
     final metadata = metadataFromSecretKey(secretKey);
 
     final config = SoraConnectionConfig(

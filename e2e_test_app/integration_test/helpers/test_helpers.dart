@@ -20,12 +20,14 @@ List<String> parseSignalingUrls(String raw) {
 ///
 /// CI では同じ workflow run 内の値を使い、ログ上で追跡しやすくする。
 /// ローカルでは連続実行しても channelId が衝突しないよう、現在時刻を付ける。
-String buildChannelId(String prefix) {
+/// [suffix] を指定すると channel ID の末尾に付与する。CI の matrix 並列実行時に
+/// テスト間で channel ID が衝突するのを防ぐために使う。
+String buildChannelId(String prefix, {String suffix = ''}) {
   final runId = Platform.environment['GITHUB_RUN_ID']?.trim();
   if (runId != null && runId.isNotEmpty) {
-    return '$prefix$runId';
+    return '$prefix$runId$suffix';
   }
-  return '$prefix${DateTime.now().microsecondsSinceEpoch}';
+  return '$prefix${DateTime.now().microsecondsSinceEpoch}$suffix';
 }
 
 /// [TEST_SECRET_KEY] を connect の metadata に載せる。

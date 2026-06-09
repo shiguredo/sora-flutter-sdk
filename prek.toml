@@ -113,11 +113,11 @@ id = "clang-format"
 name = "clang format"
 language = "system"
 entry = "clang-format -i -style=file -fallback-style=none"
-files = "\\.(cc|h)$"
+files = "\\.(c|cc|h)$"
 
 [[repos.hooks]]
 id = "clang-format-check"
 name = "clang format check"
 language = "system"
 entry = "clang-format --dry-run --Werror -style=file -fallback-style=none"
-files = "\\.(cc|h)$"
+files = "\\.(c|cc|h)$"

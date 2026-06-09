@@ -17,3 +17,6 @@
   - @zztkm
 
 ### misc
+
+- [ADD] remoteMediaStreams の grouping を検証する E2E テストを追加する
+  - @zztkm

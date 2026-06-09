@@ -179,6 +179,94 @@ final class ObservedConnection {
     );
   }
 
+  /// remoteMediaStreams に指定 connectionId のエントリが生成されるまで待つ。
+  Future<RemoteMediaStream> waitForRemoteMediaStreamEntry(
+    WidgetTester tester, {
+    required String connectionId,
+    required Duration timeout,
+  }) async {
+    const interval = Duration(milliseconds: 200);
+    final deadline = DateTime.now().add(timeout);
+
+    while (DateTime.now().isBefore(deadline)) {
+      throwIfHasErrors();
+
+      final entry = connection.remoteMediaStreams[connectionId];
+      if (entry != null) {
+        return entry;
+      }
+
+      await tester.pump(interval);
+    }
+
+    throw StateError(
+      'Timed out while waiting for RemoteMediaStream entry on $name. '
+      'connectionId=$connectionId '
+      'milestones=$milestones',
+    );
+  }
+
+  /// 指定 connectionId の RemoteMediaStream で audioTrack と videoTrack の
+  /// 両方が non-null になるまで待つ。
+  Future<RemoteMediaStream> waitForRemoteMediaStreamBothTracks(
+    WidgetTester tester, {
+    required String connectionId,
+    required Duration timeout,
+  }) async {
+    const interval = Duration(milliseconds: 200);
+    final deadline = DateTime.now().add(timeout);
+
+    while (DateTime.now().isBefore(deadline)) {
+      throwIfHasErrors();
+
+      final entry = connection.remoteMediaStreams[connectionId];
+      if (entry != null &&
+          entry.audioTrack != null &&
+          entry.videoTrack != null) {
+        return entry;
+      }
+
+      await tester.pump(interval);
+    }
+
+    final entry = connection.remoteMediaStreams[connectionId];
+    throw StateError(
+      'Timed out while waiting for both audio/video tracks on $name. '
+      'connectionId=$connectionId '
+      'entryExists=${entry != null} '
+      'audioTrack=${entry?.audioTrack != null} '
+      'videoTrack=${entry?.videoTrack != null} '
+      'milestones=$milestones',
+    );
+  }
+
+  /// remoteMediaStreams から指定 connectionId のエントリが削除されるまで待つ。
+  Future<void> waitForRemoteMediaStreamRemoved(
+    WidgetTester tester, {
+    required String connectionId,
+    required Duration timeout,
+  }) async {
+    const interval = Duration(milliseconds: 200);
+    final deadline = DateTime.now().add(timeout);
+
+    while (DateTime.now().isBefore(deadline)) {
+      throwIfHasErrors();
+
+      if (!connection.remoteMediaStreams.containsKey(connectionId)) {
+        return;
+      }
+
+      await tester.pump(interval);
+    }
+
+    throw StateError(
+      'Timed out while waiting for RemoteMediaStream removal on $name. '
+      'connectionId=$connectionId '
+      'streamCount=${connection.remoteMediaStreams.length} '
+      'milestones=$milestones',
+    );
+  }
+
   Future<RemoteTrackObservation> _waitForObservation(
     WidgetTester tester, {
     required List<RemoteTrackObservation> observations,

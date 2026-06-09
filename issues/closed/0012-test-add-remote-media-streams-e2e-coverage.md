@@ -2,6 +2,7 @@
 
 - Priority: High
 - Created: 2026-06-03
+- Completed: 2026-06-09
 - Model: GPT-5 Codex
 - Branch: feature/add-remote-media-streams-e2e-coverage
 - Polished: 2026-06-03
@@ -50,9 +51,12 @@
 
 ## 解決方法
 
-1. `MediaDevices.createAudioTrack()` と external video track を同じ `LocalMediaStream` に載せる 2 クライアント E2E を追加する
-2. sender の `connectionId` を確定させた後、receiver 側で `remoteMediaStreams[sender.connectionId]` を待つ
-3. まず対象 `RemoteMediaStream` が生成されることを確認し、その後 `audioTrack` と `videoTrack` が到着順非依存でそろうまで待つ
-4. `RemoteMediaStream` の Dart オブジェクト同一性が、audio 到着前後 / video 到着前後で維持されることを確認する
-5. sender 切断後に対象 `RemoteMediaStream` が map から消えることを確認する
-6. 必要な helper 抽出、README 更新、`CHANGES.md` の `### misc` 追記を合わせて行う
+1. `e2e_test_app/integration_test/remote_media_stream_e2e_test.dart` を新規作成し、3 Phase の検証を実装した
+   - Phase 1: `remoteMediaStreams` に `sender.connectionId` のエントリが生成されることを確認
+   - Phase 2: 同一オブジェクトに `audioTrack` + `videoTrack` が到着順非依存で束ねられ、オブジェクト同一性が維持されることを確認
+   - Phase 3: sender 切断後に当該エントリが map から削除されることを確認
+2. `connection_helpers.dart` に `waitForRemoteMediaStreamEntry` / `waitForRemoteMediaStreamBothTracks` / `waitForRemoteMediaStreamRemoved` の 3 つの polling ヘルパーを追加
+3. `DebugProfile.entitlements` / `Release.entitlements` に `com.apple.security.device.microphone` を追加
+4. `e2e_test_app/README.md` に audio track の実行条件を追記し、テスト一覧に新テストを追加
+5. `.github/workflows/e2e-test.yml` の matrix に新テストを追加
+6. `CHANGES.md` の `### misc` に追記

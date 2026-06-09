@@ -2,6 +2,7 @@
 
 - Priority: High
 - Created: 2026-06-03
+- Completed: 2026-06-09
 - Model: GPT-5 Codex
 - Branch: feature/add-local-media-toggle-e2e-coverage
 - Polished: 2026-06-03
@@ -44,9 +45,12 @@
 
 ## 解決方法
 
-1. sender / receiver の 2 クライアント E2E を追加する
-2. video 用 test では sender を external video track 付きで接続し、toggle 前後で `isVideoEnabled` と `stream.currentVideoTrackOrNull.enabled` が一致して変化することを確認する
-3. audio 用 test では sender に `MediaDevices.createAudioTrack()` を持つ stream を渡し、toggle 前後で `isAudioEnabled` と `stream.currentAudioTrackOrNull.enabled` が一致して変化することを確認する
-4. 各 test で toggle 前後に `getStats()` を呼び、接続が壊れていないことを確認する
-5. `bytesSent` や receiver 側無音化は補助ログには使ってよいが、pass / fail の主判定には使わない
-6. README と `CHANGES.md` の `### misc` を更新し、audio 権限前提と issue の検証範囲を明記する
+1. `e2e_test_app/integration_test/local_media_toggle_e2e_test.dart` を新規作成し、video toggle と audio toggle の 2 test case を実装した
+   - video test: sender sendonly (video:true) + external video track + ColorBarVideoSource
+   - audio test: sender sendonly (audio:true) + `MediaDevices.createAudioTrack()`
+   - 各 test: toggle 前後で `isVideoEnabled` / `isAudioEnabled` と `stream.current*TrackOrNull.enabled` の一致を確認
+   - `getStats()` で DTLS / ICE 確立を `statsJsonSuggestsMediaPathUp()` で検証
+   - `bytesSent` の完全停止は pass 条件にしていない
+2. `e2e_test_app/README.md` に audio track 前提とテスト一覧を追加
+3. `.github/workflows/e2e-test.yml` の matrix に新テストを追加
+4. `CHANGES.md` の `### misc` に追記

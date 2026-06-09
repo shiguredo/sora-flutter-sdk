@@ -20,3 +20,5 @@
 
 - [ADD] remoteMediaStreams の grouping を検証する E2E テストを追加する
   - @zztkm
+- [ADD] ローカル音声と映像の有効切り替えを検証する E2E テストを追加する
+  - @zztkm

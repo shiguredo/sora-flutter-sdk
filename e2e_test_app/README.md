@@ -6,7 +6,7 @@ Sora Flutter SDK の recvonly / sendonly / sendrecv 接続と、2 クライア�
 
 - **Linux**: プラグインの MethodChannel が未実装のため、接続テストは現状失敗します。CI（`e2e-test.yml`）は macOS で実行します。
 - **macOS**: 初回ビルド時に Swift Package Manager が `libwebrtc_c.xcframework.zip` を自動取得するため、手動 fetch は不要。アプリの最小デプロイは **15.0**。App Sandbox 有効時は **外向き TCP/TLS（シグナリング）用に `com.apple.security.network.client`** が entitlements に必要（本アプリの `DebugProfile` / `Release` に含める）。
-- **audio track**: `MediaDevices.createAudioTrack()` を使用するテスト（`remote_media_stream_e2e_test.dart`）は macOS のマイク入力が必要。entitlements に `com.apple.security.device.microphone` が設定されていること。CI ランナーに物理マイクが無い場合、音声デバイスが存在しない環境ではテストが失敗する可能性がある。
+- **audio track**: `MediaDevices.createAudioTrack()` を使用するテスト（`remote_media_stream_e2e_test.dart`、`local_media_toggle_e2e_test.dart`）は macOS のマイク入力が必要。entitlements に `com.apple.security.device.microphone` が設定されていること。CI ランナーに物理マイクが無い場合、音声デバイスが存在しない環境ではテストが失敗する可能性がある。
 
 ## 環境変数
 
@@ -22,7 +22,7 @@ Sora Flutter SDK の recvonly / sendonly / sendrecv 接続と、2 クライア�
 - sender / receiver は同じ `channelId` を共有する
 - `bundleId` は設定しない。同じ `bundleId` を設定すると相互受信しない
 - sender 側は external video track を使うため、カメラ権限には依存しない
-- audio track を含むテスト（`remote_media_stream_e2e_test.dart`）は `MediaDevices.createAudioTrack()` を使用するため、macOS のマイク権限と入力デバイスが必要
+- audio track を含むテスト（`remote_media_stream_e2e_test.dart`、`local_media_toggle_e2e_test.dart`）は `MediaDevices.createAudioTrack()` を使用するため、macOS のマイク権限と入力デバイスが必要
 
 `TEST_SECRET_KEY` の扱い:
 
@@ -46,11 +46,12 @@ flutter test integration_test/sendrecv_smoke_e2e_test.dart -d macos
 flutter test integration_test/track_event_e2e_test.dart -d macos
 flutter test integration_test/two_party_media_e2e_test.dart -d macos
 flutter test integration_test/remote_media_stream_e2e_test.dart -d macos
+flutter test integration_test/local_media_toggle_e2e_test.dart -d macos
 ```
 
 ## GitHub Actions
 
-`.github/workflows/e2e-test.yml` は `workflow_dispatch` と、関連ファイル変更時の `push` で実行します。workflow では macOS ランナー上で以下 6 本の E2E を matrix 実行します。
+`.github/workflows/e2e-test.yml` は `workflow_dispatch` と、関連ファイル変更時の `push` で実行します。workflow では macOS ランナー上で以下 7 本の E2E を matrix 実行します。
 
 - `integration_test/recvonly_e2e_test.dart`
 - `integration_test/sendonly_dummy_video_e2e_test.dart`
@@ -58,5 +59,6 @@ flutter test integration_test/remote_media_stream_e2e_test.dart -d macos
 - `integration_test/track_event_e2e_test.dart`
 - `integration_test/two_party_media_e2e_test.dart`
 - `integration_test/remote_media_stream_e2e_test.dart`
+- `integration_test/local_media_toggle_e2e_test.dart`
 
 Actions で実行するには、**Repository secrets** に `TEST_SECRET_KEY` / `TEST_SIGNALING_URLS` / `TEST_CHANNEL_ID_PREFIX` を登録してください。

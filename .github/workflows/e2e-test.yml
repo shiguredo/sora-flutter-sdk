@@ -1,4 +1,4 @@
-# recvonly の接続 E2E（integration_test）。
+# recvonly / sendonly / sendrecv / 2 クライアント疎通の E2E（integration_test）。
 # Linux 向け MethodChannel が未実装のため、現状は macOS デスクトップで実行する。
 # 将来 Linux が揃ったら matrix で ubuntu + `flutter test ... -d linux` を追加する。
 name: E2E Test
@@ -17,6 +17,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: e2e-${{ github.workflow }}-${{ github.ref }}
@@ -29,10 +30,22 @@ env:
   XCODE_DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
 
 jobs:
-  recvonly-macos:
-    name: recvonly (macOS)
+  integration-test-macos:
+    name: ${{ matrix.test.name }} (macOS)
     runs-on: macos-26
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+          - name: recvonly
+            target: integration_test/recvonly_e2e_test.dart
+          - name: sendonly dummy video
+            target: integration_test/sendonly_dummy_video_e2e_test.dart
+          - name: sendrecv smoke
+            target: integration_test/sendrecv_smoke_e2e_test.dart
+          - name: two-party media
+            target: integration_test/two_party_media_e2e_test.dart
     defaults:
       run:
         shell: bash
@@ -116,13 +129,12 @@ jobs:
           set -euo pipefail
           flutter pub get
 
-      - name: Run recvonly integration test
+      - name: Run integration test
         working-directory: e2e_test_app
         env:
           TEST_SECRET_KEY: ${{ secrets.TEST_SECRET_KEY }}
           TEST_SIGNALING_URLS: ${{ secrets.TEST_SIGNALING_URLS }}
           TEST_CHANNEL_ID_PREFIX: ${{ secrets.TEST_CHANNEL_ID_PREFIX }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
           if [[ -z "${TEST_SECRET_KEY:-}" || -z "${TEST_SIGNALING_URLS:-}" || -z "${TEST_CHANNEL_ID_PREFIX:-}" ]]; then
@@ -130,4 +142,4 @@ jobs:
             exit 1
           fi
           flutter precache --macos
-          flutter test integration_test/recvonly_e2e_test.dart -d macos
+          flutter test "${{ matrix.test.target }}" -d macos

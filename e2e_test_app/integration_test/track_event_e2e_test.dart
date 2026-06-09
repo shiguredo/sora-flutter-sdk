@@ -12,9 +12,12 @@ import 'helpers/video_source.dart';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
+  // ネットワーク遅延や SDK 内部 buffer を考慮し、イベントの重複/漏れ確認前に
+  // 3 秒の settle 時間を確保する。
+  const _settleDuration = Duration(seconds: 3);
+
   testWidgets(
-    'track_event: sender 接続後に SoraTrackEvent、切断後に '
-    'SoraRemoveTrackEvent が届くことを検証する',
+    'track_event: sender 接続前後の remote track 追加/削除を検証する',
     (WidgetTester tester) async {
       final env = loadE2eEnvironment();
       final channelId = buildChannelId(env.channelPrefix);
@@ -99,47 +102,43 @@ void main() {
         videoSource.start(videoTrack);
         await tester.pump(const Duration(seconds: 1));
 
-        final addObservation = await receiver.waitForRemoteVideoTrackFrom(
+        final trackAddedObs = await receiver.waitForRemoteVideoTrackFrom(
           tester,
           remoteConnectionId: senderConnectionId!,
           timeout: receiverTrackTimeout,
         );
         logE2eMessage(
           'stage=receiver_track_added channelId=$channelId '
-          'trackId=${addObservation.trackId} '
-          'connectionId=${addObservation.connectionId}',
+          'trackId=${trackAddedObs.trackId} '
+          'connectionId=${trackAddedObs.connectionId}',
         );
 
         // 同一 track に対する SoraTrackEvent の重複発火がないことを確認するため、
         // 少し待機して receiver.trackEvents の最終状態を確定させる。
-        await tester.pump(const Duration(seconds: 3));
+        await tester.pump(_settleDuration);
 
         expect(
-          addObservation.kind,
-          'video',
-          reason: 'sender 由来の track は kind=video であること。',
-        );
-        expect(
-          addObservation.connectionId,
+          trackAddedObs.connectionId,
           senderConnectionId,
           reason:
               'SoraTrackEvent の connectionId が sender の connectionId と一致すること。',
         );
         expect(
-          addObservation.trackId,
+          trackAddedObs.trackId,
           isNotEmpty,
           reason: 'SoraTrackEvent の trackId が空文字列でないこと。',
         );
 
-        // 同一 connection 由来の video track の SoraTrackEvent が 1 回だけ発火したことを確認する。
-        final videoTrackEventsFromSender = receiver.trackEvents
+        // 同一 track の SoraTrackEvent が 1 回だけ発火したことを確認する。
+        final videoTrackEventsForTrack = receiver.trackEvents
             .where(
               (RemoteTrackObservation o) =>
-                  o.kind == 'video' && o.connectionId == senderConnectionId,
+                  o.trackId == trackAddedObs.trackId &&
+                  o.connectionId == senderConnectionId,
             )
             .toList();
         expect(
-          videoTrackEventsFromSender.length,
+          videoTrackEventsForTrack.length,
           1,
           reason:
               '同一 remote video track に対する SoraTrackEvent は 1 回だけ発火すること。',
@@ -156,7 +155,7 @@ void main() {
         );
 
         // sender 切断後、receiver 側の subscription は生存したまま remove event を待つ。
-        final removeObservation =
+        final trackRemovedObs =
             await receiver.waitForRemoteVideoTrackRemoved(
           tester,
           remoteConnectionId: senderConnectionId,
@@ -164,45 +163,42 @@ void main() {
         );
         logE2eMessage(
           'stage=receiver_track_removed channelId=$channelId '
-          'trackId=${removeObservation.trackId} '
-          'connectionId=${removeObservation.connectionId}',
+          'trackId=${trackRemovedObs.trackId} '
+          'connectionId=${trackRemovedObs.connectionId}',
         );
 
         // 同一 track に対する SoraRemoveTrackEvent の漏れがないことを確認するため、
         // 少し待機して receiver.removeTrackEvents の最終状態を確定させる。
-        await tester.pump(const Duration(seconds: 3));
+        await tester.pump(_settleDuration);
 
         expect(
-          removeObservation.kind,
-          'video',
-          reason: '削除された track は kind=video であること。',
-        );
-        expect(
-          removeObservation.connectionId,
+          trackRemovedObs.connectionId,
           senderConnectionId,
           reason:
               'SoraRemoveTrackEvent の connectionId が sender の connectionId と一致すること。',
         );
         expect(
-          removeObservation.trackId,
+          trackRemovedObs.trackId,
           isNotEmpty,
           reason: 'SoraRemoveTrackEvent の trackId が空文字列でないこと。',
         );
         expect(
-          removeObservation.trackId,
-          addObservation.trackId,
+          trackRemovedObs.trackId,
+          trackAddedObs.trackId,
           reason:
               'SoraRemoveTrackEvent の trackId が SoraTrackEvent の trackId と一致すること。',
         );
 
-        final videoRemoveEventsFromSender = receiver.removeTrackEvents
+        // 同一 track の SoraRemoveTrackEvent が漏れなく 1 回発火したことを確認する。
+        final videoRemoveEventsForTrack = receiver.removeTrackEvents
             .where(
               (RemoteTrackObservation o) =>
-                  o.kind == 'video' && o.connectionId == senderConnectionId,
+                  o.trackId == trackAddedObs.trackId &&
+                  o.connectionId == senderConnectionId,
             )
             .toList();
         expect(
-          videoRemoveEventsFromSender.length,
+          videoRemoveEventsForTrack.length,
           1,
           reason:
               '同一 remote video track に対する SoraRemoveTrackEvent が漏れなく 1 回発火すること。',
@@ -239,6 +235,12 @@ void main() {
           cleanupErrors.add('videoSource.stop: $e');
           logE2eMessage('stage=cleanup_error step=videoSource.stop error=$e');
         }
+        await runCleanupStep('sender.disconnect', () async {
+          if (sender != null) {
+            await sender.disconnect();
+            await sender.waitUntilDisconnected(senderDisconnectTimeout);
+          }
+        });
         await runCleanupStep('receiver.disconnect', () async {
           if (receiver != null) {
             await receiver.disconnect();

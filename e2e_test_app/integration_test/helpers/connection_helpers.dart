@@ -102,6 +102,7 @@ final class ObservedConnection {
           connectionId: event.track.connectionId,
         ),
       );
+      return;
     }
   }
 
@@ -155,27 +156,12 @@ final class ObservedConnection {
     required String remoteConnectionId,
     required Duration timeout,
   }) async {
-    const interval = Duration(milliseconds: 200);
-    final deadline = DateTime.now().add(timeout);
-
-    while (DateTime.now().isBefore(deadline)) {
-      throwIfHasErrors();
-
-      for (final observation in trackEvents) {
-        if (observation.kind == 'video' &&
-            observation.connectionId == remoteConnectionId) {
-          return observation;
-        }
-      }
-
-      await tester.pump(interval);
-    }
-
-    throw StateError(
-      'Timed out while waiting for remote video track on $name. '
-      'remoteConnectionId=$remoteConnectionId '
-      'trackEvents=$trackEvents removeTrackEvents=$removeTrackEvents '
-      'milestones=$milestones',
+    return _waitForObservation(
+      tester,
+      observations: trackEvents,
+      remoteConnectionId: remoteConnectionId,
+      timeout: timeout,
+      label: 'add',
     );
   }
 
@@ -184,13 +170,29 @@ final class ObservedConnection {
     required String remoteConnectionId,
     required Duration timeout,
   }) async {
+    return _waitForObservation(
+      tester,
+      observations: removeTrackEvents,
+      remoteConnectionId: remoteConnectionId,
+      timeout: timeout,
+      label: 'remove',
+    );
+  }
+
+  Future<RemoteTrackObservation> _waitForObservation(
+    WidgetTester tester, {
+    required List<RemoteTrackObservation> observations,
+    required String remoteConnectionId,
+    required Duration timeout,
+    required String label,
+  }) async {
     const interval = Duration(milliseconds: 200);
     final deadline = DateTime.now().add(timeout);
 
     while (DateTime.now().isBefore(deadline)) {
       throwIfHasErrors();
 
-      for (final observation in removeTrackEvents) {
+      for (final observation in observations) {
         if (observation.kind == 'video' &&
             observation.connectionId == remoteConnectionId) {
           return observation;
@@ -201,10 +203,10 @@ final class ObservedConnection {
     }
 
     throw StateError(
-      'Timed out while waiting for remove remote video track on $name. '
+      'Timed out while waiting for $label remote video track on $name. '
       'remoteConnectionId=$remoteConnectionId '
-      'removeTrackEvents=$removeTrackEvents '
       'trackEvents=$trackEvents '
+      'removeTrackEvents=$removeTrackEvents '
       'milestones=$milestones',
     );
   }

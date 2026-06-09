@@ -179,6 +179,36 @@ final class ObservedConnection {
     );
   }
 
+  Future<RemoteTrackObservation> waitForRemoteVideoTrackRemoved(
+    WidgetTester tester, {
+    required String remoteConnectionId,
+    required Duration timeout,
+  }) async {
+    const interval = Duration(milliseconds: 200);
+    final deadline = DateTime.now().add(timeout);
+
+    while (DateTime.now().isBefore(deadline)) {
+      throwIfHasErrors();
+
+      for (final observation in removeTrackEvents) {
+        if (observation.kind == 'video' &&
+            observation.connectionId == remoteConnectionId) {
+          return observation;
+        }
+      }
+
+      await tester.pump(interval);
+    }
+
+    throw StateError(
+      'Timed out while waiting for remove remote video track on $name. '
+      'remoteConnectionId=$remoteConnectionId '
+      'removeTrackEvents=$removeTrackEvents '
+      'trackEvents=$trackEvents '
+      'milestones=$milestones',
+    );
+  }
+
   List<String> errorSummaries() {
     return errors
         .map(

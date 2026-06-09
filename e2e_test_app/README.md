@@ -41,16 +41,18 @@ flutter pub get
 flutter test integration_test/recvonly_e2e_test.dart -d macos
 flutter test integration_test/sendonly_dummy_video_e2e_test.dart -d macos
 flutter test integration_test/sendrecv_smoke_e2e_test.dart -d macos
+flutter test integration_test/track_event_e2e_test.dart -d macos
 flutter test integration_test/two_party_media_e2e_test.dart -d macos
 ```
 
 ## GitHub Actions
 
-`.github/workflows/e2e-test.yml` は `workflow_dispatch` と、関連ファイル変更時の `push` で実行します。workflow では macOS ランナー上で以下 4 本の E2E を matrix 実行します。
+`.github/workflows/e2e-test.yml` は `workflow_dispatch` と、関連ファイル変更時の `push` で実行します。workflow では macOS ランナー上で以下 5 本の E2E を matrix 実行します。
 
 - `integration_test/recvonly_e2e_test.dart`
 - `integration_test/sendonly_dummy_video_e2e_test.dart`
 - `integration_test/sendrecv_smoke_e2e_test.dart`
+- `integration_test/track_event_e2e_test.dart`
 - `integration_test/two_party_media_e2e_test.dart`
 
 Actions で実行するには、**Repository secrets** に `TEST_SECRET_KEY` / `TEST_SIGNALING_URLS` / `TEST_CHANNEL_ID_PREFIX` を登録してください。

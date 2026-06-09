@@ -46,6 +46,8 @@ jobs:
             target: integration_test/sendrecv_smoke_e2e_test.dart
           - name: two-party media
             target: integration_test/two_party_media_e2e_test.dart
+          - name: track event
+            target: integration_test/track_event_e2e_test.dart
     defaults:
       run:
         shell: bash

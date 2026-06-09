@@ -13,10 +13,10 @@
  *    NativeCallable.listener 経由で Dart に渡す。
  */
 
-#include <jni.h>
 #include <android/log.h>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
+#include <jni.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -50,7 +50,8 @@ static jmethodID g_sora_audio_device_module_create_method = NULL;
 static struct webrtc_I420Buffer* create_rotated_i420_buffer(
     struct webrtc_I420Buffer* source,
     int rotation) {
-  if (source == NULL) return NULL;
+  if (source == NULL)
+    return NULL;
   if (rotation != 90 && rotation != 180 && rotation != 270) {
     return NULL;
   }
@@ -72,22 +73,19 @@ static struct webrtc_I420Buffer* create_rotated_i420_buffer(
     return NULL;
   }
 
-  if (libyuv_I420Rotate(
-          webrtc_I420Buffer_MutableDataY(source),
-          webrtc_I420Buffer_StrideY(source),
-          webrtc_I420Buffer_MutableDataU(source),
-          webrtc_I420Buffer_StrideU(source),
-          webrtc_I420Buffer_MutableDataV(source),
-          webrtc_I420Buffer_StrideV(source),
-          webrtc_I420Buffer_MutableDataY(rotated),
-          webrtc_I420Buffer_StrideY(rotated),
-          webrtc_I420Buffer_MutableDataU(rotated),
-          webrtc_I420Buffer_StrideU(rotated),
-          webrtc_I420Buffer_MutableDataV(rotated),
-          webrtc_I420Buffer_StrideV(rotated),
-          src_width,
-          src_height,
-          rotation) != 0) {
+  if (libyuv_I420Rotate(webrtc_I420Buffer_MutableDataY(source),
+                        webrtc_I420Buffer_StrideY(source),
+                        webrtc_I420Buffer_MutableDataU(source),
+                        webrtc_I420Buffer_StrideU(source),
+                        webrtc_I420Buffer_MutableDataV(source),
+                        webrtc_I420Buffer_StrideV(source),
+                        webrtc_I420Buffer_MutableDataY(rotated),
+                        webrtc_I420Buffer_StrideY(rotated),
+                        webrtc_I420Buffer_MutableDataU(rotated),
+                        webrtc_I420Buffer_StrideU(rotated),
+                        webrtc_I420Buffer_MutableDataV(rotated),
+                        webrtc_I420Buffer_StrideV(rotated), src_width,
+                        src_height, rotation) != 0) {
     webrtc_I420Buffer_Release(rotated);
     return NULL;
   }
@@ -128,7 +126,8 @@ static void rendering_sink_release(RenderingSink* rs) {
  * delete 側が owner ref を手放してもオブジェクト本体は解放されない。
  */
 static int rendering_sink_begin_use(RenderingSink* rs) {
-  if (rs == NULL) return 0;
+  if (rs == NULL)
+    return 0;
 
   rendering_sink_add_ref(rs);
   pthread_mutex_lock(&rs->lock);
@@ -143,7 +142,8 @@ static int rendering_sink_begin_use(RenderingSink* rs) {
 }
 
 static void rendering_sink_end_use(RenderingSink* rs) {
-  if (rs == NULL) return;
+  if (rs == NULL)
+    return;
 
   pthread_mutex_lock(&rs->lock);
   rs->inflight_count--;
@@ -178,36 +178,34 @@ static struct webrtc_VideoFrame_unique* build_sora_video_frame(
   return frame;
 }
 
-__attribute__((visibility("default")))
-struct webrtc_VideoFrame_unique* sora_video_frame_create(
-    struct webrtc_I420Buffer_refcounted* buffer,
-    int rotation,
-    int64_t timestamp_us,
-    uint32_t timestamp_rtp) {
+__attribute__((visibility("default"))) struct webrtc_VideoFrame_unique*
+sora_video_frame_create(struct webrtc_I420Buffer_refcounted* buffer,
+                        int rotation,
+                        int64_t timestamp_us,
+                        uint32_t timestamp_rtp) {
   return build_sora_video_frame(buffer, rotation, timestamp_us, timestamp_rtp);
 }
 
-__attribute__((visibility("default")))
-struct webrtc_VideoFrame* sora_video_frame_unique_get(
-    struct webrtc_VideoFrame_unique* frame) {
+__attribute__((visibility("default"))) struct webrtc_VideoFrame*
+sora_video_frame_unique_get(struct webrtc_VideoFrame_unique* frame) {
   return webrtc_VideoFrame_unique_get(frame);
 }
 
-__attribute__((visibility("default")))
-void sora_video_frame_unique_delete(struct webrtc_VideoFrame_unique* frame) {
+__attribute__((visibility("default"))) void sora_video_frame_unique_delete(
+    struct webrtc_VideoFrame_unique* frame) {
   webrtc_VideoFrame_unique_delete(frame);
 }
 
-__attribute__((visibility("default")))
-struct webrtc_AudioDeviceModule_refcounted*
-sora_android_create_audio_device_module(
-    struct webrtc_Environment* webrtc_env) {
+__attribute__((
+    visibility("default"))) struct webrtc_AudioDeviceModule_refcounted*
+sora_android_create_audio_device_module(struct webrtc_Environment* webrtc_env) {
   if (webrtc_env == NULL) {
     LOGE("sora_android_create_audio_device_module: webrtc_env is null");
     return NULL;
   }
   if (g_application_context == NULL) {
-    LOGE("sora_android_create_audio_device_module: application context is null");
+    LOGE(
+        "sora_android_create_audio_device_module: application context is null");
     return NULL;
   }
 
@@ -219,17 +217,17 @@ sora_android_create_audio_device_module(
 
   if (g_sora_audio_device_module_class == NULL ||
       g_sora_audio_device_module_create_method == NULL) {
-    LOGE("sora_android_create_audio_device_module: helper class is not initialized");
+    LOGE(
+        "sora_android_create_audio_device_module: helper class is not "
+        "initialized");
     return NULL;
   }
 
   // worker thread 上では FindClass が app class loader を解決できないことがあるため、
   // 初期化時にキャッシュした helper を使って JavaAudioDeviceModule を生成する。
   jlong native_adm = (*env)->CallStaticLongMethod(
-      env,
-      g_sora_audio_device_module_class,
-      g_sora_audio_device_module_create_method,
-      g_application_context,
+      env, g_sora_audio_device_module_class,
+      g_sora_audio_device_module_create_method, g_application_context,
       (jlong)(intptr_t)webrtc_env);
   if ((*env)->ExceptionCheck(env)) {
     LOGE("sora_android_create_audio_device_module: helper method threw");
@@ -253,20 +251,19 @@ sora_android_create_audio_device_module(
 * 連続配置ではないため、`libyuv` にそのまま渡す前に SDK 側で 1 サンプルずつ
 * 正規化する必要がある。
 */
-static int copy_java_yuv_to_i420(
-    JNIEnv* env,
-    jobject yBuffer,
-    jobject uBuffer,
-    jobject vBuffer,
-    jint width,
-    jint height,
-    jint yStride,
-    jint uStride,
-    jint vStride,
-    jint yPixelStride,
-    jint uPixelStride,
-    jint vPixelStride,
-    struct webrtc_I420Buffer* buffer) {
+static int copy_java_yuv_to_i420(JNIEnv* env,
+                                 jobject yBuffer,
+                                 jobject uBuffer,
+                                 jobject vBuffer,
+                                 jint width,
+                                 jint height,
+                                 jint yStride,
+                                 jint uStride,
+                                 jint vStride,
+                                 jint yPixelStride,
+                                 jint uPixelStride,
+                                 jint vPixelStride,
+                                 struct webrtc_I420Buffer* buffer) {
   uint8_t* src_y = (uint8_t*)(*env)->GetDirectBufferAddress(env, yBuffer);
   uint8_t* src_u = (uint8_t*)(*env)->GetDirectBufferAddress(env, uBuffer);
   uint8_t* src_v = (uint8_t*)(*env)->GetDirectBufferAddress(env, vBuffer);
@@ -275,22 +272,28 @@ static int copy_java_yuv_to_i420(
   }
 
   // 各平面のバッファ容量がコピーに必要な長さを満たすか検証する
-  if (yStride <= 0 || uStride <= 0 || vStride <= 0 ||
-      yPixelStride <= 0 || uPixelStride <= 0 || vPixelStride <= 0) {
+  if (yStride <= 0 || uStride <= 0 || vStride <= 0 || yPixelStride <= 0 ||
+      uPixelStride <= 0 || vPixelStride <= 0) {
     return 0;
   }
   jlong cap_y = (*env)->GetDirectBufferCapacity(env, yBuffer);
   jlong cap_u = (*env)->GetDirectBufferCapacity(env, uBuffer);
   jlong cap_v = (*env)->GetDirectBufferCapacity(env, vBuffer);
-  if (cap_y < 0 || cap_u < 0 || cap_v < 0) return 0;
+  if (cap_y < 0 || cap_u < 0 || cap_v < 0)
+    return 0;
 
-  jlong y_req = (jlong)(height - 1) * yStride + (jlong)(width - 1) * yPixelStride + 1;
-  if (cap_y < y_req) return 0;
+  jlong y_req =
+      (jlong)(height - 1) * yStride + (jlong)(width - 1) * yPixelStride + 1;
+  if (cap_y < y_req)
+    return 0;
 
   int ch2 = ((int)height + 1) / 2;
-  jlong u_req = (jlong)(ch2 - 1) * uStride + (jlong)((int)width / 2 - 1) * uPixelStride + 1;
-  jlong v_req = (jlong)(ch2 - 1) * vStride + (jlong)((int)width / 2 - 1) * vPixelStride + 1;
-  if (cap_u < u_req || cap_v < v_req) return 0;
+  jlong u_req = (jlong)(ch2 - 1) * uStride +
+                (jlong)((int)width / 2 - 1) * uPixelStride + 1;
+  jlong v_req = (jlong)(ch2 - 1) * vStride +
+                (jlong)((int)width / 2 - 1) * vPixelStride + 1;
+  if (cap_u < u_req || cap_v < v_req)
+    return 0;
 
   uint8_t* dst_y = webrtc_I420Buffer_MutableDataY(buffer);
   uint8_t* dst_u = webrtc_I420Buffer_MutableDataU(buffer);
@@ -340,7 +343,7 @@ static int copy_java_yuv_to_i420(
 }
 
 static void on_rendering_frame(const struct webrtc_VideoFrame* frame,
-                                void* user_data) {
+                               void* user_data) {
   RenderingSink* rs = (RenderingSink*)user_data;
   struct webrtc_VideoFrameBuffer_refcounted* buffer_ref = NULL;
   struct webrtc_VideoFrameBuffer* video_buffer = NULL;
@@ -370,15 +373,15 @@ static void on_rendering_frame(const struct webrtc_VideoFrame* frame,
     if (i420_ref != NULL) {
       source_buffer = webrtc_I420Buffer_refcounted_get(i420_ref);
       if (source_buffer != NULL) {
-        rotated_buffer =
-            create_rotated_i420_buffer(source_buffer, webrtc_VideoFrame_rotation(frame));
+        rotated_buffer = create_rotated_i420_buffer(
+            source_buffer, webrtc_VideoFrame_rotation(frame));
         buffer = rotated_buffer != NULL ? rotated_buffer : source_buffer;
         int width = webrtc_I420Buffer_width(buffer);
         int height = webrtc_I420Buffer_height(buffer);
 
         if (width > 0 && height > 0) {
-          ANativeWindow_setBuffersGeometry(rs->window, width, height,
-                                            AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM);
+          ANativeWindow_setBuffersGeometry(
+              rs->window, width, height, AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM);
           ANativeWindow_Buffer window_buffer;
           if (ANativeWindow_lock(rs->window, &window_buffer, NULL) == 0) {
             window_locked = 1;
@@ -390,12 +393,8 @@ static void on_rendering_frame(const struct webrtc_VideoFrame* frame,
                 webrtc_I420Buffer_MutableDataU(buffer),
                 webrtc_I420Buffer_StrideU(buffer),
                 webrtc_I420Buffer_MutableDataV(buffer),
-                webrtc_I420Buffer_StrideV(buffer),
-                (uint8_t*)window_buffer.bits,
-                window_buffer.stride * 4,
-                width,
-                height,
-                FOURCC_ABGR);
+                webrtc_I420Buffer_StrideV(buffer), (uint8_t*)window_buffer.bits,
+                window_buffer.stride * 4, width, height, FOURCC_ABGR);
           }
         }
       }
@@ -406,7 +405,8 @@ static void on_rendering_frame(const struct webrtc_VideoFrame* frame,
     ANativeWindow_unlockAndPost(rs->window);
   }
   if (i420_ref != NULL && source_buffer == NULL) {
-    struct webrtc_I420Buffer* i420_buf = webrtc_I420Buffer_refcounted_get(i420_ref);
+    struct webrtc_I420Buffer* i420_buf =
+        webrtc_I420Buffer_refcounted_get(i420_ref);
     if (i420_buf != NULL) {
       webrtc_I420Buffer_Release(i420_buf);
     }
@@ -415,7 +415,9 @@ static void on_rendering_frame(const struct webrtc_VideoFrame* frame,
   rendering_sink_end_use(rs);
 }
 
-static void noop_destroy(void* user_data) { (void)user_data; }
+static void noop_destroy(void* user_data) {
+  (void)user_data;
+}
 
 /* ---------------------------------------------------------------------------
  * PeerConnectionObserver コールバックブリッジ
@@ -438,11 +440,21 @@ static void noop_destroy(void* user_data) { (void)user_data; }
 
 /* Dart 側のコールバック関数ポインタ型 */
 typedef void (*dart_on_state_fn)(int32_t state, void* user_data);
-typedef void (*dart_on_ice_candidate_fn)(
-    char* sdp, char* mid, int32_t mline_index, void* user_data);
-typedef void (*dart_on_track_fn)(void* track_ref, char* kind, char* track_id, void* user_data);
-typedef void (*dart_on_remove_track_fn)(void* track_ref, char* kind, char* track_id, void* user_data);
-typedef void (*dart_on_datachannel_fn)(void* dc_ref, char* label, void* user_data);
+typedef void (*dart_on_ice_candidate_fn)(char* sdp,
+                                         char* mid,
+                                         int32_t mline_index,
+                                         void* user_data);
+typedef void (*dart_on_track_fn)(void* track_ref,
+                                 char* kind,
+                                 char* track_id,
+                                 void* user_data);
+typedef void (*dart_on_remove_track_fn)(void* track_ref,
+                                        char* kind,
+                                        char* track_id,
+                                        void* user_data);
+typedef void (*dart_on_datachannel_fn)(void* dc_ref,
+                                       char* label,
+                                       void* user_data);
 typedef void (*dart_on_debug_fn)(char* message, void* user_data);
 
 typedef struct SoraObserverBridge {
@@ -494,7 +506,8 @@ static void observer_bridge_end_use(SoraObserverBridge* bridge) {
 static char* strdup_safe(const char* src) {
   if (src == NULL) {
     char* empty = (char*)malloc(1);
-    if (empty) empty[0] = '\0';
+    if (empty)
+      empty[0] = '\0';
     return empty;
   }
   return strdup(src);
@@ -513,7 +526,8 @@ static void bridge_on_connection_change(
     webrtc_PeerConnectionInterface_PeerConnectionState new_state,
     void* user_data) {
   SoraObserverBridge* bridge = (SoraObserverBridge*)user_data;
-  if (!observer_bridge_begin_use(bridge)) return;
+  if (!observer_bridge_begin_use(bridge))
+    return;
   if (bridge->on_connection_change) {
     bridge->on_connection_change((int32_t)new_state, bridge->dart_user_data);
   }
@@ -524,9 +538,11 @@ static void bridge_on_ice_connection_change(
     webrtc_PeerConnectionInterface_IceConnectionState new_state,
     void* user_data) {
   SoraObserverBridge* bridge = (SoraObserverBridge*)user_data;
-  if (!observer_bridge_begin_use(bridge)) return;
+  if (!observer_bridge_begin_use(bridge))
+    return;
   if (bridge->on_ice_connection_change) {
-    bridge->on_ice_connection_change((int32_t)new_state, bridge->dart_user_data);
+    bridge->on_ice_connection_change((int32_t)new_state,
+                                     bridge->dart_user_data);
   }
   observer_bridge_end_use(bridge);
 }
@@ -535,7 +551,8 @@ static void bridge_on_ice_gathering_change(
     webrtc_PeerConnectionInterface_IceGatheringState new_state,
     void* user_data) {
   SoraObserverBridge* bridge = (SoraObserverBridge*)user_data;
-  if (!observer_bridge_begin_use(bridge)) return;
+  if (!observer_bridge_begin_use(bridge))
+    return;
   if (bridge->on_ice_gathering_change) {
     bridge->on_ice_gathering_change((int32_t)new_state, bridge->dart_user_data);
   }
@@ -543,9 +560,10 @@ static void bridge_on_ice_gathering_change(
 }
 
 static void bridge_on_ice_candidate(const struct webrtc_IceCandidate* candidate,
-                                     void* user_data) {
+                                    void* user_data) {
   SoraObserverBridge* bridge = (SoraObserverBridge*)user_data;
-  if (!observer_bridge_begin_use(bridge)) return;
+  if (!observer_bridge_begin_use(bridge))
+    return;
   if (bridge->on_ice_candidate == NULL) {
     observer_bridge_end_use(bridge);
     return;
@@ -577,25 +595,29 @@ static void bridge_on_ice_candidate(const struct webrtc_IceCandidate* candidate,
   }
 
   bridge->on_ice_candidate(sdp_copy, mid_copy, sdp_mline_index,
-                            bridge->dart_user_data);
+                           bridge->dart_user_data);
   observer_bridge_end_use(bridge);
 }
 
-static void bridge_on_ice_candidate_error(
-    const char* address, size_t address_len,
-    int port, const char* url, size_t url_len,
-    int error_code, const char* error_text, size_t error_text_len,
-    void* user_data) {
+static void bridge_on_ice_candidate_error(const char* address,
+                                          size_t address_len,
+                                          int port,
+                                          const char* url,
+                                          size_t url_len,
+                                          int error_code,
+                                          const char* error_text,
+                                          size_t error_text_len,
+                                          void* user_data) {
   SoraObserverBridge* bridge = (SoraObserverBridge*)user_data;
-  if (!observer_bridge_begin_use(bridge)) return;
+  if (!observer_bridge_begin_use(bridge))
+    return;
   char buf[512];
   snprintf(buf, sizeof(buf),
-           "native: ice_candidate_error address=%.*s port=%d url=%.*s code=%d text=%.*s",
-           (int)address_len, address ? address : "",
-           port,
-           (int)url_len, url ? url : "",
-           error_code,
-           (int)error_text_len, error_text ? error_text : "");
+           "native: ice_candidate_error address=%.*s port=%d url=%.*s code=%d "
+           "text=%.*s",
+           (int)address_len, address ? address : "", port, (int)url_len,
+           url ? url : "", error_code, (int)error_text_len,
+           error_text ? error_text : "");
   bridge_emit_debug(bridge, buf);
   observer_bridge_end_use(bridge);
 }
@@ -607,7 +629,8 @@ static void bridge_on_track(
     struct webrtc_RtpTransceiverInterface_refcounted* transceiver_ref,
     void* user_data) {
   SoraObserverBridge* bridge = (SoraObserverBridge*)user_data;
-  if (!observer_bridge_begin_use(bridge)) return;
+  if (!observer_bridge_begin_use(bridge))
+    return;
 
   /* トラックの種別を確認する */
   struct webrtc_RtpReceiverInterface_refcounted* receiver_ref =
@@ -709,12 +732,14 @@ static void bridge_on_remove_track(
     struct webrtc_RtpReceiverInterface_refcounted* receiver_ref,
     void* user_data) {
   SoraObserverBridge* bridge = (SoraObserverBridge*)user_data;
-  if (!observer_bridge_begin_use(bridge)) return;
+  if (!observer_bridge_begin_use(bridge))
+    return;
 
   if (receiver_ref == NULL) {
     /* receiver_ref が NULL のため track / kind / track_id をまだ読めず、
      * 固定文字列でログを出す */
-    bridge_emit_debug(bridge, "native: onremovetrack skipped, receiver is null");
+    bridge_emit_debug(bridge,
+                      "native: onremovetrack skipped, receiver is null");
     observer_bridge_end_use(bridge);
     return;
   }
@@ -768,8 +793,10 @@ static void bridge_on_remove_track(
         webrtc_MediaStreamTrackInterface_refcounted_get(track_ref));
     webrtc_RtpReceiverInterface_Release(
         webrtc_RtpReceiverInterface_refcounted_get(receiver_ref));
-    if (kind_copy != NULL) free(kind_copy);
-    if (track_id_copy != NULL) free(track_id_copy);
+    if (kind_copy != NULL)
+      free(kind_copy);
+    if (track_id_copy != NULL)
+      free(track_id_copy);
     std_string_unique_delete(track_id);
     observer_bridge_end_use(bridge);
     return;
@@ -805,10 +832,14 @@ static void bridge_on_remove_track(
 
 static const char* datachannel_state_to_string(
     webrtc_DataChannelInterface_DataState state) {
-  if (state == webrtc_DataChannelInterface_DataState_kConnecting) return "connecting";
-  if (state == webrtc_DataChannelInterface_DataState_kOpen) return "open";
-  if (state == webrtc_DataChannelInterface_DataState_kClosing) return "closing";
-  if (state == webrtc_DataChannelInterface_DataState_kClosed) return "closed";
+  if (state == webrtc_DataChannelInterface_DataState_kConnecting)
+    return "connecting";
+  if (state == webrtc_DataChannelInterface_DataState_kOpen)
+    return "open";
+  if (state == webrtc_DataChannelInterface_DataState_kClosing)
+    return "closing";
+  if (state == webrtc_DataChannelInterface_DataState_kClosed)
+    return "closed";
   return "unknown";
 }
 
@@ -817,8 +848,10 @@ static const char* datachannel_state_to_string(
  * Dart に malloc 確保したデータを渡すためのコールバックブリッジ。
  */
 typedef void (*dart_on_dc_state_fn)(void* user_data);
-typedef void (*dart_on_dc_message_fn)(
-    uint8_t* data_copy, int32_t len, int32_t is_binary, void* user_data);
+typedef void (*dart_on_dc_message_fn)(uint8_t* data_copy,
+                                      int32_t len,
+                                      int32_t is_binary,
+                                      void* user_data);
 
 typedef struct DcBridgeContext {
   SoraObserverBridge* bridge;
@@ -861,14 +894,14 @@ static void dc_bridge_end_use(DcBridgeContext* ctx) {
 
 static void bridge_dc_on_state_change(void* user_data) {
   DcBridgeContext* ctx = (DcBridgeContext*)user_data;
-  if (!dc_bridge_begin_use(ctx)) return;
+  if (!dc_bridge_begin_use(ctx))
+    return;
   webrtc_DataChannelInterface_DataState state =
       webrtc_DataChannelInterface_state(ctx->dc);
   char buf[128];
-  snprintf(
-      buf, sizeof(buf), "native: datachannel(%s) state=%s",
-      ctx->label != NULL ? ctx->label : "(unknown)",
-      datachannel_state_to_string(state));
+  snprintf(buf, sizeof(buf), "native: datachannel(%s) state=%s",
+           ctx->label != NULL ? ctx->label : "(unknown)",
+           datachannel_state_to_string(state));
   bridge_emit_debug(ctx->bridge, buf);
   if (ctx->on_state_change) {
     ctx->on_state_change(ctx->dart_user_data);
@@ -876,10 +909,13 @@ static void bridge_dc_on_state_change(void* user_data) {
   dc_bridge_end_use(ctx);
 }
 
-static void bridge_dc_on_message(const uint8_t* data, size_t len,
-                                  int is_binary, void* user_data) {
+static void bridge_dc_on_message(const uint8_t* data,
+                                 size_t len,
+                                 int is_binary,
+                                 void* user_data) {
   DcBridgeContext* ctx = (DcBridgeContext*)user_data;
-  if (!dc_bridge_begin_use(ctx)) return;
+  if (!dc_bridge_begin_use(ctx))
+    return;
   if (ctx->on_message == NULL) {
     dc_bridge_end_use(ctx);
     return;
@@ -900,16 +936,18 @@ static void bridge_dc_on_message(const uint8_t* data, size_t len,
   }
   memcpy(data_copy, data, len);
   ctx->on_message(data_copy, (int32_t)len, is_binary ? 1 : 0,
-                   ctx->dart_user_data);
+                  ctx->dart_user_data);
   dc_bridge_end_use(ctx);
 }
 
 static void bridge_on_datachannel(
-    struct webrtc_DataChannelInterface_refcounted* dc_ref, void* user_data) {
+    struct webrtc_DataChannelInterface_refcounted* dc_ref,
+    void* user_data) {
   /* callback 登録時は AddRef した参照と label_copy を Dart 側へ移譲し、
    * callback 未登録時は C 側で解放する。 */
   SoraObserverBridge* bridge = (SoraObserverBridge*)user_data;
-  if (!observer_bridge_begin_use(bridge)) return;
+  if (!observer_bridge_begin_use(bridge))
+    return;
   if (dc_ref == NULL) {
     observer_bridge_end_use(bridge);
     return;
@@ -963,7 +1001,8 @@ SoraObserverBridge* sora_observer_bridge_create(
     void* dart_user_data) {
   SoraObserverBridge* bridge =
       (SoraObserverBridge*)calloc(1, sizeof(SoraObserverBridge));
-  if (bridge == NULL) return NULL;
+  if (bridge == NULL)
+    return NULL;
 
   pthread_mutex_init(&bridge->lock, NULL);
   pthread_cond_init(&bridge->inflight_cond, NULL);
@@ -992,8 +1031,8 @@ SoraObserverBridge* sora_observer_bridge_create(
   obs_cbs.OnDestroy = noop_destroy;
   bridge->observer = webrtc_PeerConnectionObserver_new(&obs_cbs, bridge);
 
-  LOGI("sora_observer_bridge_create bridge=%p observer=%p",
-       (void*)bridge, (void*)bridge->observer);
+  LOGI("sora_observer_bridge_create bridge=%p observer=%p", (void*)bridge,
+       (void*)bridge->observer);
   return bridge;
 }
 
@@ -1011,7 +1050,8 @@ DcBridgeContext* sora_observer_bridge_setup_dc(
     dart_on_dc_message_fn on_message,
     void* dart_user_data) {
   DcBridgeContext* ctx = (DcBridgeContext*)calloc(1, sizeof(DcBridgeContext));
-  if (ctx == NULL) return NULL;
+  if (ctx == NULL)
+    return NULL;
   pthread_mutex_init(&ctx->lock, NULL);
   pthread_cond_init(&ctx->inflight_cond, NULL);
   ctx->bridge = bridge;
@@ -1039,10 +1079,10 @@ DcBridgeContext* sora_observer_bridge_setup_dc(
 
 /* DcBridgeContext を破棄し、observer の解除と解放を行う。
    破棄前にインフライトのコールバック完了を待つ。 */
-void sora_observer_bridge_destroy_dc(
-    DcBridgeContext* ctx,
-    struct webrtc_DataChannelInterface* dc) {
-  if (ctx == NULL) return;
+void sora_observer_bridge_destroy_dc(DcBridgeContext* ctx,
+                                     struct webrtc_DataChannelInterface* dc) {
+  if (ctx == NULL)
+    return;
 
   /* disposed を立てて新規コールバックを抑止してから、
      lock 外で UnregisterObserver を呼ぶ。
@@ -1076,7 +1116,8 @@ void sora_observer_bridge_destroy_dc(
 /* ブリッジを破棄する。
    破棄前にインフライトのコールバック完了を待つ。 */
 void sora_observer_bridge_destroy(SoraObserverBridge* bridge) {
-  if (bridge == NULL) return;
+  if (bridge == NULL)
+    return;
   LOGI("sora_observer_bridge_destroy bridge=%p", (void*)bridge);
 
   /* disposed を立てて新規コールバックを抑止してから、
@@ -1106,7 +1147,9 @@ void sora_observer_bridge_destroy(SoraObserverBridge* bridge) {
 
 JNIEXPORT jboolean JNICALL
 Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeInitializeAndroid(
-    JNIEnv* env, jclass clazz, jobject application_context) {
+    JNIEnv* env,
+    jclass clazz,
+    jobject application_context) {
   (void)clazz;
 
   JavaVM* jvm = NULL;
@@ -1131,7 +1174,8 @@ Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeInitializeAndroid(
   g_sora_audio_device_module_create_method = NULL;
   g_application_context = (*env)->NewGlobalRef(env, application_context);
   if (g_application_context == NULL) {
-    LOGE("nativeInitializeAndroid: failed to create global application context");
+    LOGE(
+        "nativeInitializeAndroid: failed to create global application context");
     return JNI_FALSE;
   }
 
@@ -1148,17 +1192,19 @@ Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeInitializeAndroid(
       (jclass)(*env)->NewGlobalRef(env, helper_class);
   (*env)->DeleteLocalRef(env, helper_class);
   if (g_sora_audio_device_module_class == NULL) {
-    LOGE("nativeInitializeAndroid: failed to create SoraAudioDeviceModule global ref");
+    LOGE(
+        "nativeInitializeAndroid: failed to create SoraAudioDeviceModule "
+        "global ref");
     return JNI_FALSE;
   }
 
   g_sora_audio_device_module_create_method = (*env)->GetStaticMethodID(
-      env,
-      g_sora_audio_device_module_class,
-      "createNativeAudioDeviceModule",
+      env, g_sora_audio_device_module_class, "createNativeAudioDeviceModule",
       "(Landroid/content/Context;J)J");
   if (g_sora_audio_device_module_create_method == NULL) {
-    LOGE("nativeInitializeAndroid: failed to find createNativeAudioDeviceModule");
+    LOGE(
+        "nativeInitializeAndroid: failed to find "
+        "createNativeAudioDeviceModule");
     (*env)->ExceptionClear(env);
     return JNI_FALSE;
   }
@@ -1172,15 +1218,18 @@ Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeInitializeAndroid(
  * --------------------------------------------------------------------------- */
 
 JNIEXPORT jlong JNICALL
-Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeCreateRenderingSink(
-    JNIEnv* env, jclass clazz, jobject surface) {
+Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeCreateRenderingSink(JNIEnv* env,
+                                                              jclass clazz,
+                                                              jobject surface) {
   (void)clazz;
   struct webrtc_VideoSinkInterface_cbs cbs;
 
-  if (surface == NULL) return 0;
+  if (surface == NULL)
+    return 0;
 
   RenderingSink* rs = (RenderingSink*)calloc(1, sizeof(RenderingSink));
-  if (rs == NULL) return 0;
+  if (rs == NULL)
+    return 0;
 
   if (pthread_mutex_init(&rs->lock, NULL) != 0) {
     free(rs);
@@ -1215,18 +1264,21 @@ Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeCreateRenderingSink(
     return 0;
   }
 
-  LOGI("nativeCreateRenderingSink rs=%p sink=%p window=%p",
-       (void*)rs, (void*)rs->sink, (void*)rs->window);
+  LOGI("nativeCreateRenderingSink rs=%p sink=%p window=%p", (void*)rs,
+       (void*)rs->sink, (void*)rs->window);
   return (jlong)(intptr_t)rs;
 }
 
 JNIEXPORT jlong JNICALL
-Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeGetSinkPtr(
-    JNIEnv* env, jclass clazz, jlong renderingSinkPtr) {
-  (void)env; (void)clazz;
+Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeGetSinkPtr(JNIEnv* env,
+                                                     jclass clazz,
+                                                     jlong renderingSinkPtr) {
+  (void)env;
+  (void)clazz;
   RenderingSink* rs = (RenderingSink*)(intptr_t)renderingSinkPtr;
   jlong sink_ptr = 0;
-  if (rs == NULL) return 0;
+  if (rs == NULL)
+    return 0;
 
   /*
    * 呼び出し元は create 直後だけを想定しているが、
@@ -1242,10 +1294,14 @@ Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeGetSinkPtr(
 
 JNIEXPORT void JNICALL
 Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeDeleteRenderingSink(
-    JNIEnv* env, jclass clazz, jlong renderingSinkPtr) {
-  (void)env; (void)clazz;
+    JNIEnv* env,
+    jclass clazz,
+    jlong renderingSinkPtr) {
+  (void)env;
+  (void)clazz;
   RenderingSink* rs = (RenderingSink*)(intptr_t)renderingSinkPtr;
-  if (rs == NULL) return;
+  if (rs == NULL)
+    return;
   LOGI("nativeDeleteRenderingSink rs=%p", (void*)rs);
 
   /*
@@ -1287,18 +1343,30 @@ Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeDeleteRenderingSink(
  * --------------------------------------------------------------------------- */
 
 JNIEXPORT void JNICALL
-Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeFeedVideoFrame(
-    JNIEnv* env, jclass clazz, jlong videoSourcePtr,
-    jobject yBuffer, jobject uBuffer, jobject vBuffer, jint width, jint height,
-    jint yStride, jint uStride, jint vStride,
-    jint yPixelStride, jint uPixelStride, jint vPixelStride,
-    jint rotation,
-    jlong timestampUs) {
+Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeFeedVideoFrame(JNIEnv* env,
+                                                         jclass clazz,
+                                                         jlong videoSourcePtr,
+                                                         jobject yBuffer,
+                                                         jobject uBuffer,
+                                                         jobject vBuffer,
+                                                         jint width,
+                                                         jint height,
+                                                         jint yStride,
+                                                         jint uStride,
+                                                         jint vStride,
+                                                         jint yPixelStride,
+                                                         jint uPixelStride,
+                                                         jint vPixelStride,
+                                                         jint rotation,
+                                                         jlong timestampUs) {
   (void)clazz;
-  if (width <= 0 || height <= 0 || width > 16384 || height > 16384) return;
+  if (width <= 0 || height <= 0 || width > 16384 || height > 16384)
+    return;
   struct webrtc_AdaptedVideoTrackSource_refcounted* source_ref =
-      (struct webrtc_AdaptedVideoTrackSource_refcounted*)(intptr_t)videoSourcePtr;
-  if (source_ref == NULL) return;
+      (struct webrtc_AdaptedVideoTrackSource_refcounted*)(intptr_t)
+          videoSourcePtr;
+  if (source_ref == NULL)
+    return;
 
   struct webrtc_AdaptedVideoTrackSource* source =
       webrtc_AdaptedVideoTrackSource_refcounted_get(source_ref);
@@ -1306,16 +1374,17 @@ Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeFeedVideoFrame(
   int adapted_width = 0, adapted_height = 0;
   int crop_width = 0, crop_height = 0, crop_x = 0, crop_y = 0;
   if (!webrtc_AdaptedVideoTrackSource_AdaptFrame(
-          source, (int)width, (int)height, (int64_t)timestampUs,
-          &adapted_width, &adapted_height, &crop_width, &crop_height,
-          &crop_x, &crop_y)) {
+          source, (int)width, (int)height, (int64_t)timestampUs, &adapted_width,
+          &adapted_height, &crop_width, &crop_height, &crop_x, &crop_y)) {
     return;
   }
 
   struct webrtc_I420Buffer_refcounted* buffer_ref =
       webrtc_I420Buffer_Create(adapted_width, adapted_height);
-  if (buffer_ref == NULL) return;
-  struct webrtc_I420Buffer* buffer = webrtc_I420Buffer_refcounted_get(buffer_ref);
+  if (buffer_ref == NULL)
+    return;
+  struct webrtc_I420Buffer* buffer =
+      webrtc_I420Buffer_refcounted_get(buffer_ref);
 
   if (adapted_width == (int)width && adapted_height == (int)height) {
     if (!copy_java_yuv_to_i420(env, yBuffer, uBuffer, vBuffer, width, height,
@@ -1346,8 +1415,8 @@ Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeFeedVideoFrame(
   struct webrtc_VideoFrame_unique* vf =
       build_sora_video_frame(buffer_ref, rotation, (int64_t)timestampUs, 0);
   if (vf != NULL) {
-    webrtc_AdaptedVideoTrackSource_OnFrame(
-        source, webrtc_VideoFrame_unique_get(vf));
+    webrtc_AdaptedVideoTrackSource_OnFrame(source,
+                                           webrtc_VideoFrame_unique_get(vf));
     webrtc_VideoFrame_unique_delete(vf);
   }
   webrtc_I420Buffer_Release(buffer);
@@ -1355,20 +1424,32 @@ Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeFeedVideoFrame(
 
 JNIEXPORT void JNICALL
 Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeRenderVideoFrame(
-    JNIEnv* env, jclass clazz, jlong renderingSinkPtr,
-    jobject yBuffer, jobject uBuffer, jobject vBuffer, jint width, jint height,
-    jint yStride, jint uStride, jint vStride,
-    jint yPixelStride, jint uPixelStride, jint vPixelStride,
+    JNIEnv* env,
+    jclass clazz,
+    jlong renderingSinkPtr,
+    jobject yBuffer,
+    jobject uBuffer,
+    jobject vBuffer,
+    jint width,
+    jint height,
+    jint yStride,
+    jint uStride,
+    jint vStride,
+    jint yPixelStride,
+    jint uPixelStride,
+    jint vPixelStride,
     jint rotation,
     jlong timestampUs) {
   (void)clazz;
-  if (width <= 0 || height <= 0 || width > 16384 || height > 16384) return;
+  if (width <= 0 || height <= 0 || width > 16384 || height > 16384)
+    return;
   RenderingSink* rs = (RenderingSink*)(intptr_t)renderingSinkPtr;
   struct webrtc_I420Buffer_refcounted* buffer_ref = NULL;
   struct webrtc_I420Buffer* buffer = NULL;
   struct webrtc_VideoFrame_unique* vf = NULL;
 
-  if (rs == NULL) return;
+  if (rs == NULL)
+    return;
 
   if (!rendering_sink_begin_use(rs)) {
     return;
@@ -1381,7 +1462,8 @@ Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeRenderVideoFrame(
       if (copy_java_yuv_to_i420(env, yBuffer, uBuffer, vBuffer, width, height,
                                 yStride, uStride, vStride, yPixelStride,
                                 uPixelStride, vPixelStride, buffer)) {
-        vf = build_sora_video_frame(buffer_ref, rotation, (int64_t)timestampUs, 0);
+        vf = build_sora_video_frame(buffer_ref, rotation, (int64_t)timestampUs,
+                                    0);
         if (vf != NULL) {
           on_rendering_frame(webrtc_VideoFrame_unique_get(vf), rs);
           webrtc_VideoFrame_unique_delete(vf);

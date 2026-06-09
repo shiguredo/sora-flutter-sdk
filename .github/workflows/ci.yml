@@ -1,4 +1,4 @@
-# Dart / Kotlin / Swift の静的 check と devtools の Android / iOS build を行う。
+# Dart / Kotlin / Swift の静的 check と devtools の Android / iOS / macOS build を行う。
 # push と手動実行の両方を許可し、重い build を必要なタイミングで明示実行できるようにする。
 # Slack 通知は sora-js-sdk と同じ `slack_notify` ジョブ構成と
 # `shiguredo/github-actions` の `slack-notify` action を使う。
@@ -220,7 +220,7 @@ jobs:
       - name: Run C and C++ clang-format check
         run: |
           set -euo pipefail
-          files="$(git ls-files -- '*.cc' '*.h')"
+          files="$(git ls-files -- '*.c' '*.cc' '*.h')"
           if [[ -n "${files}" ]]; then
             printf '%s\n' "${files}" | xargs clang-format --dry-run --Werror -style=file -fallback-style=none
           fi
@@ -268,8 +268,8 @@ jobs:
           path: devtools/build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
 
-  build-ios:
-    name: Build iOS
+  build-apple:
+    name: Build Apple
     runs-on: macos-26
     timeout-minutes: 30
     defaults:
@@ -378,7 +378,7 @@ jobs:
       - name: Restore native dependency cache
         uses: actions/cache@v5
         with:
-          # iOS plugin build 時に自動取得される libwebrtc-c 配布物を再利用する。
+          # iOS / macOS plugin build 時に自動取得される libwebrtc-c 配布物を再利用する。
           path: third_party/libwebrtc-c
           key: ${{ runner.os }}-native-deps-${{ hashFiles('scripts/native_deps.json') }}
 
@@ -388,11 +388,22 @@ jobs:
           flutter --version
           xcodebuild -version
 
+      - name: Resolve package dependencies
+        run: |
+          set -euo pipefail
+          flutter pub get
+
       - name: Precache Flutter iOS artifacts
         run: |
           set -euo pipefail
           # iOS build に必要な engine artifact を先に温め、次回以降は Flutter SDK cache から再利用する。
           flutter precache --ios
+
+      - name: Precache Flutter macOS artifacts
+        run: |
+          set -euo pipefail
+          # macOS build に必要な engine artifact を先に温め、次回以降は Flutter SDK cache から再利用する。
+          flutter precache --macos
 
       - name: Prepare devtools environment file
         run: |
@@ -413,9 +424,16 @@ jobs:
           # 現行の native dependency 配布は iphoneos 向けのため、署名なし実機 build で成立性を確認する。
           flutter build ios --release --no-codesign --no-pub
 
+      - name: Build devtools macOS app
+        working-directory: devtools
+        run: |
+          set -euo pipefail
+          # macOS デスクトップ向け build の成立性を確認する。
+          flutter build macos --release --no-pub
+
   slack_notify:
     name: Slack Notify
-    needs: [ build-android, build-ios ]
+    needs: [ build-android, build-apple ]
     runs-on: ubuntu-24.04
     if: ${{ always() }}
     permissions:

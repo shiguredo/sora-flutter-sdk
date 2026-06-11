@@ -697,9 +697,16 @@ class WebrtcClient {
   }
 
   @visibleForTesting
-  void setupPendingStatsForTest(Completer<String?> completer, Timer timer) {
+  void setupPendingStatsForTest(
+    Completer<String?>? completer,
+    Timer? timer, {
+    Pointer<RTCStatsCollectorCallbackCbs>? cbsPtr,
+    NativeCallable<Function>? nativeCallable,
+  }) {
     _pendingStatsCompleter = completer;
     _pendingStatsTimer = timer;
+    _pendingStatsCbsPtr = cbsPtr;
+    _pendingStatsNativeCallable = nativeCallable;
   }
 
   /// WebRTC 統計情報を取得する。
@@ -707,16 +714,21 @@ class WebrtcClient {
   // 公開 API の `RTCPeerConnection.getStats()` 互換を保つため、
   // `get` をあえて残している。
   Future<String?> getStats() {
-    if (_disposed || _pcRef == null) {
+    if (_disposed) {
       return Future<String?>.value(null);
     }
-    // 前回の request の native callback が未着のまま残っている可能性がある。
-    // timeout 後は Completer が null でも cbsPtr / NativeCallable が残るため、
-    // 全ての追跡フィールドでスロット使用中かどうかを判定する。
-    if (_pendingStatsCompleter != null ||
-        _pendingStatsCbsPtr != null ||
-        _pendingStatsNativeCallable != null) {
-      throw StateError('getStats() is already in progress.');
+    // Future 共有: 進行中の getStats() がある場合、その future を返す
+    final pendingCompleter = _pendingStatsCompleter;
+    if (pendingCompleter != null) {
+      return pendingCompleter.future;
+    }
+    // null フォールバック: timeout 後など completer が解放済みだが
+    // native callback が残っている期間は null を返す
+    if (_pendingStatsCbsPtr != null || _pendingStatsNativeCallable != null) {
+      return Future<String?>.value(null);
+    }
+    if (_pcRef == null) {
+      return Future<String?>.value(null);
     }
 
     final completer = Completer<String?>();

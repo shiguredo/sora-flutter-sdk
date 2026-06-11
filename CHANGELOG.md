@@ -15,6 +15,8 @@
   - @zztkm
 - [UPDATE] webrtc-build を m150.7871.0.0 に更新する
   - @zztkm
+- [FIX] 同一接続上で getStats() の再入競合が発生した時に StateError が送出される問題を修正する
+  - @zztkm
 
 ### misc
 

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ffi';
 
+import 'package:ffi/ffi.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sora_sdk/src/ffi/bindings.dart';
 import 'package:sora_sdk/src/ffi/library_loader.dart';
@@ -66,6 +67,62 @@ void main() {
 
         // 追跡状態がクリア済み
         expect(wc.cleanupPendingStatsRequest(), isNull);
+      } finally {
+        wc.dispose();
+      }
+    });
+  });
+
+  group('getStats reentrancy', () {
+    late bool ffiAvailable;
+
+    setUpAll(() {
+      ffiAvailable = _ffiAvailable();
+    });
+
+    test('returns pending future when completer is already set', () {
+      if (!ffiAvailable) return;
+      final wc = WebrtcClient.create(config: {}, onEvent: (_, _) {});
+      try {
+        final completer = Completer<String?>();
+        final timer = Timer(const Duration(seconds: 30), () {});
+        wc.setupPendingStatsForTest(completer, timer);
+
+        // StateError ではなく、進行中の future が返ることを確認
+        final result = wc.getStats();
+        expect(result, same(completer.future));
+      } finally {
+        wc.dispose();
+      }
+    });
+
+    test('returns null when only native resources remain after timeout', () {
+      if (!ffiAvailable) return;
+      final wc = WebrtcClient.create(config: {}, onEvent: (_, _) {});
+      try {
+        // cbsPtr を割り当てて native callback 未到達状態を模擬
+        final cbsPtr = calloc<RTCStatsCollectorCallbackCbs>();
+        wc.setupPendingStatsForTest(null, null, cbsPtr: cbsPtr);
+
+        // completer が null で cbsPtr のみ残っているため null が返る
+        final result = wc.getStats();
+        expect(result, completion(isNull));
+
+        calloc.free(cbsPtr);
+      } finally {
+        wc.dispose();
+      }
+    });
+
+    test('does not throw StateError on consecutive calls', () {
+      if (!ffiAvailable) return;
+      final wc = WebrtcClient.create(config: {}, onEvent: (_, _) {});
+      try {
+        // 通常の連続呼び出し（_pcRef が null なので null が返るのみ）
+        final result1 = wc.getStats();
+        final result2 = wc.getStats();
+        expect(result1, completion(isNull));
+        expect(result2, completion(isNull));
       } finally {
         wc.dispose();
       }

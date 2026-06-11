@@ -596,7 +596,7 @@ class DataChannelController {
         webrtcClient.sendStatsMessage(sendData);
       }
     } catch (error) {
-      onDebugMessage('dc(stats) json decode failed: error=$error');
+      onDebugMessage('dc(stats) getStats or json decode failed: error=$error');
     }
   }
 

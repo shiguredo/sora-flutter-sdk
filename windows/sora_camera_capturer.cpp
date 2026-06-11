@@ -41,42 +41,39 @@ flutter::EncodableList SoraCameraCapturer::EnumerateDevices() {
   if (SUCCEEDED(hr)) {
     for (UINT32 i = 0; i < count; ++i) {
       WCHAR symbolic_link[MAX_PATH] = {};
-      UINT32 link_len = 0;
-      hr = devices[i]->GetString(
+      bool valid = SUCCEEDED(devices[i]->GetString(
           MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
-          symbolic_link, MAX_PATH, &link_len);
-      if (FAILED(hr)) {
-        continue;
-      }
+          symbolic_link, MAX_PATH, nullptr));
 
       WCHAR friendly_name[MAX_PATH] = {};
-      UINT32 name_len = 0;
-      hr = devices[i]->GetString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
-                                 friendly_name, MAX_PATH, &name_len);
-      if (FAILED(hr)) {
-        continue;
+      if (valid) {
+        valid = SUCCEEDED(devices[i]->GetString(
+            MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
+            friendly_name, MAX_PATH, nullptr));
       }
 
-      flutter::EncodableMap device_map;
-      int buf_size = WideCharToMultiByte(CP_UTF8, 0, symbolic_link, -1, nullptr,
-                                         0, nullptr, nullptr);
-      std::string device_id(buf_size, '\0');
-      WideCharToMultiByte(CP_UTF8, 0, symbolic_link, -1, &device_id[0],
-                          buf_size, nullptr, nullptr);
-      device_id.pop_back();
+      if (valid) {
+        flutter::EncodableMap device_map;
+        int buf_size = WideCharToMultiByte(CP_UTF8, 0, symbolic_link, -1, nullptr,
+                                           0, nullptr, nullptr);
+        std::string device_id(buf_size, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, symbolic_link, -1, &device_id[0],
+                            buf_size, nullptr, nullptr);
+        device_id.pop_back();
 
-      buf_size = WideCharToMultiByte(CP_UTF8, 0, friendly_name, -1, nullptr, 0,
-                                     nullptr, nullptr);
-      std::string label(buf_size, '\0');
-      WideCharToMultiByte(CP_UTF8, 0, friendly_name, -1, &label[0], buf_size,
-                          nullptr, nullptr);
-      label.pop_back();
+        buf_size = WideCharToMultiByte(CP_UTF8, 0, friendly_name, -1, nullptr, 0,
+                                       nullptr, nullptr);
+        std::string label(buf_size, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, friendly_name, -1, &label[0], buf_size,
+                            nullptr, nullptr);
+        label.pop_back();
 
-      device_map[flutter::EncodableValue("deviceId")] =
-          flutter::EncodableValue(device_id);
-      device_map[flutter::EncodableValue("label")] =
-          flutter::EncodableValue(label);
-      result.push_back(flutter::EncodableValue(device_map));
+        device_map[flutter::EncodableValue("deviceId")] =
+            flutter::EncodableValue(device_id);
+        device_map[flutter::EncodableValue("label")] =
+            flutter::EncodableValue(label);
+        result.push_back(flutter::EncodableValue(device_map));
+      }
 
       devices[i]->Release();
     }
@@ -356,8 +353,19 @@ bool SoraCameraCapturer::CreateMediaSource() {
 }
 
 bool SoraCameraCapturer::CreateSourceReader() {
-  HRESULT hr =
-      MFCreateSourceReaderFromMediaSource(media_source_, nullptr, &source_reader_);
+  IMFAttributes* attributes = nullptr;
+  HRESULT hr = MFCreateAttributes(&attributes, 1);
+  if (SUCCEEDED(hr)) {
+    UINT32 value = 1;
+    hr = attributes->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, value);
+  }
+  if (SUCCEEDED(hr)) {
+    hr = MFCreateSourceReaderFromMediaSource(media_source_, attributes,
+                                             &source_reader_);
+  }
+  if (attributes) {
+    attributes->Release();
+  }
   return SUCCEEDED(hr) && source_reader_ != nullptr;
 }
 
@@ -389,7 +397,6 @@ bool SoraCameraCapturer::SetCurrentMediaType() {
   media_type->Release();
 
   if (SUCCEEDED(hr)) {
-    // 実際に選択されたメディアタイプを読み取る
     IMFMediaType* actual_type = nullptr;
     hr = source_reader_->GetCurrentMediaType(
         MF_SOURCE_READER_FIRST_VIDEO_STREAM, &actual_type);
@@ -401,16 +408,6 @@ bool SoraCameraCapturer::SetCurrentMediaType() {
         requested_height_ = h;
       }
       actual_type->Release();
-    }
-
-    // ビデオプロセッシングを有効にして MJPEG などを自動変換する
-    IMFAttributes* reader_attributes = nullptr;
-    hr = source_reader_->GetServiceForStream(
-        MF_SOURCE_READER_MEDIASOURCE, GUID_NULL, IID_PPV_ARGS(&reader_attributes));
-    if (SUCCEEDED(hr)) {
-      UINT32 value = 1;
-      reader_attributes->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, value);
-      reader_attributes->Release();
     }
   }
 

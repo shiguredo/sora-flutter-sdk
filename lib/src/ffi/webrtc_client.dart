@@ -284,6 +284,21 @@ class WebrtcClient {
         // Dart から SetRecordingDevice を呼ぶために参照を保持しておく
         _sharedAdmRef = adm;
       }
+    } else if (Platform.isWindows) {
+      // Windows はネイティブ側で独自に ADM を生成してデバイス制御を行うため、
+      // Dart 側で参照を保持せず即時 release する
+      final env = sharedLib.createEnvironment();
+      final adm = sharedLib.createAudioDeviceModule(
+        env,
+        sharedConsts.kPlatformDefaultAudio,
+      );
+      sharedLib.environmentDelete(env);
+      if (adm != nullptr) {
+        sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+        sharedLib.audioDeviceModuleRelease(
+          sharedLib.audioDeviceModuleRefcountedGet(adm),
+        );
+      }
     }
 
     final eventLogFactory = sharedLib.rtcEventLogFactoryCreate();

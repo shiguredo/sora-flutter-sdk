@@ -1,6 +1,6 @@
 #!/usr/bin/env dart
-// Android 向けのネイティブ依存関係（libwebrtc-c / webrtc）をダウンロード・展開・インストールするスクリプト。
-// 引数でプラットフォーム名（android_arm64）を受け取る。
+// 各プラットフォーム向けのネイティブ依存関係（libwebrtc-c / webrtc）をダウンロード・展開・インストールするスクリプト。
+// 引数でプラットフォーム名（android_arm64 等）を受け取る。
 //
 // native_deps.json に各依存のバージョン、ダウンロード URL、アーカイブの SHA256 が定義されている。
 // 取得済みの依存情報は .state.json に保存され、バージョン・アーカイブ名に変更がない場合は再取得をスキップする。
@@ -9,6 +9,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:archive/archive_io.dart';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
@@ -36,6 +37,16 @@ const platformConfig = {
       'build-android_arm64/_deps/webrtc/include',
       'build-android_arm64/_deps/webrtc/lib/arm64-v8a/libwebrtc.a',
       'build-android_arm64/_deps/webrtc/jar/webrtc.jar',
+    ],
+  },
+  'windows_x86_64': {
+    'build_dir': 'build-windows_x86_64',
+    'extract_paths': ['build-windows_x86_64'],
+    'required_paths': [
+      'include/webrtc_c.h',
+      'build-windows_x86_64/libwebrtc-c.lib',
+      'build-windows_x86_64/_deps/webrtc/include',
+      'build-windows_x86_64/_deps/webrtc/lib/webrtc.lib',
     ],
   },
 };
@@ -254,21 +265,20 @@ Future<void> verifySha256Async(File archivePath, String expectedSha256) async {
   }
 }
 
-/// アーカイブを tar コマンドで展開し、展開先ディレクトリを返す。
+/// アーカイブを展開し、展開先ディレクトリを返す。
+/// archive パッケージの extractFileToDisk で .tar.gz / .zip 両方を処理する。
 Future<Directory> extractArchive(File archivePath) async {
   final extractDir = childDir(archivePath.parent, 'extracted');
   extractDir.createSync(recursive: true);
 
-  // tar コマンドで展開
-  final result = await Process.run('tar', [
-    '-xzf',
-    archivePath.path,
-    '-C',
-    extractDir.path,
-  ]);
-
-  if (result.exitCode != 0) {
-    failWith('Failed to extract ${archivePath.path}: ${result.stderr}');
+  try {
+    await extractFileToDisk(archivePath.path, extractDir.path);
+  } catch (e) {
+    // 展開に失敗した場合は不完全な展開結果を削除して終了する
+    if (extractDir.existsSync()) {
+      extractDir.deleteSync(recursive: true);
+    }
+    failWith('Failed to extract ${archivePath.path}: $e');
   }
 
   return extractDir;
@@ -314,9 +324,11 @@ Future<void> installLibwebrtcC(String platform, Directory extractedDir) async {
   final buildDir = childDir(installDir, config['build_dir'] as String);
   buildDir.createSync(recursive: true);
 
+  // Android/Linux は libwebrtc_c.a / libwebrtc-c.a、Windows は webrtc_c.lib
   final staticLibraryCandidates = [
     childDir(childDir(extractedDir, 'lib'), 'libwebrtc_c.a'),
     childDir(childDir(extractedDir, 'lib'), 'libwebrtc-c.a'),
+    childDir(childDir(extractedDir, 'lib'), 'webrtc_c.lib'),
   ].map((d) => File(d.path)).toList();
 
   File? staticLibraryPath;
@@ -331,8 +343,12 @@ Future<void> installLibwebrtcC(String platform, Directory extractedDir) async {
     failWith('libwebrtc_c static library is missing for $platform');
   }
 
-  final destinationPath = childFile(buildDir, 'libwebrtc-c.a');
-  staticLibraryPath!.copySync(destinationPath.path);
+  // ソースの拡張子が .lib の場合はコピー先も .lib にする
+  final libPath = staticLibraryPath!;
+  final sourceExtension = p.extension(libPath.path);
+  final destFileName = sourceExtension == '.lib' ? 'libwebrtc-c.lib' : 'libwebrtc-c.a';
+  final destinationPath = childFile(buildDir, destFileName);
+  libPath.copySync(destinationPath.path);
   final includeCandidates = [
     childDir(extractedDir, 'include'),
     childDir(childDir(extractedDir, 'libwebrtc-c'), 'include'),

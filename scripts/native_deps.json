@@ -11,6 +11,10 @@
       "android_arm64": {
         "file": "libwebrtc_c-android_arm64.tar.gz",
         "sha256": "c20e0d85f6401bdff89e1bdaccd044af92b12f3caf5fb7f806155f2132378fd0"
+      },
+      "windows_x86_64": {
+        "file": "libwebrtc_c-windows_x86_64.tar.gz",
+        "sha256": "3baadabb7dc7cb96d200e987cc195ddf06ee3f78d4ce80472e5f7e495679ffa5"
       }
     }
   },
@@ -21,6 +25,10 @@
       "android_arm64": {
         "file": "webrtc.android.tar.gz",
         "sha256": "907c4712fd5b0e44a08048c59b60971a4d047788d89be967be3bbc47cbfd1014"
+      },
+      "windows_x86_64": {
+        "file": "webrtc.windows_x86_64.zip",
+        "sha256": "a4c7f9606b52c801bb3e13f26e49bd22cdd56ac1fc990a4c11e5082432ba0444"
       }
     }
   }

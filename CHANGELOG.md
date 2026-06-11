@@ -11,6 +11,8 @@
 
 ## develop
 
+- [ADD] Windows 向けネイティブ依存取得（libwebrtc-c / webrtc）を追加する
+  - @zztkm
 - [UPDATE] libwebrtc-c を 0.150.0 に更新する
   - @zztkm
 - [UPDATE] webrtc-build を m150.7871.0.0 に更新する

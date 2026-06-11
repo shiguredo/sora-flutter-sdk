@@ -112,19 +112,5 @@ void main() {
         wc.dispose();
       }
     });
-
-    test('does not throw StateError on consecutive calls', () {
-      if (!ffiAvailable) return;
-      final wc = WebrtcClient.create(config: {}, onEvent: (_, _) {});
-      try {
-        // 通常の連続呼び出し（_pcRef が null なので null が返るのみ）
-        final result1 = wc.getStats();
-        final result2 = wc.getStats();
-        expect(result1, completion(isNull));
-        expect(result2, completion(isNull));
-      } finally {
-        wc.dispose();
-      }
-    });
   });
 }

@@ -679,10 +679,8 @@ class WebrtcClient {
   /// disconnect() / dispose() 時は Dart 側追跡だけを解除し、
   /// native リソースの解放は onStatsDelivered コールバックへ委譲する。
   ///
-  /// 制約として、 timeout 後は native callback が到着するまで
-  /// 同一 WebrtcClient で getStats() を再実行できない。
   /// タイムアウト後にネイティブリソースを解放すると、
-  /// 遅延コールバック到着時に native crash を起こすため。
+  /// 遅延コールバック到着時に native crash を起こすため解放しない。
   ///
   /// 二重呼び出しへの対策として、2回目以降は null を返すようにしている。
   @visibleForTesting

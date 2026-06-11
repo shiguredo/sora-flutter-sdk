@@ -99,17 +99,16 @@ void main() {
     test('returns null when only native resources remain after timeout', () {
       if (!ffiAvailable) return;
       final wc = WebrtcClient.create(config: {}, onEvent: (_, _) {});
+      // cbsPtr を割り当てて native callback 未到達状態を模擬
+      final cbsPtr = calloc<RTCStatsCollectorCallbackCbs>();
       try {
-        // cbsPtr を割り当てて native callback 未到達状態を模擬
-        final cbsPtr = calloc<RTCStatsCollectorCallbackCbs>();
         wc.setupPendingStatsForTest(null, null, cbsPtr: cbsPtr);
 
         // completer が null で cbsPtr のみ残っているため null が返る
         final result = wc.getStats();
         expect(result, completion(isNull));
-
-        calloc.free(cbsPtr);
       } finally {
+        calloc.free(cbsPtr);
         wc.dispose();
       }
     });

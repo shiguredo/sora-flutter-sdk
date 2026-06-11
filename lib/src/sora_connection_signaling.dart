@@ -117,7 +117,12 @@ extension _SoraConnectionSignaling on SoraConnection {
     if (payload['type'] == 'ping') {
       final wantStats = payload['stats'] == true;
       if (wantStats) {
-        final statsJson = await _webrtcClient.getStats();
+        String? statsJson;
+        try {
+          statsJson = await _webrtcClient.getStats();
+        } catch (_) {
+          // getStats() がエラーとなった場合は stats なしで pong を送信する
+        }
         final pongMessage = <String, Object?>{
           'type': 'pong',
           if (statsJson != null)

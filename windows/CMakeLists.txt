@@ -3,6 +3,13 @@ project(sora_sdk LANGUAGES C CXX)
 
 set(PLUGIN_NAME "sora_sdk_plugin")
 
+# ネイティブ依存 (0032) のインストール先パス (両 DLL で共用)
+set(LIBWEBRTC_C_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/libwebrtc-c")
+set(LIBWEBRTC_C_BUILD_DIR "${LIBWEBRTC_C_DIR}/build-windows_x86_64")
+set(WEBRTC_INCLUDE_DIR "${LIBWEBRTC_C_BUILD_DIR}/_deps/webrtc/include")
+set(LIBWEBRTC_C_LIB "${LIBWEBRTC_C_BUILD_DIR}/libwebrtc-c.lib")
+set(WEBRTC_LIB "${LIBWEBRTC_C_BUILD_DIR}/_deps/webrtc/lib/webrtc.lib")
+
 # === Flutter プラグイン DLL (MethodChannel 処理) ===
 
 add_library(${PLUGIN_NAME} SHARED
@@ -10,6 +17,8 @@ add_library(${PLUGIN_NAME} SHARED
   "sora_sdk_plugin_c_api.cpp"
   "sora_sdk_plugin.cpp"
   "sora_sdk_plugin.h"
+  "sora_camera_capturer.cpp"
+  "sora_camera_capturer.h"
 )
 
 apply_standard_settings(${PLUGIN_NAME})
@@ -17,16 +26,30 @@ set_target_properties(${PLUGIN_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
 target_compile_definitions(${PLUGIN_NAME} PRIVATE FLUTTER_PLUGIN_IMPL)
 target_include_directories(${PLUGIN_NAME} INTERFACE
   "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(${PLUGIN_NAME} PRIVATE flutter flutter_wrapper_plugin)
+target_include_directories(${PLUGIN_NAME} PRIVATE
+  "${LIBWEBRTC_C_DIR}/include"
+  "${WEBRTC_INCLUDE_DIR}"
+)
+target_link_libraries(${PLUGIN_NAME} PRIVATE
+  flutter
+  flutter_wrapper_plugin
+  "${LIBWEBRTC_C_LIB}"
+  "${WEBRTC_LIB}"
+  mfplat.lib
+  mf.lib
+  mfreadwrite.lib
+  mfuuid.lib
+  secur32.lib
+  winmm.lib
+  dmoguids.lib
+  msdmo.lib
+  strmiids.lib
+)
+target_link_options(${PLUGIN_NAME} PRIVATE
+  "/WHOLEARCHIVE:${LIBWEBRTC_C_LIB}"
+)
 
 # === dart:ffi C API DLL (sora_sdk.dll) ===
-
-# ネイティブ依存 (0032) のインストール先パス
-set(LIBWEBRTC_C_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/libwebrtc-c")
-set(LIBWEBRTC_C_BUILD_DIR "${LIBWEBRTC_C_DIR}/build-windows_x86_64")
-set(WEBRTC_INCLUDE_DIR "${LIBWEBRTC_C_BUILD_DIR}/_deps/webrtc/include")
-set(LIBWEBRTC_C_LIB "${LIBWEBRTC_C_BUILD_DIR}/libwebrtc-c.lib")
-set(WEBRTC_LIB "${LIBWEBRTC_C_BUILD_DIR}/_deps/webrtc/lib/webrtc.lib")
 
 add_library(sora_sdk SHARED
   "windows_bridge.c"

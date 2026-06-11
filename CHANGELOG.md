@@ -19,6 +19,9 @@
 - [ADD] Windows ネイティブプラグイン基盤と MethodChannel ハンドラを追加する
   - CMake で `sora_sdk.dll` を生成し、MethodChannel によるクライアント管理を実装する
   - @zztkm
+- [ADD] Windows カメラキャプチャ (Media Foundation) を実装する
+  - Media Foundation によるデバイス列挙・フォーマット取得・フレームキャプチャ・I420 変換・ローカルプレビューを実装する
+  - @zztkm
 - [UPDATE] libwebrtc-c を 0.150.0 に更新する
   - @zztkm
 - [UPDATE] webrtc-build を m150.7871.0.0 に更新する

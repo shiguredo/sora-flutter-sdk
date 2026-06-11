@@ -1,5 +1,7 @@
 #include "sora_sdk_plugin.h"
 
+#include "sora_camera_capturer.h"
+
 SoraSdkPlugin::SoraSdkPlugin(flutter::BinaryMessenger* messenger,
                              flutter::TextureRegistrar* texture_registrar)
     : messenger_(messenger), texture_registrar_(texture_registrar) {}
@@ -38,7 +40,7 @@ void SoraSdkPlugin::HandleMethodCall(
     return;
   }
   if (method == "enumerateVideoInputDevices") {
-    result->Success(flutter::EncodableValue(flutter::EncodableList()));
+    HandleEnumerateVideoInputDevices(method_call, std::move(result));
     return;
   }
   if (method == "enumerateAudioInputDevices") {
@@ -50,7 +52,19 @@ void SoraSdkPlugin::HandleMethodCall(
     return;
   }
   if (method == "getVideoInputFormats") {
-    result->Success(flutter::EncodableValue(flutter::EncodableList()));
+    HandleGetVideoInputFormats(method_call, std::move(result));
+    return;
+  }
+  if (method == "ensureLocalVideoTrackTexture") {
+    HandleEnsureLocalVideoTrackTexture(method_call, std::move(result));
+    return;
+  }
+  if (method == "disposeLocalVideoTrackTexture") {
+    HandleDisposeLocalVideoTrackTexture(method_call, std::move(result));
+    return;
+  }
+  if (method == "stopCameraCapturer") {
+    HandleStopCameraCapturer(method_call, std::move(result));
     return;
   }
   result->NotImplemented();
@@ -133,8 +147,6 @@ void SoraSdkPlugin::HandleDisposeClient(
 
 int64_t SoraSdkPlugin::GetIntValue(const flutter::EncodableValue& value,
                                    int64_t default_value) {
-  // Flutter StandardMethodCodec は値の大きさによって int32_t と int64_t を
-  // 使い分ける。両方のエンコードに対応するため両方をチェックする。
   if (auto* v = std::get_if<int32_t>(&value)) {
     return static_cast<int64_t>(*v);
   }
@@ -142,4 +154,157 @@ int64_t SoraSdkPlugin::GetIntValue(const flutter::EncodableValue& value,
     return *v;
   }
   return default_value;
+}
+
+std::string SoraSdkPlugin::GetStringValue(
+    const flutter::EncodableValue& value,
+    const std::string& default_value) {
+  if (auto* v = std::get_if<std::string>(&value)) {
+    return *v;
+  }
+  return default_value;
+}
+
+void SoraSdkPlugin::HandleEnumerateVideoInputDevices(
+    const flutter::MethodCall<flutter::EncodableValue>& method_call,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  (void)method_call;
+  flutter::EncodableList devices = SoraCameraCapturer::EnumerateDevices();
+  result->Success(flutter::EncodableValue(devices));
+}
+
+void SoraSdkPlugin::HandleGetVideoInputFormats(
+    const flutter::MethodCall<flutter::EncodableValue>& method_call,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  const auto* args =
+      std::get_if<flutter::EncodableMap>(method_call.arguments());
+  if (!args) {
+    result->Error("invalid_argument", "Arguments are required.");
+    return;
+  }
+  auto it = args->find(flutter::EncodableValue("deviceId"));
+  if (it == args->end()) {
+    result->Error("invalid_argument", "deviceId is required.");
+    return;
+  }
+  std::string device_id = GetStringValue(it->second, "");
+  if (device_id.empty()) {
+    result->Error("invalid_argument", "deviceId must be a non-empty string.");
+    return;
+  }
+  flutter::EncodableList formats = SoraCameraCapturer::GetFormats(device_id);
+  result->Success(flutter::EncodableValue(formats));
+}
+
+void SoraSdkPlugin::HandleEnsureLocalVideoTrackTexture(
+    const flutter::MethodCall<flutter::EncodableValue>& method_call,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  const auto* args =
+      std::get_if<flutter::EncodableMap>(method_call.arguments());
+  if (!args) {
+    result->Error("invalid_argument", "Arguments are required.");
+    return;
+  }
+
+  auto video_source_it = args->find(flutter::EncodableValue("videoSourcePtr"));
+  if (video_source_it == args->end()) {
+    result->Error("invalid_argument", "videoSourcePtr is required.");
+    return;
+  }
+  int64_t video_source_ptr = GetIntValue(video_source_it->second, 0);
+  if (video_source_ptr == 0) {
+    result->Error("invalid_argument",
+                  "videoSourcePtr must be a non-zero integer.");
+    return;
+  }
+
+  std::string device_id;
+  auto device_id_it = args->find(flutter::EncodableValue("videoDeviceId"));
+  if (device_id_it != args->end()) {
+    device_id = GetStringValue(device_id_it->second, "");
+  }
+
+  int width = 640;
+  auto width_it = args->find(flutter::EncodableValue("videoWidth"));
+  if (width_it != args->end()) {
+    int w = static_cast<int>(GetIntValue(width_it->second, 0));
+    if (w > 0) width = w;
+  }
+
+  int height = 480;
+  auto height_it = args->find(flutter::EncodableValue("videoHeight"));
+  if (height_it != args->end()) {
+    int h = static_cast<int>(GetIntValue(height_it->second, 0));
+    if (h > 0) height = h;
+  }
+
+  int fps = 30;
+  auto fps_it = args->find(flutter::EncodableValue("videoFrameRate"));
+  if (fps_it != args->end()) {
+    int f = static_cast<int>(GetIntValue(fps_it->second, 0));
+    if (f > 0) fps = f;
+  }
+
+  auto capturer = std::make_unique<SoraCameraCapturer>(
+      device_id, width, height, fps, texture_registrar_);
+  capturer->SetVideoSourcePtr(
+      reinterpret_cast<void*>(static_cast<intptr_t>(video_source_ptr)));
+  capturer->Start();
+
+  int64_t texture_id = capturer->preview_texture_id();
+  capturers_[video_source_ptr] = std::move(capturer);
+
+  flutter::EncodableMap response;
+  response[flutter::EncodableValue("textureId")] =
+      flutter::EncodableValue(texture_id);
+  result->Success(flutter::EncodableValue(response));
+}
+
+void SoraSdkPlugin::HandleDisposeLocalVideoTrackTexture(
+    const flutter::MethodCall<flutter::EncodableValue>& method_call,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  const auto* args =
+      std::get_if<flutter::EncodableMap>(method_call.arguments());
+  if (!args) {
+    result->Error("invalid_argument", "Arguments are required.");
+    return;
+  }
+  auto it = args->find(flutter::EncodableValue("videoSourcePtr"));
+  if (it == args->end()) {
+    result->Error("invalid_argument", "videoSourcePtr is required.");
+    return;
+  }
+  int64_t video_source_ptr = GetIntValue(it->second, 0);
+  auto capturer_it = capturers_.find(video_source_ptr);
+  if (capturer_it == capturers_.end()) {
+    result->Success();
+    return;
+  }
+  capturer_it->second->Stop();
+  capturers_.erase(capturer_it);
+  result->Success();
+}
+
+void SoraSdkPlugin::HandleStopCameraCapturer(
+    const flutter::MethodCall<flutter::EncodableValue>& method_call,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  const auto* args =
+      std::get_if<flutter::EncodableMap>(method_call.arguments());
+  if (!args) {
+    result->Error("invalid_argument", "Arguments are required.");
+    return;
+  }
+  auto it = args->find(flutter::EncodableValue("videoSourcePtr"));
+  if (it == args->end()) {
+    result->Error("invalid_argument", "videoSourcePtr is required.");
+    return;
+  }
+  int64_t video_source_ptr = GetIntValue(it->second, 0);
+  auto capturer_it = capturers_.find(video_source_ptr);
+  if (capturer_it == capturers_.end()) {
+    result->Success();
+    return;
+  }
+  capturer_it->second->Stop();
+  result->Success();
 }

@@ -8,6 +8,8 @@
 #include <memory>
 #include <string>
 
+class SoraCameraCapturer;
+
 class SoraSdkPlugin : public flutter::Plugin {
  public:
   static void RegisterWithRegistrar(flutter::PluginRegistrarWindows* registrar);
@@ -20,8 +22,6 @@ class SoraSdkPlugin : public flutter::Plugin {
   SoraSdkPlugin& operator=(const SoraSdkPlugin&) = delete;
 
  private:
-  // クライアント単位の情報を保持する。
-  // event_channel_name は Dart 側が EventChannel を購読するために使う。
   struct ClientWrapper {
     int64_t client_id;
     std::string event_channel_name;
@@ -39,14 +39,37 @@ class SoraSdkPlugin : public flutter::Plugin {
       const flutter::MethodCall<flutter::EncodableValue>& method_call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
 
+  void HandleEnumerateVideoInputDevices(
+      const flutter::MethodCall<flutter::EncodableValue>& method_call,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+
+  void HandleGetVideoInputFormats(
+      const flutter::MethodCall<flutter::EncodableValue>& method_call,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+
+  void HandleEnsureLocalVideoTrackTexture(
+      const flutter::MethodCall<flutter::EncodableValue>& method_call,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+
+  void HandleDisposeLocalVideoTrackTexture(
+      const flutter::MethodCall<flutter::EncodableValue>& method_call,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+
+  void HandleStopCameraCapturer(
+      const flutter::MethodCall<flutter::EncodableValue>& method_call,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+
   static int64_t GetIntValue(const flutter::EncodableValue& value,
                              int64_t default_value);
 
-  // 後続 issue で Texture 登録・EventChannel 経由のイベント送信に使う
+  static std::string GetStringValue(const flutter::EncodableValue& value,
+                                    const std::string& default_value);
+
   flutter::BinaryMessenger* messenger_;
   flutter::TextureRegistrar* texture_registrar_;
   int64_t next_client_id_ = 1;
   std::map<int64_t, std::unique_ptr<ClientWrapper>> clients_;
+  std::map<int64_t, std::unique_ptr<SoraCameraCapturer>> capturers_;
 };
 
 #endif

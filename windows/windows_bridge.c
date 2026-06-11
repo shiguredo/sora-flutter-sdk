@@ -3,15 +3,16 @@
 // libwebrtc-c の `WEBRTC_EXPORT` (`__declspec(dllexport)`) が付与された
 // シンボルは libwebrtc-c.lib からのリンクで自動的にエクスポートされる。
 // 本ファイルは libwebrtc-c に含まれない追加のブリッジ関数を提供する。
-//
-// sora_observer_bridge_* / sora_video_frame_* の実体は後続 issue (0035-0037)
-// で埋める。本 issue ではスタブを返す。
 
 // webrtc_c.h には iOS/macOS 専用の Objective-C ヘッダが含まれるため
-// Windows ではインクルードしない。libwebrtc-c のシンボルは
-// /WHOLEARCHIVE によりリンク保持し、__declspec(dllexport) でエクスポートする。
+// Windows ではインクルードしない。必要なヘッダのみを個別にインクルードする。
+// libwebrtc-c のシンボルは /WHOLEARCHIVE によりリンク保持し、
+// __declspec(dllexport) でエクスポートする。
 
 #include <windows.h>
+
+#include <webrtc_c/api/video/i420_buffer.h>
+#include <webrtc_c/api/video/video_frame.h>
 
 // --- observer bridge ---
 
@@ -69,23 +70,33 @@ __declspec(dllexport) void sora_observer_bridge_destroy_dc(
 
 // --- video frame ---
 
-__declspec(dllexport) void* sora_video_frame_create(
-    void* buffer,
+__declspec(dllexport) struct webrtc_VideoFrame_unique* sora_video_frame_create(
+    struct webrtc_I420Buffer_refcounted* buffer,
     int rotation,
-    long long timestamp_us,
-    unsigned int timestamp_rtp) {
-  (void)buffer;
-  (void)rotation;
-  (void)timestamp_us;
-  (void)timestamp_rtp;
-  return NULL;
+    int64_t timestamp_us,
+    uint32_t timestamp_rtp) {
+  struct webrtc_VideoFrameBuffer_refcounted* frame_buffer =
+      webrtc_I420Buffer_refcounted_cast_to_webrtc_VideoFrameBuffer(buffer);
+  struct webrtc_VideoFrameBuilder_unique* builder =
+      webrtc_VideoFrameBuilder_new(frame_buffer);
+  if (builder == NULL) {
+    return NULL;
+  }
+  webrtc_VideoFrameBuilder_set_rotation(builder, rotation);
+  webrtc_VideoFrameBuilder_set_timestamp_us(builder, timestamp_us);
+  webrtc_VideoFrameBuilder_set_timestamp_rtp(builder, timestamp_rtp);
+  struct webrtc_VideoFrame_unique* frame =
+      webrtc_VideoFrameBuilder_build(builder);
+  webrtc_VideoFrameBuilder_unique_delete(builder);
+  return frame;
 }
 
-__declspec(dllexport) void* sora_video_frame_unique_get(void* frame) {
-  (void)frame;
-  return NULL;
+__declspec(dllexport) struct webrtc_VideoFrame* sora_video_frame_unique_get(
+    struct webrtc_VideoFrame_unique* frame) {
+  return webrtc_VideoFrame_unique_get(frame);
 }
 
-__declspec(dllexport) void sora_video_frame_unique_delete(void* frame) {
-  (void)frame;
+__declspec(dllexport) void sora_video_frame_unique_delete(
+    struct webrtc_VideoFrame_unique* frame) {
+  webrtc_VideoFrame_unique_delete(frame);
 }

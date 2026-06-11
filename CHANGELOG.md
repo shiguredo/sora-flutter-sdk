@@ -11,6 +11,9 @@
 
 ## develop
 
+- [ADD] WebrtcClient に Windows の AudioDeviceModule 初期化パスを追加する
+  - Windows の PeerConnectionFactory 生成時に `kPlatformDefaultAudio` で ADM を初期化し、音声入出力を有効化する
+  - @zztkm
 - [ADD] Windows 向けネイティブ依存取得（libwebrtc-c / webrtc）を追加する
   - @zztkm
 - [UPDATE] libwebrtc-c を 0.150.0 に更新する

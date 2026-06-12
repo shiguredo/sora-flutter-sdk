@@ -43,8 +43,8 @@ class SoraSdkPlugin : public flutter::Plugin {
     flutter::TextureRegistrar* texture_registrar;
     std::unique_ptr<flutter::TextureVariant> texture_variant;
     std::vector<uint8_t> buffer;
-    int width;
-    int height;
+    int width = 0;
+    int height = 0;
     std::mutex mutex;
     FlutterDesktopPixelBuffer pixel_buffer{};
   };

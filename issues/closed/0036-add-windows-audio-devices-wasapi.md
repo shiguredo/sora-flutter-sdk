@@ -2,6 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-03
+- Completed: 2026-06-12
 - Model: Opus 4.8
 - Branch: feature/add-windows-audio-devices
 - Polished: 2026-06-03
@@ -44,8 +45,9 @@ Windows で音声入出力デバイスを列挙・選択できるようにする
 
 ## 解決方法
 
-1. Windows 版音声デバイス管理のソースを追加し、`sora_sdk.dll` ターゲット (0034) に含める。
-2. WASAPI によるマイク・スピーカー列挙と既定入力取得を実装する。
-3. 入力デバイス切り替えを実装し、ADM と対応付ける。
-4. 0034 の MethodChannel ハンドラから接続する。
-5. `CHANGES.md` に担当者行付きで `[ADD]` エントリを追記する。
+1. Windows 版音声デバイス管理のソース (`sora_audio_devices.h/cpp`) を追加し、`sora_sdk_plugin.dll` ターゲットに含めた。
+2. WASAPI (`IMMDeviceEnumerator`) によるマイク (eCapture) / スピーカー (eRender) 列挙と、`GetDefaultAudioEndpoint` による既定入力取得を実装した。
+3. 入力デバイス切り替え方式として、当初の設計（ネイティブ側で独自 ADM 生成）ではなく、0033 の設計を変更し `_sharedAdmRef` に ADM 参照を保持する方式を採用した。macOS と同一の FFI 経由 (`setRecordingDeviceByGuid`) でデバイス切り替えを行う。
+4. 0034 の MethodChannel ハンドラから WASAPI 列挙結果を返すよう接続した。
+5. `CHANGES.md` に担当者行付きで `[ADD]` エントリを追記した。
+6. プラットフォーム結合テスト (`windows_audio_device_test.dart`) を追加した。Sora 接続不要で WASAPI 列挙とデバイス切り替えを検証する。

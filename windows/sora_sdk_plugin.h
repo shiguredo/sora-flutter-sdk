@@ -4,12 +4,16 @@
 #include <flutter/encodable_value.h>
 #include <flutter/method_channel.h>
 #include <flutter/plugin_registrar_windows.h>
+#include <flutter/texture_registrar.h>
 
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <vector>
 
 class SoraCameraCapturer;
+struct WindowsRenderingSink;
 
 class SoraSdkPlugin : public flutter::Plugin {
  public:
@@ -31,6 +35,19 @@ class SoraSdkPlugin : public flutter::Plugin {
   void HandleMethodCall(
       const flutter::MethodCall<flutter::EncodableValue>& method_call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+
+  struct RemoteVideoRendererContext {
+    int64_t renderer_id;
+    WindowsRenderingSink* sink;
+    int64_t texture_id;
+    flutter::TextureRegistrar* texture_registrar;
+    std::unique_ptr<flutter::TextureVariant> texture_variant;
+    std::vector<uint8_t> buffer;
+    int width;
+    int height;
+    std::mutex mutex;
+    FlutterDesktopPixelBuffer pixel_buffer{};
+  };
 
   void HandleCreateClient(
       const flutter::MethodCall<flutter::EncodableValue>& method_call,
@@ -68,6 +85,14 @@ class SoraSdkPlugin : public flutter::Plugin {
       const flutter::MethodCall<flutter::EncodableValue>& method_call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
 
+  void HandleCreateRemoteVideoRenderer(
+      const flutter::MethodCall<flutter::EncodableValue>& method_call,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+
+  void HandleDisposeRemoteVideoRenderer(
+      const flutter::MethodCall<flutter::EncodableValue>& method_call,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+
   void HandleGetDefaultAudioInputDevice(
       const flutter::MethodCall<flutter::EncodableValue>& method_call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
@@ -81,8 +106,11 @@ class SoraSdkPlugin : public flutter::Plugin {
   flutter::BinaryMessenger* messenger_;
   flutter::TextureRegistrar* texture_registrar_;
   int64_t next_client_id_ = 1;
+  int64_t next_renderer_id_ = 1;
   std::map<int64_t, std::unique_ptr<ClientWrapper>> clients_;
   std::map<int64_t, std::unique_ptr<SoraCameraCapturer>> capturers_;
+  std::map<int64_t, std::unique_ptr<RemoteVideoRendererContext>>
+      remote_renderers_;
 };
 
 #endif

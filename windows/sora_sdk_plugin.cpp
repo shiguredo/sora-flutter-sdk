@@ -4,12 +4,26 @@
 
 #include "sora_audio_devices.h"
 #include "sora_camera_capturer.h"
+#include "windows_rendering_sink.h"
 
 SoraSdkPlugin::SoraSdkPlugin(flutter::BinaryMessenger* messenger,
                              flutter::TextureRegistrar* texture_registrar)
     : messenger_(messenger), texture_registrar_(texture_registrar) {}
 
-SoraSdkPlugin::~SoraSdkPlugin() = default;
+SoraSdkPlugin::~SoraSdkPlugin() {
+  // 残留レンダラーをクリーンアップする
+  for (auto& pair : remote_renderers_) {
+    if (pair.second->sink) {
+      DeleteWindowsRenderingSink(pair.second->sink);
+      pair.second->sink = nullptr;
+    }
+    if (pair.second->texture_id >= 0 && texture_registrar_) {
+      texture_registrar_->UnregisterTexture(pair.second->texture_id, nullptr);
+      pair.second->texture_id = -1;
+    }
+  }
+  remote_renderers_.clear();
+}
 
 void SoraSdkPlugin::RegisterWithRegistrar(
     flutter::PluginRegistrarWindows* registrar) {
@@ -72,6 +86,14 @@ void SoraSdkPlugin::HandleMethodCall(
   }
   if (method == "stopCameraCapturer") {
     HandleStopCameraCapturer(method_call, std::move(result));
+    return;
+  }
+  if (method == "createRemoteVideoRenderer") {
+    HandleCreateRemoteVideoRenderer(method_call, std::move(result));
+    return;
+  }
+  if (method == "disposeRemoteVideoRenderer") {
+    HandleDisposeRemoteVideoRenderer(method_call, std::move(result));
     return;
   }
   result->NotImplemented();
@@ -342,4 +364,145 @@ void SoraSdkPlugin::HandleGetDefaultAudioInputDevice(
     return;
   }
   result->Success(flutter::EncodableValue(device_id));
+}
+
+void SoraSdkPlugin::HandleCreateRemoteVideoRenderer(
+    const flutter::MethodCall<flutter::EncodableValue>& method_call,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  const auto* args =
+      std::get_if<flutter::EncodableMap>(method_call.arguments());
+  if (!args) {
+    result->Error("invalid_argument", "Arguments are required.");
+    return;
+  }
+
+  auto client_id_it = args->find(flutter::EncodableValue("clientId"));
+  if (client_id_it == args->end()) {
+    result->Error("invalid_argument", "clientId is required.");
+    return;
+  }
+  int64_t client_id = GetIntValue(client_id_it->second, -1);
+  auto wrapper_it = clients_.find(client_id);
+  if (wrapper_it == clients_.end()) {
+    result->Error("client_not_found", "Client not found.");
+    return;
+  }
+
+  // C ブリッジでレンダリングシンクを作成する
+  WindowsRenderingSink* sink = CreateWindowsRenderingSink();
+  if (sink == NULL) {
+    result->Error("renderer_create_failed",
+                  "Failed to create rendering sink.");
+    return;
+  }
+
+  auto ctx = std::make_unique<RemoteVideoRendererContext>();
+  ctx->renderer_id = next_renderer_id_++;
+  ctx->sink = sink;
+  ctx->texture_registrar = texture_registrar_;
+
+  // Flutter Texture を登録する
+  // PixelBufferTexture は Flutter エンジンのレンダリングスレッドから呼ばれ、
+  // その中で I420 → BGRA 変換を行う。
+  ctx->pixel_buffer = {};
+  auto texture = std::make_unique<flutter::PixelBufferTexture>(
+      [ctx = ctx.get()](size_t width, size_t height) {
+        (void)width;
+        (void)height;
+        if (ctx->sink == nullptr) {
+          return &ctx->pixel_buffer;
+        }
+        if (!CopyPixelBuffer(ctx->sink, ctx->buffer, ctx->width,
+                             ctx->height)) {
+          return &ctx->pixel_buffer;
+        }
+        std::lock_guard<std::mutex> lock(ctx->mutex);
+        ctx->pixel_buffer.buffer = ctx->buffer.data();
+        ctx->pixel_buffer.width = ctx->width;
+        ctx->pixel_buffer.height = ctx->height;
+        ctx->pixel_buffer.release_callback = nullptr;
+        ctx->pixel_buffer.release_context = nullptr;
+        return &ctx->pixel_buffer;
+      });
+  ctx->texture_variant =
+      std::make_unique<flutter::TextureVariant>(std::move(*texture));
+  ctx->texture_id =
+      texture_registrar_->RegisterTexture(ctx->texture_variant.get());
+
+  // フレーム通知コールバックを設定する
+  // コールバックは webrtc スレッドから呼ばれる。
+  // MarkTextureFrameAvailable はスレッドセーフ。
+  SetFrameCallback(
+      sink,
+      [](void* context) {
+        auto* renderer_ctx =
+            static_cast<RemoteVideoRendererContext*>(context);
+        if (renderer_ctx->texture_id >= 0) {
+          renderer_ctx->texture_registrar->MarkTextureFrameAvailable(
+              renderer_ctx->texture_id);
+        }
+      },
+      ctx.get());
+
+  int64_t renderer_id = ctx->renderer_id;
+  int64_t texture_id = ctx->texture_id;
+  intptr_t rendering_sink_ptr = reinterpret_cast<intptr_t>(sink);
+  intptr_t video_sink_ptr =
+      reinterpret_cast<intptr_t>(GetVideoSinkPtr(sink));
+
+  remote_renderers_[renderer_id] = std::move(ctx);
+
+  flutter::EncodableMap response;
+  response[flutter::EncodableValue("rendererId")] =
+      flutter::EncodableValue(renderer_id);
+  response[flutter::EncodableValue("renderingSinkPtr")] =
+      flutter::EncodableValue(rendering_sink_ptr);
+  response[flutter::EncodableValue("videoSinkPtr")] =
+      flutter::EncodableValue(video_sink_ptr);
+  response[flutter::EncodableValue("textureId")] =
+      flutter::EncodableValue(texture_id);
+  result->Success(flutter::EncodableValue(response));
+}
+
+void SoraSdkPlugin::HandleDisposeRemoteVideoRenderer(
+    const flutter::MethodCall<flutter::EncodableValue>& method_call,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  const auto* args =
+      std::get_if<flutter::EncodableMap>(method_call.arguments());
+  if (!args) {
+    result->Error("invalid_argument", "Arguments are required.");
+    return;
+  }
+
+  auto renderer_id_it = args->find(flutter::EncodableValue("rendererId"));
+  if (renderer_id_it == args->end()) {
+    result->Error("invalid_argument", "rendererId is required.");
+    return;
+  }
+  int64_t renderer_id = GetIntValue(renderer_id_it->second, -1);
+
+  auto it = remote_renderers_.find(renderer_id);
+  if (it == remote_renderers_.end()) {
+    result->Success();
+    return;
+  }
+
+  // レンダリングシンクを破棄する。
+  // DeleteWindowsRenderingSink は disposed を設定し、on_frame_available を
+  // NULL にし、inflight の完了を待つ。これにより以降のフレームコールバックは
+  // 発火しなくなる。
+  if (it->second->sink) {
+    DeleteWindowsRenderingSink(it->second->sink);
+    it->second->sink = nullptr;
+  }
+
+  // テクスチャを登録解除する。
+  // MarkTextureFrameAvailable はもう発火しないため安全に解除できる。
+  if (it->second->texture_id >= 0 && texture_registrar_) {
+    texture_registrar_->UnregisterTexture(it->second->texture_id, nullptr);
+    it->second->texture_id = -1;
+  }
+
+  remote_renderers_.erase(it);
+  result->Success();
 }

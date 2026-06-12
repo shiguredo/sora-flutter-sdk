@@ -3,6 +3,11 @@
 #include <flutter/standard_method_codec.h>
 
 #include <algorithm>
+#include <mferror.h>
+
+// Media Foundation API の DWORD 引数に符号付き定数が使われる箇所で
+// C4245 (signed/unsigned mismatch) が発生するため抑制する。
+#pragma warning(disable : 4245)
 #include <sstream>
 
 // libwebrtc-c / libyuv
@@ -434,7 +439,14 @@ void SoraCameraCapturer::ProcessSample(IMFSample* sample) {
   LONG pitch1 = 0;
 
   if (SUCCEEDED(hr)) {
-    hr = buffer_2d->Lock2D(&scanline0, &pitch0, &scanline1, &pitch1);
+    // Windows SDK 10.0.26100 以降、IMF2DBuffer::Lock2D の引数が 2 つに
+    // 変更された。NV12 の UV プレーンは Y プレーンの直後に配置される。
+    hr = buffer_2d->Lock2D(&scanline0, &pitch0);
+    if (SUCCEEDED(hr)) {
+      // NV12: UV プレーンは Y プレーン (pitch0 * height) の直後
+      scanline1 = scanline0 + pitch0 * requested_height_;
+      pitch1 = pitch0;
+    }
   }
 
   if (SUCCEEDED(hr) && scanline0) {
@@ -497,11 +509,13 @@ void SoraCameraCapturer::ProcessSample(IMFSample* sample) {
           struct webrtc_VideoFrameBuilder_unique* builder =
               webrtc_VideoFrameBuilder_new(frame_buffer);
           if (builder) {
-            webrtc_VideoFrameBuilder_set_rotation(builder,
+            struct webrtc_VideoFrameBuilder* b =
+                webrtc_VideoFrameBuilder_unique_get(builder);
+            webrtc_VideoFrameBuilder_set_rotation(b,
                                                   webrtc_VideoRotation_0);
-            webrtc_VideoFrameBuilder_set_timestamp_us(builder, timestamp_us);
+            webrtc_VideoFrameBuilder_set_timestamp_us(b, timestamp_us);
             struct webrtc_VideoFrame_unique* frame =
-                webrtc_VideoFrameBuilder_build(builder);
+                webrtc_VideoFrameBuilder_build(b);
             webrtc_VideoFrameBuilder_unique_delete(builder);
             if (frame) {
               webrtc_AdaptedVideoTrackSource_OnFrame(

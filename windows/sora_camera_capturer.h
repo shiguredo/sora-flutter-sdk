@@ -1,6 +1,7 @@
 #ifndef SORA_SDK_SORA_CAMERA_CAPTURER_H_
 #define SORA_SDK_SORA_CAMERA_CAPTURER_H_
 
+#include <flutter/encodable_value.h>
 #include <flutter/texture_registrar.h>
 
 #include <atomic>

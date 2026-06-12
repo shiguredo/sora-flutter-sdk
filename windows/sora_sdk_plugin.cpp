@@ -1,5 +1,8 @@
 #include "sora_sdk_plugin.h"
 
+#include <flutter/standard_method_codec.h>
+
+#include "sora_audio_devices.h"
 #include "sora_camera_capturer.h"
 
 SoraSdkPlugin::SoraSdkPlugin(flutter::BinaryMessenger* messenger,
@@ -44,11 +47,15 @@ void SoraSdkPlugin::HandleMethodCall(
     return;
   }
   if (method == "enumerateAudioInputDevices") {
-    result->Success(flutter::EncodableValue(flutter::EncodableList()));
+    HandleEnumerateAudioInputDevices(method_call, std::move(result));
     return;
   }
   if (method == "enumerateAudioOutputDevices") {
-    result->Success(flutter::EncodableValue(flutter::EncodableList()));
+    HandleEnumerateAudioOutputDevices(method_call, std::move(result));
+    return;
+  }
+  if (method == "getDefaultAudioInputDevice") {
+    HandleGetDefaultAudioInputDevice(method_call, std::move(result));
     return;
   }
   if (method == "getVideoInputFormats") {
@@ -96,11 +103,11 @@ void SoraSdkPlugin::HandleCreateClient(
         if (call->method_name() == "listen" ||
             call->method_name() == "cancel") {
           auto response = codec.EncodeSuccessEnvelope(nullptr);
-          reply(response.data(), response.size());
+          reply(response->data(), response->size());
         } else {
           auto response = codec.EncodeErrorEnvelope(
               "error", "Not implemented", nullptr);
-          reply(response.data(), response.size());
+          reply(response->data(), response->size());
         }
       });
 
@@ -307,4 +314,32 @@ void SoraSdkPlugin::HandleStopCameraCapturer(
   }
   capturer_it->second->Stop();
   result->Success();
+}
+
+void SoraSdkPlugin::HandleEnumerateAudioInputDevices(
+    const flutter::MethodCall<flutter::EncodableValue>& method_call,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  (void)method_call;
+  flutter::EncodableList devices = SoraAudioDevices::EnumerateInputDevices();
+  result->Success(flutter::EncodableValue(devices));
+}
+
+void SoraSdkPlugin::HandleEnumerateAudioOutputDevices(
+    const flutter::MethodCall<flutter::EncodableValue>& method_call,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  (void)method_call;
+  flutter::EncodableList devices = SoraAudioDevices::EnumerateOutputDevices();
+  result->Success(flutter::EncodableValue(devices));
+}
+
+void SoraSdkPlugin::HandleGetDefaultAudioInputDevice(
+    const flutter::MethodCall<flutter::EncodableValue>& method_call,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  (void)method_call;
+  std::string device_id = SoraAudioDevices::GetDefaultInputDeviceId();
+  if (device_id.empty()) {
+    result->Success(flutter::EncodableValue());
+    return;
+  }
+  result->Success(flutter::EncodableValue(device_id));
 }

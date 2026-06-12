@@ -1,6 +1,7 @@
 #ifndef FLUTTER_PLUGIN_SORA_SDK_PLUGIN_H_
 #define FLUTTER_PLUGIN_SORA_SDK_PLUGIN_H_
 
+#include <flutter/encodable_value.h>
 #include <flutter/method_channel.h>
 #include <flutter/plugin_registrar_windows.h>
 
@@ -56,6 +57,18 @@ class SoraSdkPlugin : public flutter::Plugin {
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
 
   void HandleStopCameraCapturer(
+      const flutter::MethodCall<flutter::EncodableValue>& method_call,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+
+  void HandleEnumerateAudioInputDevices(
+      const flutter::MethodCall<flutter::EncodableValue>& method_call,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+
+  void HandleEnumerateAudioOutputDevices(
+      const flutter::MethodCall<flutter::EncodableValue>& method_call,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+
+  void HandleGetDefaultAudioInputDevice(
       const flutter::MethodCall<flutter::EncodableValue>& method_call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
 

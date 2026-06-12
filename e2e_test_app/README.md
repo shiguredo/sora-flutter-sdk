@@ -1,12 +1,17 @@
 # e2e_test_app
 
 Sora Flutter SDK の recvonly / sendonly / sendrecv 接続と、2 クライアント間メディア疎通を `integration_test` で検証する最小アプリです。
+加えて、ネイティブプラグインの結合テスト（Sora 接続不要でデバイス列挙等のみを検証するテスト）も含みます。
 
 ## 前提
 
 - **Linux**: プラグインの MethodChannel が未実装のため、接続テストは現状失敗します。CI（`e2e-test.yml`）は macOS で実行します。
 - **macOS**: 初回ビルド時に Swift Package Manager が `libwebrtc_c.xcframework.zip` を自動取得するため、手動 fetch は不要。アプリの最小デプロイは **15.0**。App Sandbox 有効時は **外向き TCP/TLS（シグナリング）用に `com.apple.security.network.client`** が entitlements に必要（本アプリの `DebugProfile` / `Release` に含める）。
 - **audio track**: `MediaDevices.createAudioTrack()` を使用するテスト（`remote_media_stream_e2e_test.dart`、`local_media_toggle_e2e_test.dart`）は macOS のマイク入力が必要。entitlements に `com.apple.security.device.microphone` が設定されていること。CI ランナーに物理マイクが無い場合、音声デバイスが存在しない環境ではテストが失敗する可能性がある。
+- **Windows**: プラグインの MethodChannel は実装済み。カメラキャプチャ (0035) と音声デバイス (0036) に対応する。Windows の接続テストは以下の前提で実行する:
+  - 音声デバイステスト（`windows_audio_device_test.dart`）は Sora 接続不要のプラットフォーム結合テストで、WASAPI によるデバイス列挙と切り替えのみを検証する
+  - 音声テストには物理マイクが必要。仮想オーディオデバイス（CABLE Input 等）でも動作する
+  - `flutter build windows` でビルドが通る状態であること（不足システムライブラリがある場合は `windows/CMakeLists.txt` に追加する）
 
 ## 環境変数
 
@@ -48,3 +53,14 @@ flutter test integration_test/two_party_media_e2e_test.dart -d macos
 flutter test integration_test/remote_media_stream_e2e_test.dart -d macos
 flutter test integration_test/local_media_toggle_e2e_test.dart -d macos
 ```
+
+## ローカル実行例（Windows）
+
+```powershell
+cd e2e_test_app
+flutter pub get
+# Sora 接続不要のプラットフォーム結合テスト（物理マイクが必要）
+flutter test integration_test/windows_audio_device_test.dart -d windows
+```
+
+Windows で Sora 接続を含むテストを実行する場合は macOS と同様に環境変数を設定してください。ただし `sora_camera_capturer.cpp` に Windows SDK 互換性の問題があるため、カメラを含むテストは現時点では失敗する可能性があります。

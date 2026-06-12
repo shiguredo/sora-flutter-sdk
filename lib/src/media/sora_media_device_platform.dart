@@ -70,14 +70,14 @@ Future<List<AudioOutputDevice>> enumerateAudioOutputDevices() async {
 /// 入力デバイスへ戻します。
 @internal
 Future<void> setAudioInputDevice(String? deviceId) async {
-  // macOS では libwebrtc ADM が Dart 側から FFI で直接参照可能であり、
+  // macOS と Windows では libwebrtc ADM が Dart 側から FFI で直接参照可能であり、
   // ネイティブ往復なしでデバイス切り替えが完了するため、
   // MethodChannel ではなく FFI 経由で libwebrtc の AudioDeviceModule (ADM) を直接操作する。
-  // 既定デバイスへの復帰には CoreAudio の kAudioHardwarePropertyDefaultInputDevice を取得する。
+  // 既定デバイスへの復帰にはプラットフォーム既定の入力デバイス ID を取得する。
   // Android と異なり Bluetooth SCO のような長時間 suspend がなく、
   // 内部の getDefaultAudioInputDeviceId / enumerateAudioInputDevices も
   // 軽量な問い合わせであるため、タイムアウトは設定していない。
-  if (Platform.isMacOS) {
+  if (Platform.isMacOS || Platform.isWindows) {
     final effectiveDeviceId = deviceId ?? await getDefaultAudioInputDeviceId();
     final devices = await enumerateAudioInputDevices();
     AudioInputDevice? selectedDevice;

@@ -282,11 +282,16 @@ class WebrtcClient {
       if (adm != nullptr) {
         sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
         // Dart から SetRecordingDevice を呼ぶために参照を保持しておく
+        if (_sharedAdmRef != null) {
+          sharedLib.audioDeviceModuleRelease(
+            sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+          );
+        }
         _sharedAdmRef = adm;
       }
     } else if (Platform.isWindows) {
-      // Windows はネイティブ側で独自に ADM を生成してデバイス制御を行うため、
-      // Dart 側で参照を保持せず即時 release する
+      // Windows は Dart 側から SetRecordingDevice を呼べるよう、
+      // macOS と同様に _sharedAdmRef に参照を保持する
       final env = sharedLib.createEnvironment();
       final adm = sharedLib.createAudioDeviceModule(
         env,
@@ -295,9 +300,12 @@ class WebrtcClient {
       sharedLib.environmentDelete(env);
       if (adm != nullptr) {
         sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
-        sharedLib.audioDeviceModuleRelease(
-          sharedLib.audioDeviceModuleRefcountedGet(adm),
-        );
+        if (_sharedAdmRef != null) {
+          sharedLib.audioDeviceModuleRelease(
+            sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+          );
+        }
+        _sharedAdmRef = adm;
       }
     }
 

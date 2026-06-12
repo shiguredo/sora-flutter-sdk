@@ -22,6 +22,9 @@
 - [ADD] Windows カメラキャプチャ (Media Foundation) を実装する
   - Media Foundation によるデバイス列挙・フォーマット取得・フレームキャプチャ・I420 変換・ローカルプレビューを実装する
   - @zztkm
+- [ADD] Windows 音声デバイス (WASAPI) の列挙と選択を実装する
+  - WASAPI を用いた音声入出力デバイスの列挙と入力デバイス切り替えを実装する
+  - @zztkm
 - [UPDATE] libwebrtc-c を 0.150.0 に更新する
   - @zztkm
 - [UPDATE] webrtc-build を m150.7871.0.0 に更新する

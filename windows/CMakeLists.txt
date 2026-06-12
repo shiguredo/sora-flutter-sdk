@@ -21,6 +21,8 @@ add_library(${PLUGIN_NAME} SHARED
   "sora_audio_devices.h"
   "sora_camera_capturer.cpp"
   "sora_camera_capturer.h"
+  "windows_rendering_sink.h"
+  "windows_rendering_sink.cpp"
 )
 
 

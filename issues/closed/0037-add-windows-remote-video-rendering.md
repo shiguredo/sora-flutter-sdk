@@ -4,6 +4,7 @@
 - Created: 2026-06-03
 - Model: Opus 4.8
 - Branch: feature/add-windows-remote-video-rendering
+- Completed: 2026-06-15
 - Polished: 2026-06-03
 
 ## 目的

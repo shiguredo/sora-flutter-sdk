@@ -18,6 +18,7 @@ on:
       - "android/**"
       - "ios/**"
       - "macos/**"
+      - "windows/**"
       - "devtools/**"
       - "lib/**"
       - "prek.toml"
@@ -431,9 +432,130 @@ jobs:
           # macOS デスクトップ向け build の成立性を確認する。
           flutter build macos --release --no-pub
 
+  build-windows:
+    name: Build Windows
+    runs-on: windows-2022
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Restore Flutter SDK cache
+        id: flutter-sdk-cache-windows
+        uses: actions/cache@v5
+        with:
+          # Flutter SDK 本体と `flutter precache` の成果物をまとめて再利用する。
+          path: ~/flutter
+          key: ${{ runner.os }}-flutter-sdk-${{ env.FLUTTER_CHANNEL }}-${{
+            env.FLUTTER_VERSION }}
+
+      - name: Install Flutter SDK
+        if: steps.flutter-sdk-cache-windows.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+
+          # 公式 release manifest から対象バージョンの archive path と sha256 を取得する
+          $releasesJson = "$env:RUNNER_TEMP/releases_windows.json"
+
+          Invoke-WebRequest -Uri "https://storage.googleapis.com/flutter_infra_release/releases/releases_windows.json" -OutFile $releasesJson
+
+          # jq は windows-2022 にプリインストールされていないため ConvertFrom-Json を使う
+          $releases = Get-Content -Raw $releasesJson | ConvertFrom-Json
+          $release = $releases.releases | Where-Object {
+            $_.version -eq $env:FLUTTER_VERSION -and $_.channel -eq $env:FLUTTER_CHANNEL
+          } | Select-Object -First 1
+
+          if (-not $release) {
+            throw "Flutter release $env:FLUTTER_VERSION ($env:FLUTTER_CHANNEL) was not found."
+          }
+
+          $archivePath = $release.archive
+          $archiveSha256 = $release.sha256
+          $archiveFile = Join-Path $env:RUNNER_TEMP (Split-Path $archivePath -Leaf)
+
+          Invoke-WebRequest -Uri "https://storage.googleapis.com/flutter_infra_release/releases/$archivePath" -OutFile $archiveFile
+
+          $actualHash = (Get-FileHash -Path $archiveFile -Algorithm SHA256).Hash.ToLower()
+          if ($actualHash -ne $archiveSha256) {
+            throw "SHA256 mismatch: expected=$archiveSha256 actual=$actualHash"
+          }
+
+          Remove-Item -Recurse -Force "$env:USERPROFILE/flutter" -ErrorAction SilentlyContinue
+
+          if ($archiveFile.EndsWith('.zip')) {
+            Expand-Archive -Path $archiveFile -DestinationPath "$env:USERPROFILE"
+          } elseif ($archiveFile.EndsWith('.tar.xz')) {
+            tar -xJf $archiveFile -C "$env:USERPROFILE"
+            if ($LASTEXITCODE -ne 0) {
+              throw "tar failed with exit code $LASTEXITCODE"
+            }
+          } else {
+            throw "Unsupported Flutter archive format: $archiveFile"
+          }
+
+      - name: Add Flutter to PATH
+        run: echo "${HOME}/flutter/bin" >> "${GITHUB_PATH}"
+
+      - name: Set Pub cache path for Windows
+        run: echo "PUB_CACHE=${HOME}/.pub-cache" >> "${GITHUB_ENV}"
+
+      - name: Restore Pub cache
+        uses: actions/cache@v5
+        with:
+          # package 本体と devtools の両方で使う pub cache を共有する。
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-pub-${{ env.FLUTTER_VERSION }}-${{
+            hashFiles('pubspec.yaml', 'pubspec.lock', 'devtools/pubspec.yaml',
+            'devtools/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-${{ env.FLUTTER_VERSION }}-
+
+      - name: Restore native dependency cache
+        uses: actions/cache@v5
+        with:
+          # Windows plugin build 時に自動取得される libwebrtc-c 配布物を再利用する。
+          path: third_party/libwebrtc-c
+          key: ${{ runner.os }}-native-deps-${{ hashFiles('scripts/native_deps.json') }}
+
+      - name: Show tool versions
+        run: |
+          set -euo pipefail
+          flutter --version
+
+      - name: Resolve package dependencies
+        run: |
+          set -euo pipefail
+          flutter pub get
+
+      - name: Precache Flutter Windows artifacts
+        run: |
+          set -euo pipefail
+          # Windows build に必要な engine artifact を先に温め、次回以降は Flutter SDK cache から再利用する。
+          flutter precache --windows
+
+      - name: Resolve e2e_test_app dependencies
+        working-directory: e2e_test_app
+        run: |
+          set -euo pipefail
+          flutter pub get
+
+      - name: Build e2e_test_app Windows app
+        working-directory: e2e_test_app
+        run: |
+          set -euo pipefail
+          # Windows デスクトップ向け build の成立性を確認する。
+          # CMake が自動的に fetch_native_deps.dart を起動し、ネイティブ依存を取得する。
+          flutter build windows --release --no-pub
+
   slack_notify:
     name: Slack Notify
-    needs: [ build-android, build-apple ]
+    needs: [ build-android, build-apple, build-windows ]
     runs-on: ubuntu-24.04
     if: ${{ always() }}
     permissions:

@@ -31,6 +31,8 @@ set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE}")
 
 # Use Unicode for all projects.
 add_definitions(-DUNICODE -D_UNICODE)
+# libwebrtc-c.lib が /MT（静的 CRT）でビルドされているため、イテレータデバッグを無効化する
+add_definitions(-D_ITERATOR_DEBUG_LEVEL=0)
 
 # Compilation settings that should be applied to most targets.
 #
@@ -41,8 +43,9 @@ function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_features(${TARGET} PUBLIC cxx_std_17)
   target_compile_options(${TARGET} PRIVATE /W4 /WX /wd"4100")
   target_compile_options(${TARGET} PRIVATE /EHsc)
+  # libwebrtc-c.lib が /MT（静的リリース CRT）でビルドされているため、全構成で /MT を使用する
+  target_compile_options(${TARGET} PRIVATE "/MT")
   target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0")
-  target_compile_definitions(${TARGET} PRIVATE "$<$<CONFIG:Debug>:_DEBUG>")
 endfunction()
 
 # Flutter library and tool build rules.

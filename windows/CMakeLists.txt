@@ -29,6 +29,8 @@ add_library(${PLUGIN_NAME} SHARED
 
 apply_standard_settings(${PLUGIN_NAME})
 set_target_properties(${PLUGIN_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
+set_target_properties(${PLUGIN_NAME} PROPERTIES
+  MSVC_RUNTIME_LIBRARY "MultiThreaded")
 # ソースファイルが UTF-8 で保存されている場合、MSVC の Shift-JIS コードページで
 # C4819 警告 → /WX でエラーになる問題を回避する。
 target_compile_options(${PLUGIN_NAME} PRIVATE "/utf-8")
@@ -78,6 +80,8 @@ target_include_directories(sora_sdk PRIVATE
   "${WEBRTC_INCLUDE_DIR}"
 )
 target_compile_options(sora_sdk PRIVATE "/utf-8")
+set_target_properties(sora_sdk PROPERTIES
+  MSVC_RUNTIME_LIBRARY "MultiThreaded")
 
 # libwebrtc-c は dllexport 済みの C API シンボルを持つ静的ライブラリ。
 # WHOLEARCHIVE ですべてのオブジェクトファイルを強制リンクし、

@@ -37,7 +37,7 @@ class SoraCameraCapturer {
   int64_t preview_texture_id() const { return preview_texture_id_; }
 
   const FlutterDesktopPixelBuffer* CopyPreviewPixelBuffer(size_t width,
-                                                           size_t height);
+                                                          size_t height);
 
  private:
   bool CreateMediaSource();

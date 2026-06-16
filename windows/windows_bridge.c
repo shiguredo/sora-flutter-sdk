@@ -61,9 +61,8 @@ __declspec(dllexport) void* sora_observer_bridge_setup_dc(
   return NULL;
 }
 
-__declspec(dllexport) void sora_observer_bridge_destroy_dc(
-    void* ctx,
-    void* dc) {
+__declspec(dllexport) void sora_observer_bridge_destroy_dc(void* ctx,
+                                                           void* dc) {
   (void)ctx;
   (void)dc;
 }

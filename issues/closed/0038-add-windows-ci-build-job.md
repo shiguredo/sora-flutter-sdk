@@ -2,6 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-03
+- Completed: 2026-06-16
 - Model: Opus 4.8
 - Branch: feature/add-windows-ci-build-job
 - Polished: 2026-06-03
@@ -49,3 +50,12 @@ Windows 対応の回帰を防ぐため、CI に Windows のビルドジョブを
 1. `.github/workflows/ci.yml` に `build-windows` ジョブ (windows-2022、依存取得、`flutter build windows`) を追加する。
 2. ネイティブ依存キャッシュを Windows に適用する。
 3. `CHANGES.md` にエントリを追記する。
+
+## 実装後に判明した修正
+
+- `windows/**` を CI の push paths に追加したことで、従来 CI でチェックされていなかった C/C++ ファイルの clang-format 違反が検出された。以下のファイルを clang-format (Chromium スタイル) で修正した:
+  - `e2e_test_app/windows/runner/flutter_window.h`
+  - `e2e_test_app/windows/runner/resource.h`
+  - `windows/sora_camera_capturer.h`
+  - `windows/windows_bridge.c`
+- `e2e_test_app/windows/CMakeLists.txt` の `install(DIRECTORY ...)` が `build/native_assets/windows/` の不存在により CMake エラーになっていた。`if(EXISTS ...)` でガードして修正した。

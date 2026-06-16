@@ -19,9 +19,12 @@ Please read <https://github.com/shiguredo/oss/blob/master/README.en.md> before u
 
 ## Sora Flutter SDK について
 
-iOS / macOS / Android に対応した WebRTC SFU Sora 向けの Flutter SDK です。
+iOS / macOS / Android / Windows に対応した WebRTC SFU Sora 向けの Flutter SDK です。
 
-WebRTC ライブラリには [libwebrtc](https://webrtc.googlesource.com/src/) を採用しています。WebRTC のコアロジック (PeerConnection、SDP 処理、ICE、DataChannel) は `dart:ffi` 経由で libwebrtc を直接呼び出して Dart 側に実装しており、プラットフォーム側 (iOS / macOS / Android) はカメラキャプチャと映像レンダリングのみを担当します。
+WebRTC ライブラリには [libwebrtc](https://webrtc.googlesource.com/src/) を採用しています。
+WebRTC のコアロジック (PeerConnection、SDP 処理、ICE、DataChannel) は `dart:ffi` 経由で
+libwebrtc を直接呼び出して Dart 側に実装しており、プラットフォーム側 (iOS / macOS / Android / Windows) は
+カメラキャプチャと映像レンダリングのみを担当します。
 
 ## 特徴
 
@@ -385,7 +388,9 @@ sora-flutter-sdk/
 
 ### e2e_test_app
 
-`integration_test` で recvonly / sendonly / sendrecv 接続と、2 クライアント間の基本メディア疎通を検証する最小アプリです。2 クライアント E2E では sender / receiver が同じ `channelId` を共有し、`bundleId` は設定しません。詳細は [e2e_test_app/README.md](e2e_test_app/README.md) を参照してください。
+`integration_test` で recvonly / sendonly / sendrecv 接続と、2 クライアント間の
+基本メディア疎通を検証する最小アプリです。2 クライアント E2E では sender / receiver が同じ
+`channelId` を共有し、`bundleId` は設定しません。詳細は [e2e_test_app/README.md](e2e_test_app/README.md) を参照してください。
 
 ```bash
 cd e2e_test_app
@@ -405,6 +410,7 @@ flutter test integration_test/two_party_media_e2e_test.dart -d macos
 - [iOS](docs/IOS.md)
 - [macOS](docs/MACOS.md)
 - [Android](docs/ANDROID.md)
+- [Windows](docs/WINDOWS.md)
 - [WebRTC ビルド](docs/WEBRTC_BUILD.md)
 
 ## ビルド
@@ -416,8 +422,13 @@ flutter test integration_test/two_party_media_e2e_test.dart -d macos
 - iOS: Xcode (iOS 16.0 以上)
 - macOS: Xcode (macOS 15.0 以上)
 - Android: Android Studio / Android NDK
+- Windows: Visual Studio 2022 (MSVC v143) / Build Tools for Visual Studio 2022
 
-ネイティブ依存 (libwebrtc) は iOS / macOS では Swift Package Manager、Android では Gradle の `fetchNativeDeps` task から自動取得されます。Android 向け取得対象のバージョン・配布元 URL・SHA-256 は [`scripts/native_deps.json`](scripts/native_deps.json) で管理しています。
+ネイティブ依存 (libwebrtc) は iOS / macOS では Swift Package Manager、Android では Gradle の
+`fetchNativeDeps` task から自動取得されます。Android 向け取得対象のバージョン・配布元 URL・SHA-256 は
+[`scripts/native_deps.json`](scripts/native_deps.json) で管理しています。
+
+Windows では CMake ビルド時に `scripts/fetch_native_deps.dart windows_x86_64` が自動実行され、libwebrtc-c / webrtc を `third_party/libwebrtc-c/` にダウンロード・展開します。詳細は [Windows ドキュメント](docs/WINDOWS.md) を参照してください。
 
 iOS / macOS 向けの `libwebrtc_c.xcframework.zip` の version は [`scripts/native_deps.json`](scripts/native_deps.json) の `libwebrtc_c.version`、URL / checksum は `libwebrtc_c.apple_xcframework` を正本として管理しています。
 
@@ -443,7 +454,7 @@ dart run scripts/update_apple_native_binary.dart
 | iOS | 対応 |
 | macOS | 対応 |
 | Android | 対応 |
-| Windows | 対応予定 |
+| Windows | 対応 (x86_64) |
 | Linux | 対応予定 |
 
 ### iOS の対応バージョン
@@ -458,6 +469,10 @@ macOS 15 以上をサポートします。
 
 Android 10 (API 29) 以上をサポートします。
 
+### Windows の対応バージョン
+
+Windows 10 20H2 以上 (x86_64) をサポートします。
+
 ## 優先実装
 
 優先実装とは Sora のライセンスを契約頂いているお客様限定で Sora Flutter SDK の実装予定機能を有償にて前倒しで実装することです。
@@ -466,7 +481,6 @@ Android 10 (API 29) 以上をサポートします。
 
 **詳細は Discord やメールなどでお気軽にお問い合わせください**
 
-- Windows 対応
 - Linux 対応
 - Opus 詳細パラメータ対応 (`audioOpusParamsChannels` / `audioOpusParamsStereo` / `audioOpusParamsUseinbandfec` 等)
 - `audioStreamingLanguageCode` 対応

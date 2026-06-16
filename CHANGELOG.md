@@ -45,3 +45,6 @@
   - @zztkm
 - [ADD] ローカル音声と映像の有効切り替えを検証する E2E テストを追加する
   - @zztkm
+- [ADD] Windows のドキュメントを追加し README のサポート OS を更新する
+  - `docs/WINDOWS.md` を追加し、README の対応プラットフォーム表に Windows を反映する
+  - @zztkm

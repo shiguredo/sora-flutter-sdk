@@ -14,7 +14,9 @@
 // との互換性に問題があるため、必要な定数のみを直接定義する。
 // {0xa45c254e, 0xdf1c, 0x4efd, {0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}}, 14
 static const PROPERTYKEY PKEY_Device_FriendlyName = {
-    {0xa45c254e, 0xdf1c, 0x4efd,
+    {0xa45c254e,
+     0xdf1c,
+     0x4efd,
      {0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}},
     14};
 
@@ -25,8 +27,8 @@ namespace {
 // LPWSTR を UTF-8 std::string に変換する
 // 変換に失敗した場合は空文字列を返す
 std::string WideToUTF8(LPCWSTR wide) {
-  int size = WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr,
-                                 nullptr);
+  int size =
+      WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
   if (size <= 0) {
     return "";
   }
@@ -61,8 +63,7 @@ flutter::EncodableMap DeviceToEncodableMap(IMMDevice* device) {
         var.vt == VT_LPWSTR) {
       std::string label = WideToUTF8(var.pwszVal);
       if (!label.empty()) {
-        map[flutter::EncodableValue("label")] =
-            flutter::EncodableValue(label);
+        map[flutter::EncodableValue("label")] = flutter::EncodableValue(label);
       }
     }
     PropVariantClear(&var);
@@ -81,62 +82,51 @@ flutter::EncodableList EnumerateDevices(EDataFlow data_flow) {
     return flutter::EncodableList();
   }
 
-  ComPtr<IMMDeviceEnumerator> enumerator;
-  hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
-                        IID_PPV_ARGS(&enumerator));
-  if (FAILED(hr)) {
-    OutputDebugStringA(
-        ("SoraAudioDevices: CoCreateInstance IMMDeviceEnumerator failed: hr=" +
-         std::to_string(static_cast<int>(hr)))
-            .c_str());
-    if (com_initialized) {
-      CoUninitialize();
-    }
-    return flutter::EncodableList();
-  }
-
-  ComPtr<IMMDeviceCollection> collection;
-  hr = enumerator->EnumAudioEndpoints(data_flow, DEVICE_STATE_ACTIVE,
-                                      &collection);
-  if (FAILED(hr)) {
-    OutputDebugStringA(
-        ("SoraAudioDevices: EnumAudioEndpoints failed: hr=" +
-         std::to_string(static_cast<int>(hr)))
-            .c_str());
-    if (com_initialized) {
-      CoUninitialize();
-    }
-    return flutter::EncodableList();
-  }
-
-  UINT count = 0;
-  hr = collection->GetCount(&count);
-  if (FAILED(hr)) {
-    OutputDebugStringA(("SoraAudioDevices: GetCount failed: hr=" +
-                        std::to_string(static_cast<int>(hr)))
-                           .c_str());
-    if (com_initialized) {
-      CoUninitialize();
-    }
-    return flutter::EncodableList();
-  }
-  if (count == 0) {
-    if (com_initialized) {
-      CoUninitialize();
-    }
-    return flutter::EncodableList();
-  }
-
   flutter::EncodableList devices;
-  for (UINT i = 0; i < count; i++) {
-    ComPtr<IMMDevice> device;
-    if (SUCCEEDED(collection->Item(i, &device))) {
-      flutter::EncodableMap map = DeviceToEncodableMap(device.Get());
-      if (map.find(flutter::EncodableValue("deviceId")) != map.end()) {
-        devices.push_back(flutter::EncodableValue(map));
+  do {
+    ComPtr<IMMDeviceEnumerator> enumerator;
+    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                          IID_PPV_ARGS(&enumerator));
+    if (FAILED(hr)) {
+      OutputDebugStringA(("SoraAudioDevices: CoCreateInstance "
+                          "IMMDeviceEnumerator failed: hr=" +
+                          std::to_string(static_cast<int>(hr)))
+                             .c_str());
+      break;
+    }
+
+    ComPtr<IMMDeviceCollection> collection;
+    hr = enumerator->EnumAudioEndpoints(data_flow, DEVICE_STATE_ACTIVE,
+                                        &collection);
+    if (FAILED(hr)) {
+      OutputDebugStringA(("SoraAudioDevices: EnumAudioEndpoints failed: hr=" +
+                          std::to_string(static_cast<int>(hr)))
+                             .c_str());
+      break;
+    }
+
+    UINT count = 0;
+    hr = collection->GetCount(&count);
+    if (FAILED(hr)) {
+      OutputDebugStringA(("SoraAudioDevices: GetCount failed: hr=" +
+                          std::to_string(static_cast<int>(hr)))
+                             .c_str());
+      break;
+    }
+    if (count == 0) {
+      break;
+    }
+
+    for (UINT i = 0; i < count; i++) {
+      ComPtr<IMMDevice> device;
+      if (SUCCEEDED(collection->Item(i, &device))) {
+        flutter::EncodableMap map = DeviceToEncodableMap(device.Get());
+        if (map.find(flutter::EncodableValue("deviceId")) != map.end()) {
+          devices.push_back(flutter::EncodableValue(map));
+        }
       }
     }
-  }
+  } while (false);
 
   if (com_initialized) {
     CoUninitialize();
@@ -164,47 +154,41 @@ std::string SoraAudioDevices::GetDefaultInputDeviceId() {
     return "";
   }
 
-  ComPtr<IMMDeviceEnumerator> enumerator;
-  hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
-                        IID_PPV_ARGS(&enumerator));
-  if (FAILED(hr)) {
-    OutputDebugStringA(
-        ("SoraAudioDevices: CoCreateInstance IMMDeviceEnumerator failed: hr=" +
-         std::to_string(static_cast<int>(hr)))
-            .c_str());
-    if (com_initialized) {
-      CoUninitialize();
+  std::string device_id;
+  do {
+    ComPtr<IMMDeviceEnumerator> enumerator;
+    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                          IID_PPV_ARGS(&enumerator));
+    if (FAILED(hr)) {
+      OutputDebugStringA(("SoraAudioDevices: CoCreateInstance "
+                          "IMMDeviceEnumerator failed: hr=" +
+                          std::to_string(static_cast<int>(hr)))
+                             .c_str());
+      break;
     }
-    return "";
-  }
 
-  ComPtr<IMMDevice> device;
-  hr = enumerator->GetDefaultAudioEndpoint(eCapture, eConsole, &device);
-  if (FAILED(hr)) {
-    OutputDebugStringA(
-        ("SoraAudioDevices: GetDefaultAudioEndpoint failed: hr=" +
-         std::to_string(static_cast<int>(hr)))
-            .c_str());
-    if (com_initialized) {
-      CoUninitialize();
+    ComPtr<IMMDevice> device;
+    hr = enumerator->GetDefaultAudioEndpoint(eCapture, eConsole, &device);
+    if (FAILED(hr)) {
+      OutputDebugStringA(
+          ("SoraAudioDevices: GetDefaultAudioEndpoint failed: hr=" +
+           std::to_string(static_cast<int>(hr)))
+              .c_str());
+      break;
     }
-    return "";
-  }
 
-  LPWSTR id = nullptr;
-  hr = device->GetId(&id);
-  if (FAILED(hr)) {
-    OutputDebugStringA(("SoraAudioDevices: device->GetId failed: hr=" +
-                        std::to_string(static_cast<int>(hr)))
-                           .c_str());
-    if (com_initialized) {
-      CoUninitialize();
+    LPWSTR id = nullptr;
+    hr = device->GetId(&id);
+    if (FAILED(hr)) {
+      OutputDebugStringA(("SoraAudioDevices: device->GetId failed: hr=" +
+                          std::to_string(static_cast<int>(hr)))
+                             .c_str());
+      break;
     }
-    return "";
-  }
 
-  std::string device_id = WideToUTF8(id);
-  CoTaskMemFree(id);
+    device_id = WideToUTF8(id);
+    CoTaskMemFree(id);
+  } while (false);
 
   if (com_initialized) {
     CoUninitialize();

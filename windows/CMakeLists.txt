@@ -80,6 +80,7 @@ target_include_directories(sora_sdk PRIVATE
   "${WEBRTC_INCLUDE_DIR}"
 )
 target_compile_options(sora_sdk PRIVATE "/utf-8")
+target_compile_definitions(sora_sdk PRIVATE "NDEBUG")
 set_target_properties(sora_sdk PROPERTIES
   MSVC_RUNTIME_LIBRARY "MultiThreaded")
 

@@ -170,10 +170,6 @@ class WebrtcClient {
     if (adm == nullptr) {
       throw StateError('AudioDeviceModule is not initialized.');
     }
-    final initRc = sharedLib.audioDeviceModuleInit(adm);
-    if (initRc != 0) {
-      throw StateError('AudioDeviceModule init failed: rc=$initRc');
-    }
     final count = sharedLib.audioDeviceModuleRecordingDevices(adm);
     if (count <= 0) {
       throw StateError('No audio input devices available.');
@@ -288,12 +284,17 @@ class WebrtcClient {
           );
         }
         _sharedAdmRef = adm;
+        final initRcMac = sharedLib.audioDeviceModuleInit(
+          sharedLib.audioDeviceModuleRefcountedGet(adm),
+        );
+        if (initRcMac != 0) {
+          throw StateError('AudioDeviceModule init failed: rc=$initRcMac');
+        }
       }
     } else if (Platform.isWindows) {
-      // Windows は Dart 側から SetRecordingDevice を呼べるよう、
-      // macOS と同様に _sharedAdmRef に参照を保持する
+      // Windows: setjmp/longjmp で abort を捕捉して安全に ADM を作成する
       final env = sharedLib.createEnvironment();
-      final adm = sharedLib.createAudioDeviceModule(
+      final adm = sharedLib.soraCreateAudioDeviceModule(
         env,
         sharedConsts.kPlatformDefaultAudio,
       );
@@ -306,6 +307,12 @@ class WebrtcClient {
           );
         }
         _sharedAdmRef = adm;
+        final initRcWin = sharedLib.audioDeviceModuleInit(
+          sharedLib.audioDeviceModuleRefcountedGet(adm),
+        );
+        if (initRcWin != 0) {
+          throw StateError('AudioDeviceModule init failed: rc=$initRcWin');
+        }
       }
     }
 

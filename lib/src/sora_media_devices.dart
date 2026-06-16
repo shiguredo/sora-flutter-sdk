@@ -160,7 +160,10 @@ abstract final class MediaDevices {
   static Future<LocalAudioTrack> createAudioTrack({
     String? audioDeviceId,
   }) async {
-    if (Platform.isMacOS || Platform.isIOS || audioDeviceId != null) {
+    if (Platform.isMacOS ||
+        Platform.isIOS ||
+        Platform.isWindows ||
+        audioDeviceId != null) {
       await media_device_platform.setAudioInputDevice(audioDeviceId);
     }
     final lib = WebrtcClient.sharedLib;

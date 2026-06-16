@@ -762,6 +762,19 @@ class LibWebrtcC {
         )
       >('webrtc_CreateAudioDeviceModule');
 
+  // abort を setjmp/longjmp で捕捉するラッパー
+  late final soraCreateAudioDeviceModule = _lib
+      .lookupFunction<
+        Pointer<WebrtcAudioDeviceModuleRefcounted> Function(
+          Pointer<WebrtcEnvironment>,
+          Int32,
+        ),
+        Pointer<WebrtcAudioDeviceModuleRefcounted> Function(
+          Pointer<WebrtcEnvironment>,
+          int,
+        )
+      >('sora_create_audio_device_module');
+
   late final createAndroidAudioDeviceModule = _lib
       .lookupFunction<
         Pointer<WebrtcAudioDeviceModuleRefcounted> Function(

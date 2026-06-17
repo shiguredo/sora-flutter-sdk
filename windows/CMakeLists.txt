@@ -120,6 +120,7 @@ if(DART_EXECUTABLE)
       windows_x86_64
     WORKING_DIRECTORY "${SORA_SDK_ROOT}/.."
   )
+  add_dependencies(${PLUGIN_NAME} fetch_native_deps_windows)
   add_dependencies(sora_sdk fetch_native_deps_windows)
 endif()
 

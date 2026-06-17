@@ -4,7 +4,11 @@ project(sora_sdk LANGUAGES C CXX)
 set(PLUGIN_NAME "sora_sdk_plugin")
 
 # ネイティブ依存 (0032) のインストール先パス (両 DLL で共用)
-set(LIBWEBRTC_C_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/libwebrtc-c")
+# CMAKE_CURRENT_SOURCE_DIR は add_subdirectory 経由でビルドすると
+# .plugin_symlinks 以下の symlink パスを指す場合があるため、
+# REALPATH で実際のパスを解決してから相対パスを計算する。
+get_filename_component(SORA_SDK_ROOT "${CMAKE_CURRENT_LIST_DIR}" REALPATH)
+set(LIBWEBRTC_C_DIR "${SORA_SDK_ROOT}/../third_party/libwebrtc-c")
 set(LIBWEBRTC_C_BUILD_DIR "${LIBWEBRTC_C_DIR}/build-windows_x86_64")
 set(WEBRTC_INCLUDE_DIR "${LIBWEBRTC_C_BUILD_DIR}/_deps/webrtc/include")
 set(LIBWEBRTC_C_LIB "${LIBWEBRTC_C_BUILD_DIR}/libwebrtc-c.lib")
@@ -112,9 +116,9 @@ find_program(DART_EXECUTABLE dart)
 if(DART_EXECUTABLE)
   add_custom_target(fetch_native_deps_windows
     COMMAND "${DART_EXECUTABLE}" run
-      "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/fetch_native_deps.dart"
+      "${SORA_SDK_ROOT}/../scripts/fetch_native_deps.dart"
       windows_x86_64
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    WORKING_DIRECTORY "${SORA_SDK_ROOT}/.."
   )
   add_dependencies(sora_sdk fetch_native_deps_windows)
 endif()

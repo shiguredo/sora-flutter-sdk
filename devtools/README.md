@@ -16,6 +16,33 @@ cp lib/configs/environment.example.dart lib/configs/environment.dart
 
 ## 起動方法
 
+### Windows
+
+Windows 向けの Release ビルドでは PDB ファイルを生成しており、Visual Studio のデバッガでアタッチしてデバッグできます。
+
+#### PDB 生成の設定
+
+`windows/CMakeLists.txt` および `devtools/windows/runner/CMakeLists.txt` で以下を設定しています:
+
+```cmake
+# コンパイル時にデバッグ情報を生成 (/Zi)
+target_compile_options(<target> PRIVATE "$<$<CONFIG:Release>:/Zi>")
+# リンク時に PDB を生成 (/DEBUG:FULL)
+target_link_options(<target> PRIVATE "$<$<CONFIG:Release>:/DEBUG:FULL>")
+```
+
+生成される PDB は以下のパスに出力されます:
+
+- `build\windows\x64\runner\Release\sora_devtools.pdb`
+- `build\windows\x64\plugins\sora_sdk\Release\sora_sdk_plugin.pdb`
+
+#### 制限事項
+
+libwebrtc-c と webrtc は Release ビルド (`/MT`) のみ提供されているため、Debug ビルドは利用できません。
+COM は WebRTC の要件に合わせ `COINIT_MULTITHREADED` で初期化されます。
+
+### 全プラットフォーム共通
+
 1. 依存パッケージを解決します
 
 ```bash

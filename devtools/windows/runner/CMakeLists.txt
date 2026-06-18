@@ -20,6 +20,13 @@ add_executable(${BINARY_NAME} WIN32
 # that need different build settings.
 apply_standard_settings(${BINARY_NAME})
 
+# ソースファイルが UTF-8 で保存されている場合、MSVC の Shift-JIS コードページで
+# C4819 警告 → /WX でエラーになる問題を回避する。
+target_compile_options(${BINARY_NAME} PRIVATE "/utf-8")
+# Release ビルドでも PDB を生成してデバッグ可能にする
+target_compile_options(${BINARY_NAME} PRIVATE "$<$<CONFIG:Release>:/Zi>")
+target_link_options(${BINARY_NAME} PRIVATE "$<$<CONFIG:Release>:/DEBUG:FULL>")
+
 # Add preprocessor definitions for the build version.
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION=\"${FLUTTER_VERSION}\"")
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_MAJOR=${FLUTTER_VERSION_MAJOR}")

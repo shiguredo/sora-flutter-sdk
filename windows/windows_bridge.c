@@ -87,6 +87,66 @@ static void on_connection_change(
     b->on_connection_change((int32_t)s, b->dart_user_data);
 }
 
+// 未実装コールバックの no-op スタブ。
+// 全コールバックは非 null が必須だが、現時点では未実装のため空実装を提供する。
+static void noop_OnStandardizedIceConnectionChange(
+    webrtc_PeerConnectionInterface_IceConnectionState new_state,
+    void* user_data) {
+  (void)new_state;
+  (void)user_data;
+}
+static void noop_OnIceCandidate(const struct webrtc_IceCandidate* candidate,
+                                void* user_data) {
+  (void)candidate;
+  (void)user_data;
+}
+static void noop_OnIceCandidateError(const char* address,
+                                     size_t address_len,
+                                     int port,
+                                     const char* url,
+                                     size_t url_len,
+                                     int error_code,
+                                     const char* error_text,
+                                     size_t error_text_len,
+                                     void* user_data) {
+  (void)address;
+  (void)address_len;
+  (void)port;
+  (void)url;
+  (void)url_len;
+  (void)error_code;
+  (void)error_text;
+  (void)error_text_len;
+  (void)user_data;
+}
+static void noop_OnTrack(
+    struct webrtc_RtpTransceiverInterface_refcounted* transceiver,
+    void* user_data) {
+  (void)transceiver;
+  (void)user_data;
+}
+static void noop_OnRemoveTrack(
+    struct webrtc_RtpReceiverInterface_refcounted* receiver,
+    void* user_data) {
+  (void)receiver;
+  (void)user_data;
+}
+static void noop_OnDataChannel(
+    struct webrtc_DataChannelInterface_refcounted* data_channel,
+    void* user_data) {
+  (void)data_channel;
+  (void)user_data;
+}
+static void noop_OnDestroy(void* user_data) {
+  (void)user_data;
+}
+static void noop_OnIceGatheringChange(
+    webrtc_PeerConnectionInterface_IceGatheringState new_state,
+    void* user_data) {
+  (void)new_state;
+  (void)user_data;
+}
+
 __declspec(dllexport) SoraObserverBridge* sora_observer_bridge_create(
     dart_on_state_fn a1,
     dart_on_state_fn a2,
@@ -112,7 +172,16 @@ __declspec(dllexport) SoraObserverBridge* sora_observer_bridge_create(
   b->dart_user_data = a9;
   struct webrtc_PeerConnectionObserver_cbs cbs;
   memset(&cbs, 0, sizeof(cbs));
+  cbs.OnStandardizedIceConnectionChange =
+      noop_OnStandardizedIceConnectionChange;
   cbs.OnConnectionChange = on_connection_change;
+  cbs.OnIceCandidate = noop_OnIceCandidate;
+  cbs.OnIceCandidateError = noop_OnIceCandidateError;
+  cbs.OnTrack = noop_OnTrack;
+  cbs.OnRemoveTrack = noop_OnRemoveTrack;
+  cbs.OnDataChannel = noop_OnDataChannel;
+  cbs.OnDestroy = noop_OnDestroy;
+  cbs.OnIceGatheringChange = noop_OnIceGatheringChange;
   b->observer = webrtc_PeerConnectionObserver_new(&cbs, b);
   return b;
 }

@@ -461,6 +461,120 @@ static void bridge_on_ice_gathering_change(
   observer_bridge_end_use(bridge);
 }
 
+/* --- DataChannel Observer 用の型・構造体・コールバック実装 --- */
+
+static const char* datachannel_state_to_string(
+    webrtc_DataChannelInterface_DataState state) {
+  if (state == webrtc_DataChannelInterface_DataState_kConnecting)
+    return "connecting";
+  if (state == webrtc_DataChannelInterface_DataState_kOpen)
+    return "open";
+  if (state == webrtc_DataChannelInterface_DataState_kClosing)
+    return "closing";
+  if (state == webrtc_DataChannelInterface_DataState_kClosed)
+    return "closed";
+  return "unknown";
+}
+
+typedef void (*dart_on_dc_state_fn)(void* user_data);
+typedef void (*dart_on_dc_message_fn)(const uint8_t* data_copy,
+                                      int32_t len,
+                                      int32_t is_binary,
+                                      void* user_data);
+
+typedef struct DcBridgeContext {
+  SoraObserverBridge* bridge;
+  struct webrtc_DataChannelInterface* dc;
+  char* label;
+  struct webrtc_DataChannelObserver* observer;
+  dart_on_dc_state_fn on_state_change;
+  dart_on_dc_message_fn on_message;
+  void* dart_user_data;
+
+  /* インフライトコールバックの同期機構 */
+  CRITICAL_SECTION lock;
+  CONDITION_VARIABLE inflight_cond;
+  int disposed;
+  int inflight_count;
+} DcBridgeContext;
+
+/* DcBridgeContext のコールバックインフライトを開始する。
+   破棄済みの場合は 0 を返す。 */
+static int dc_bridge_begin_use(DcBridgeContext* ctx) {
+  EnterCriticalSection(&ctx->lock);
+  if (ctx->disposed) {
+    LeaveCriticalSection(&ctx->lock);
+    return 0;
+  }
+  ctx->inflight_count++;
+  LeaveCriticalSection(&ctx->lock);
+  return 1;
+}
+
+/* DcBridgeContext のコールバックインフライトを終了する。 */
+static void dc_bridge_end_use(DcBridgeContext* ctx) {
+  EnterCriticalSection(&ctx->lock);
+  ctx->inflight_count--;
+  if (ctx->disposed && ctx->inflight_count == 0) {
+    WakeConditionVariable(&ctx->inflight_cond);
+  }
+  LeaveCriticalSection(&ctx->lock);
+}
+
+static void bridge_dc_on_state_change(void* user_data) {
+  DcBridgeContext* ctx = (DcBridgeContext*)user_data;
+  if (!dc_bridge_begin_use(ctx))
+    return;
+  webrtc_DataChannelInterface_DataState state =
+      webrtc_DataChannelInterface_state(ctx->dc);
+  char buf[128];
+  snprintf(buf, sizeof(buf), "native: datachannel(%s) state=%s",
+           ctx->label != NULL ? ctx->label : "(unknown)",
+           datachannel_state_to_string(state));
+  if (ctx->bridge) {
+    bridge_emit_debug(ctx->bridge, buf);
+  }
+  if (ctx->on_state_change) {
+    ctx->on_state_change(ctx->dart_user_data);
+  }
+  dc_bridge_end_use(ctx);
+}
+
+static void bridge_dc_on_message(const uint8_t* data,
+                                 size_t len,
+                                 int is_binary,
+                                 void* user_data) {
+  DcBridgeContext* ctx = (DcBridgeContext*)user_data;
+  if (!dc_bridge_begin_use(ctx))
+    return;
+  if (ctx->on_message == NULL) {
+    dc_bridge_end_use(ctx);
+    return;
+  }
+
+  if (data == NULL || len == 0) {
+    ctx->on_message(NULL, 0, is_binary ? 1 : 0, ctx->dart_user_data);
+    dc_bridge_end_use(ctx);
+    return;
+  }
+
+  uint8_t* data_copy = (uint8_t*)malloc(len);
+  if (data_copy == NULL) {
+    char buf[192];
+    snprintf(buf, sizeof(buf),
+             "dc_on_message: malloc failed; dropped message len=%zu", len);
+    if (ctx->bridge) {
+      bridge_emit_debug(ctx->bridge, buf);
+    }
+    dc_bridge_end_use(ctx);
+    return;
+  }
+  memcpy(data_copy, data, len);
+  ctx->on_message(data_copy, (int32_t)len, is_binary ? 1 : 0,
+                  ctx->dart_user_data);
+  dc_bridge_end_use(ctx);
+}
+
 __declspec(dllexport) SoraObserverBridge* sora_observer_bridge_create(
     dart_on_state_fn on_connection_change,
     dart_on_state_fn on_ice_connection_change,
@@ -539,22 +653,78 @@ __declspec(dllexport) void sora_observer_bridge_destroy(
   free(bridge);
 }
 
-__declspec(dllexport) void* sora_observer_bridge_setup_dc(void* a,
-                                                          void* b,
-                                                          void* c,
-                                                          void* d,
-                                                          void* e) {
-  (void)a;
-  (void)b;
-  (void)c;
-  (void)d;
-  (void)e;
-  return NULL;
+__declspec(dllexport) DcBridgeContext* sora_observer_bridge_setup_dc(
+    SoraObserverBridge* bridge,
+    struct webrtc_DataChannelInterface* dc,
+    dart_on_dc_state_fn on_state_change,
+    dart_on_dc_message_fn on_message,
+    void* dart_user_data) {
+  DcBridgeContext* ctx = (DcBridgeContext*)calloc(1, sizeof(DcBridgeContext));
+  if (ctx == NULL)
+    return NULL;
+  InitializeCriticalSection(&ctx->lock);
+  InitializeConditionVariable(&ctx->inflight_cond);
+  ctx->bridge = bridge;
+  ctx->dc = dc;
+  ctx->on_state_change = on_state_change;
+  ctx->on_message = on_message;
+  ctx->dart_user_data = dart_user_data;
+  struct std_string_unique* label = webrtc_DataChannelInterface_label(dc);
+  const char* label_cstr = std_string_c_str(std_string_unique_get(label));
+  ctx->label = strdup_safe(label_cstr);
+  std_string_unique_delete(label);
+
+  struct webrtc_DataChannelObserver_cbs cbs;
+  memset(&cbs, 0, sizeof(cbs));
+  cbs.OnStateChange = bridge_dc_on_state_change;
+  cbs.OnMessage = bridge_dc_on_message;
+  cbs.OnDestroy = noop_destroy;
+  struct webrtc_DataChannelObserver* observer =
+      webrtc_DataChannelObserver_new(&cbs, ctx);
+  if (observer == NULL) {
+    free(ctx->label);
+    DeleteCriticalSection(&ctx->lock);
+    free(ctx);
+    return NULL;
+  }
+  webrtc_DataChannelInterface_RegisterObserver(dc, observer);
+  ctx->observer = observer;
+
+  return ctx;
 }
 
-__declspec(dllexport) void sora_observer_bridge_destroy_dc(void* a, void* b) {
-  (void)a;
-  (void)b;
+__declspec(dllexport) void sora_observer_bridge_destroy_dc(
+    DcBridgeContext* ctx,
+    struct webrtc_DataChannelInterface* dc) {
+  if (ctx == NULL)
+    return;
+
+  /* disposed を立てて新規コールバックを抑止してから、
+       lock 外で UnregisterObserver を呼ぶ。
+       UnregisterObserver が同期的に callback を流す実装でも
+       begin_use が disposed を検出して return するため安全。 */
+  EnterCriticalSection(&ctx->lock);
+  ctx->disposed = 1;
+  LeaveCriticalSection(&ctx->lock);
+
+  if (dc != NULL && ctx->observer != NULL) {
+    webrtc_DataChannelInterface_UnregisterObserver(dc);
+  }
+
+  /* インフライトのコールバック完了を待つ */
+  EnterCriticalSection(&ctx->lock);
+  while (ctx->inflight_count > 0) {
+    SleepConditionVariableCS(&ctx->inflight_cond, &ctx->lock, INFINITE);
+  }
+  LeaveCriticalSection(&ctx->lock);
+
+  if (ctx->observer != NULL) {
+    webrtc_DataChannelObserver_delete(ctx->observer);
+  }
+
+  DeleteCriticalSection(&ctx->lock);
+  free(ctx->label);
+  free(ctx);
 }
 
 // --- video frame ---

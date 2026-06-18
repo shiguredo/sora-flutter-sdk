@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-17
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-06-18
 - Model: DeepSeek V4 Pro
 - Branch: feature/add-devtools-windows-support
 - Polished: 2026-06-17
@@ -150,7 +150,7 @@ devtools の widget test は現状レイアウト overflow で失敗すること
     - @{実装者のユーザー名}
   ```
 
-## 解決方法
+## 実装計画
 
 1. `devtools/` で `flutter create --platforms=windows --project-name sora_devtools .` を実行し、Windows ランナーを生成する。実行後 `git diff` で意図しないファイル変更（特に `pubspec.yaml`）が無いことを確認する
 2. `devtools/windows/CMakeLists.txt` を e2e_test_app の同等ファイルを参考に修正する:
@@ -176,5 +176,25 @@ devtools の widget test は現状レイアウト overflow で失敗すること
    - devtools の Dart analyze（`working-directory: devtools`）
    - devtools の Windows ビルド（`working-directory: devtools`、`flutter build windows --release --no-pub`）
    - artifact upload（`name: devtools-windows`、`path: devtools/build/windows/x64/runner/Release/`）
-   - devtools の `flutter test` は build-android と同様に実行しない
+    - devtools の `flutter test` は build-android と同様に実行しない
 9. CHANGES.md を新規作成し（`shiguredo-changelog` スキル参照）、`## develop` 配下に `### misc` セクションと `[ADD]` エントリを追加する。本 issue のエントリのみを追加し、過去の closed issue のエントリを遡及追加する必要はない
+
+## 解決方法
+
+`devtools/` に Windows ランナーを生成し、以下の対応を行った:
+
+- `devtools/windows/` ディレクトリの追加 (`flutter create --platforms=windows`)
+- `devtools/windows/CMakeLists.txt` の修正（プロジェクト名、`_ITERATOR_DEBUG_LEVEL=0`、`_HAS_EXCEPTIONS=0`、`/MT`、`/utf-8`）
+- `devtools/windows/runner/main.cpp` の COM 初期化を `COINIT_MULTITHREADED` に変更（WebRTC 要件）
+- `devtools/windows/runner/CMakeLists.txt` に `/utf-8` と PDB 生成 (`/Zi`、`/DEBUG:FULL`) を追加
+- `windows/windows_bridge.c` の observer コールバックに noop スタブを追加（起動時クラッシュ回避）
+- `windows/CMakeLists.txt` に `/wd4115`、PDB 生成を追加
+- `devtools/README.md` に Windows ビルド設定のドキュメントを追加
+- `devtools/lib/configs/environment.example.dart` から `environment.dart` を生成
+
+未対応の残件は後続 issue で対応する:
+
+- CI への devtools Windows ビルド追加
+- `prek.toml` の `dart-analyze-devtools` フックの Windows 対応
+- External Video Track の Windows 無効化
+- `CHANGES.md` の新規作成

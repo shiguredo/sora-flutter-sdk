@@ -40,6 +40,9 @@ set_target_properties(${PLUGIN_NAME} PROPERTIES
 # ソースファイルが UTF-8 で保存されている場合、MSVC の Shift-JIS コードページで
 # C4819 警告 → /WX でエラーになる問題を回避する。
 target_compile_options(${PLUGIN_NAME} PRIVATE "/utf-8")
+# libwebrtc-c のヘッダは不完全型を仮引数リストで使用しているため C4115 が発生する。
+# サードパーティヘッダのため警告を抑制する。
+target_compile_options(${PLUGIN_NAME} PRIVATE "/wd4115")
 target_compile_definitions(${PLUGIN_NAME} PRIVATE FLUTTER_PLUGIN_IMPL)
 target_include_directories(${PLUGIN_NAME} INTERFACE
   "${CMAKE_CURRENT_SOURCE_DIR}/include")

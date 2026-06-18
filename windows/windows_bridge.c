@@ -49,14 +49,14 @@ BOOL WINAPI DllMain(HINSTANCE dll, DWORD reason, LPVOID rsv) {
 struct webrtc_AudioDeviceModule_refcounted;
 struct webrtc_Environment;
 
+extern struct webrtc_AudioDeviceModule_refcounted*
+webrtc_CreateAudioDeviceModule(struct webrtc_Environment* env, int type);
+
 __declspec(dllexport) struct webrtc_AudioDeviceModule_refcounted*
 sora_create_audio_device_module(struct webrtc_Environment* env, int type) {
   (void)type;
   // abort を setjmp/longjmp で捕捉して NULL を返す
   if (setjmp(g_abort_jmp) == 0) {
-    // webrtc-c API: webrtc_CreateAudioDeviceModule(env, type)
-    extern struct webrtc_AudioDeviceModule_refcounted*
-    webrtc_CreateAudioDeviceModule(struct webrtc_Environment * env, int type);
     return webrtc_CreateAudioDeviceModule(env, type);
   }
   return NULL;
@@ -162,10 +162,13 @@ __declspec(dllexport) struct webrtc_VideoFrame_unique* sora_video_frame_create(
   struct webrtc_VideoFrameBuilder_unique* b = webrtc_VideoFrameBuilder_new(f);
   if (!b)
     return NULL;
-  webrtc_VideoFrameBuilder_set_rotation(b, rotation);
-  webrtc_VideoFrameBuilder_set_timestamp_us(b, timestamp_us);
-  webrtc_VideoFrameBuilder_set_timestamp_rtp(b, timestamp_rtp);
-  struct webrtc_VideoFrame_unique* frame = webrtc_VideoFrameBuilder_build(b);
+  struct webrtc_VideoFrameBuilder* builder =
+      webrtc_VideoFrameBuilder_unique_get(b);
+  webrtc_VideoFrameBuilder_set_rotation(builder, rotation);
+  webrtc_VideoFrameBuilder_set_timestamp_us(builder, timestamp_us);
+  webrtc_VideoFrameBuilder_set_timestamp_rtp(builder, timestamp_rtp);
+  struct webrtc_VideoFrame_unique* frame =
+      webrtc_VideoFrameBuilder_build(builder);
   webrtc_VideoFrameBuilder_unique_delete(b);
   return frame;
 }

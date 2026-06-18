@@ -389,6 +389,10 @@ class _DevToolsPageState extends State<DevToolsPage>
     );
     // external video track 用のカメラ管理。
     _cameraManager = DevToolsExternalCameraManager(onLog: _appendLog);
+    // Windows では External Video Track の動作が未検証のため無効化する
+    if (Platform.isWindows) {
+      _useExternalVideoTrack = false;
+    }
     // シグナリング URL 入力欄の TextEditingController。
     _signalingUrlController = TextEditingController(
       text: Environment.urls.isNotEmpty ? Environment.urls.first : '',
@@ -1550,7 +1554,7 @@ class _DevToolsPageState extends State<DevToolsPage>
                   'pub.dev の camera package 利用で映像を配信する検証用機能です',
                 ),
                 value: _useExternalVideoTrack,
-                onChanged: _busy || _isConnected
+                onChanged: _busy || _isConnected || Platform.isWindows
                     ? null
                     : (value) {
                         _mutateView(() {

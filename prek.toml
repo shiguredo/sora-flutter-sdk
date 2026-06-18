@@ -60,7 +60,7 @@ files = "^devtools/(lib|test)/.*\\.dart$"
 id = "dart-analyze-devtools"
 name = "dart analyze (devtools)"
 language = "system"
-entry = "bash -euo pipefail -c 'cp devtools/lib/configs/environment.example.dart devtools/lib/configs/environment.dart && trap \"rm -f devtools/lib/configs/environment.dart\" EXIT && cd devtools && dart analyze --fatal-infos lib test'"
+entry = "dart run scripts/copy_env_and_analyze_devtools.dart"
 pass_filenames = false
 files = "^devtools/(lib|test)/.*\\.dart$"
 

@@ -435,7 +435,7 @@ jobs:
   build-windows:
     name: Build Windows
     runs-on: windows-2022
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash
@@ -532,6 +532,42 @@ jobs:
         run: |
           set -euo pipefail
           flutter pub get
+
+      - name: Prepare devtools environment file
+        run: |
+          set -euo pipefail
+          # devtools は environment.dart を前提にしているため、CI では example から生成する。
+          cp devtools/lib/configs/environment.example.dart devtools/lib/configs/environment.dart
+
+      - name: Resolve devtools dependencies
+        working-directory: devtools
+        run: |
+          set -euo pipefail
+          flutter pub get
+
+      - name: Run devtools Dart format check
+        run: |
+          set -euo pipefail
+          dart format --output=none --set-exit-if-changed devtools/lib devtools/test
+
+      - name: Run devtools Dart analyze
+        working-directory: devtools
+        run: |
+          set -euo pipefail
+          dart analyze --fatal-infos lib test
+
+      - name: Build devtools Windows app
+        working-directory: devtools
+        run: |
+          set -euo pipefail
+          flutter build windows --release --no-pub
+
+      - name: Upload devtools Windows artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: devtools-windows
+          path: devtools/build/windows/x64/runner/Release/
+          if-no-files-found: error
 
       - name: Precache Flutter Windows artifacts
         run: |

@@ -531,7 +531,9 @@ static void bridge_dc_on_state_change(void* user_data) {
   snprintf(buf, sizeof(buf), "native: datachannel(%s) state=%s",
            ctx->label != NULL ? ctx->label : "(unknown)",
            datachannel_state_to_string(state));
-  bridge_emit_debug(ctx->bridge, buf);
+  if (ctx->bridge) {
+    bridge_emit_debug(ctx->bridge, buf);
+  }
   if (ctx->on_state_change) {
     ctx->on_state_change(ctx->dart_user_data);
   }
@@ -561,7 +563,9 @@ static void bridge_dc_on_message(const uint8_t* data,
     char buf[192];
     snprintf(buf, sizeof(buf),
              "dc_on_message: malloc failed; dropped message len=%zu", len);
-    bridge_emit_debug(ctx->bridge, buf);
+    if (ctx->bridge) {
+      bridge_emit_debug(ctx->bridge, buf);
+    }
     dc_bridge_end_use(ctx);
     return;
   }
@@ -677,6 +681,12 @@ __declspec(dllexport) DcBridgeContext* sora_observer_bridge_setup_dc(
   cbs.OnDestroy = noop_destroy;
   struct webrtc_DataChannelObserver* observer =
       webrtc_DataChannelObserver_new(&cbs, ctx);
+  if (observer == NULL) {
+    free(ctx->label);
+    DeleteCriticalSection(&ctx->lock);
+    free(ctx);
+    return NULL;
+  }
   webrtc_DataChannelInterface_RegisterObserver(dc, observer);
   ctx->observer = observer;
 

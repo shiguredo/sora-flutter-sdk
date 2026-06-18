@@ -22,7 +22,8 @@ DynamicLibrary loadLibWebrtcC() {
     return DynamicLibrary.open('libsora_sdk.so');
   }
   if (Platform.isWindows) {
-    return DynamicLibrary.open('sora_sdk.dll');
+    // Flutter Windows プラグインの出力 DLL (libwebrtc-c / ブリッジを同梱)
+    return DynamicLibrary.open('sora_sdk_plugin.dll');
   }
   throw UnsupportedError('Unsupported platform: ${Platform.operatingSystem}');
 }

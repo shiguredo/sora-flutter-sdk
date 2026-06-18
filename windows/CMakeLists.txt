@@ -3,7 +3,7 @@ project(sora_sdk LANGUAGES C CXX)
 
 set(PLUGIN_NAME "sora_sdk_plugin")
 
-# ネイティブ依存 (0032) のインストール先パス (両 DLL で共用)
+# ネイティブ依存 (0032) のインストール先パス
 # CMAKE_CURRENT_SOURCE_DIR は add_subdirectory 経由でビルドすると
 # .plugin_symlinks 以下の symlink パスを指す場合があるため、
 # REALPATH で実際のパスを解決してから相対パスを計算する。
@@ -14,7 +14,10 @@ set(WEBRTC_INCLUDE_DIR "${LIBWEBRTC_C_BUILD_DIR}/_deps/webrtc/include")
 set(LIBWEBRTC_C_LIB "${LIBWEBRTC_C_BUILD_DIR}/libwebrtc-c.lib")
 set(WEBRTC_LIB "${LIBWEBRTC_C_BUILD_DIR}/_deps/webrtc/lib/webrtc.lib")
 
-# === Flutter プラグイン DLL (MethodChannel 処理) ===
+# === sora_sdk_plugin.dll (MethodChannel + dart:ffi 統合) ===
+# 他プラットフォーム (macOS/iOS/Linux/Android) と同様に、
+# MethodChannel プラグインコードと dart:ffi C ブリッジを
+# 単一の共有ライブラリに統合する。
 
 add_library(${PLUGIN_NAME} SHARED
   "include/sora_sdk/sora_sdk_plugin_c_api.h"
@@ -27,9 +30,8 @@ add_library(${PLUGIN_NAME} SHARED
   "sora_camera_capturer.h"
   "windows_rendering_sink.h"
   "windows_rendering_sink.cpp"
+  "windows_bridge.c"
 )
-
-
 
 apply_standard_settings(${PLUGIN_NAME})
 set_target_properties(${PLUGIN_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
@@ -45,6 +47,9 @@ target_include_directories(${PLUGIN_NAME} PRIVATE
   "${LIBWEBRTC_C_DIR}/include"
   "${WEBRTC_INCLUDE_DIR}"
 )
+# libwebrtc-c は dllexport 済みの C API シンボルを持つ静的ライブラリ。
+# WHOLEARCHIVE ですべてのオブジェクトファイルを強制リンクし、
+# dart:ffi から lookup される全シンボルを DLL のエクスポートテーブルに含める。
 target_link_libraries(${PLUGIN_NAME} PRIVATE
   flutter
   flutter_wrapper_plugin
@@ -73,44 +78,6 @@ target_link_options(${PLUGIN_NAME} PRIVATE
   "/WHOLEARCHIVE:${LIBWEBRTC_C_LIB}"
 )
 
-# === dart:ffi C API DLL (sora_sdk.dll) ===
-
-add_library(sora_sdk SHARED
-  "windows_bridge.c"
-)
-
-target_include_directories(sora_sdk PRIVATE
-  "${LIBWEBRTC_C_DIR}/include"
-  "${WEBRTC_INCLUDE_DIR}"
-)
-target_compile_options(sora_sdk PRIVATE "/utf-8")
-target_compile_definitions(sora_sdk PRIVATE "NDEBUG")
-set_target_properties(sora_sdk PROPERTIES
-  MSVC_RUNTIME_LIBRARY "MultiThreaded")
-
-# libwebrtc-c は dllexport 済みの C API シンボルを持つ静的ライブラリ。
-# WHOLEARCHIVE ですべてのオブジェクトファイルを強制リンクし、
-# dart:ffi から lookup される全シンボルを DLL のエクスポートテーブルに含める。
-target_link_libraries(sora_sdk PRIVATE
-  "${LIBWEBRTC_C_LIB}"
-  "${WEBRTC_LIB}"
-  # WebRTC が要求する Windows システムライブラリ
-  secur32.lib
-  winmm.lib
-  dmoguids.lib
-  msdmo.lib
-  strmiids.lib
-  iphlpapi.lib
-  d3d11.lib
-  dxgi.lib
-  dwmapi.lib
-  shcore.lib
-  wmcodecdspuuid.lib
-)
-target_link_options(sora_sdk PRIVATE
-  "/WHOLEARCHIVE:${LIBWEBRTC_C_LIB}"
-)
-
 # ビルド時にネイティブ依存を自動取得する
 find_program(DART_EXECUTABLE dart)
 if(DART_EXECUTABLE)
@@ -121,11 +88,11 @@ if(DART_EXECUTABLE)
     WORKING_DIRECTORY "${SORA_SDK_ROOT}/.."
   )
   add_dependencies(${PLUGIN_NAME} fetch_native_deps_windows)
-  add_dependencies(sora_sdk fetch_native_deps_windows)
 endif()
 
-# sora_sdk.dll をバンドル対象に含める (dart:ffi の DynamicLibrary.open で読み込めるようにする)
+# 他プラットフォームと同様に dart:ffi コードはプラグイン DLL に統合済みのため、
+# 追加のバンドルライブラリは不要。
 set(sora_sdk_bundled_libraries
-  "$<TARGET_FILE:sora_sdk>"
+  ""
   PARENT_SCOPE
 )

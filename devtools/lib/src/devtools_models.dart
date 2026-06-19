@@ -134,8 +134,11 @@ class DevToolsPageNotifier extends ChangeNotifier {
   DevToolsLogTab selectedLogTab = DevToolsLogTab.app;
   // RPC 実行中フラグを保持する。
   bool rpcBusy = false;
+
   // ローカルプレビューの水平反転を有効にするかどうかを保持する。
-  bool localPreviewMirror = false;
+  //
+  // デフォルト true: 一般的なカメラプレビューと同様に鏡表示にする。
+  bool localPreviewMirror = true;
   // 接続中 audio track の enabled 状態を保持する。
   bool audioEnabled = true;
   // 接続中 video track の enabled 状態を保持する。

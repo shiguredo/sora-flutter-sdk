@@ -164,7 +164,13 @@ abstract final class MediaDevices {
         Platform.isIOS ||
         Platform.isWindows ||
         audioDeviceId != null) {
-      await media_device_platform.setAudioInputDevice(audioDeviceId);
+      // オーディオ入力デバイスが存在しない環境（CI 等）では
+      // setAudioInputDevice が失敗する可能性があるが、ネイティブの
+      // audio track 作成自体はデバイスがなくても成功するため、
+      // エラーは無視して続行する。
+      try {
+        await media_device_platform.setAudioInputDevice(audioDeviceId);
+      } catch (_) {}
     }
     final lib = WebrtcClient.sharedLib;
     final factory = WebrtcClient.sharedFactory;

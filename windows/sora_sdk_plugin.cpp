@@ -111,18 +111,24 @@ void SoraSdkPlugin::HandleCreateClient(
   auto wrapper = std::make_unique<ClientWrapper>();
   wrapper->client_id = client_id;
   wrapper->event_channel_name = event_channel_name;
+  wrapper->messenger = messenger_;
 
-  // EventChannel の listen / cancel に応答するハンドラを登録する。
-  // 後続 issue でカメラ・音声・レンダリングのイベントを送信するための基盤。
-  // flutter::EventChannel は Windows C++ ラッパーに存在しないため、
-  // BinaryMessenger の生のメッセージハンドラで代用する。
+  // EventChannel の listen / cancel に応答し、イベント送信の基盤を提供する。
+  // BinaryMessenger の生のメッセージハンドラで listen/cancel を処理し、
+  // sendEvent() 経由で Dart 側へイベントを送出する。
+  ClientWrapper* wrapper_ptr = wrapper.get();
   messenger_->SetMessageHandler(
       event_channel_name,
-      [](const uint8_t* data, size_t size, flutter::BinaryReply reply) {
+      [wrapper_ptr](const uint8_t* data, size_t size,
+                    flutter::BinaryReply reply) {
         auto& codec = flutter::StandardMethodCodec::GetInstance();
         auto call = codec.DecodeMethodCall(data, size);
-        if (call->method_name() == "listen" ||
-            call->method_name() == "cancel") {
+        if (call->method_name() == "listen") {
+          wrapper_ptr->event_sink_active.store(true);
+          auto response = codec.EncodeSuccessEnvelope(nullptr);
+          reply(response->data(), response->size());
+        } else if (call->method_name() == "cancel") {
+          wrapper_ptr->event_sink_active.store(false);
           auto response = codec.EncodeSuccessEnvelope(nullptr);
           reply(response->data(), response->size());
         } else {
@@ -171,6 +177,18 @@ void SoraSdkPlugin::HandleDisposeClient(
                                 nullptr);
   clients_.erase(wrapper_it);
   result->Success();
+}
+
+void SoraSdkPlugin::ClientWrapper::sendEvent(flutter::EncodableMap event) {
+  // 購読開始前のイベントは破棄する
+  if (!event_sink_active.load()) {
+    return;
+  }
+  auto& codec = flutter::StandardMethodCodec::GetInstance();
+  flutter::EncodableValue result(event);
+  auto encoded = codec.EncodeSuccessEnvelope(&result);
+  messenger->Send(event_channel_name, encoded->data(), encoded->size(),
+                  nullptr);
 }
 
 int64_t SoraSdkPlugin::GetIntValue(const flutter::EncodableValue& value,

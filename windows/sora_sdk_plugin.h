@@ -6,6 +6,7 @@
 #include <flutter/plugin_registrar_windows.h>
 #include <flutter/texture_registrar.h>
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -30,6 +31,9 @@ class SoraSdkPlugin : public flutter::Plugin {
   struct ClientWrapper {
     int64_t client_id;
     std::string event_channel_name;
+    flutter::BinaryMessenger* messenger;
+    std::atomic<bool> event_sink_active{false};
+    void sendEvent(flutter::EncodableMap event);
   };
 
   void HandleMethodCall(

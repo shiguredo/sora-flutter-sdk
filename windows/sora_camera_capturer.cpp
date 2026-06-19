@@ -2,8 +2,8 @@
 
 #include <flutter/standard_method_codec.h>
 
-#include <algorithm>
 #include <mferror.h>
+#include <set>
 
 // Media Foundation API の DWORD 引数に符号付き定数が使われる箇所で
 // C4245 (signed/unsigned mismatch) が発生するため抑制する。
@@ -140,9 +140,7 @@ flutter::EncodableList SoraCameraCapturer::GetFormats(
     IMFSourceReader* reader = nullptr;
     hr = MFCreateSourceReaderFromMediaSource(media_source, nullptr, &reader);
     if (SUCCEEDED(hr)) {
-      bool seen_640x480 = false;
-      bool seen_1280x720 = false;
-      bool seen_1920x1080 = false;
+      std::set<std::pair<UINT32, UINT32>> seen_resolutions;
 
       for (DWORD type_index = 0;; ++type_index) {
         IMFMediaType* media_type = nullptr;
@@ -168,31 +166,22 @@ flutter::EncodableList SoraCameraCapturer::GetFormats(
           fps_den = 1;
         }
 
-        // 重複除去: 同じ解像度は最大 FPS のみ保持する
-        bool duplicate = false;
-        if (width == 640 && height == 480) {
-          if (seen_640x480) duplicate = true;
-          seen_640x480 = true;
-        } else if (width == 1280 && height == 720) {
-          if (seen_1280x720) duplicate = true;
-          seen_1280x720 = true;
-        } else if (width == 1920 && height == 1080) {
-          if (seen_1920x1080) duplicate = true;
-          seen_1920x1080 = true;
+        auto inserted = seen_resolutions.emplace(width, height).second;
+        if (!inserted) {
+          media_type->Release();
+          continue;
         }
 
-        if (!duplicate) {
-          flutter::EncodableMap format_map;
-          format_map[flutter::EncodableValue("width")] =
-              flutter::EncodableValue(static_cast<int>(width));
-          format_map[flutter::EncodableValue("height")] =
-              flutter::EncodableValue(static_cast<int>(height));
-          double max_fps =
-              static_cast<double>(fps_num) / static_cast<double>(fps_den);
-          format_map[flutter::EncodableValue("maxFrameRate")] =
-              flutter::EncodableValue(max_fps);
-          result.push_back(flutter::EncodableValue(format_map));
-        }
+        flutter::EncodableMap format_map;
+        format_map[flutter::EncodableValue("width")] =
+            flutter::EncodableValue(static_cast<int>(width));
+        format_map[flutter::EncodableValue("height")] =
+            flutter::EncodableValue(static_cast<int>(height));
+        double max_fps =
+            static_cast<double>(fps_num) / static_cast<double>(fps_den);
+        format_map[flutter::EncodableValue("maxFrameRate")] =
+            flutter::EncodableValue(max_fps);
+        result.push_back(flutter::EncodableValue(format_map));
 
         media_type->Release();
       }

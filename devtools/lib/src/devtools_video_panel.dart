@@ -17,6 +17,7 @@ class DevToolsVideoPanel extends StatelessWidget {
     required this.showsLocalPreview,
     required this.needsCamera,
     required this.localTextureId,
+    required this.localPreviewMirror,
     required this.remoteVideos,
     required this.remoteAudios,
     required this.remoteClients,
@@ -27,6 +28,7 @@ class DevToolsVideoPanel extends StatelessWidget {
   final bool showsLocalPreview;
   final bool needsCamera;
   final int? localTextureId;
+  final bool localPreviewMirror;
   final List<RemoteMediaStreamTrack> remoteVideos;
   final List<RemoteMediaStreamTrack> remoteAudios;
   final List<DevToolsRemoteClientInfo> remoteClients;
@@ -334,10 +336,9 @@ class DevToolsVideoPanel extends StatelessWidget {
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        // ローカルプレビューは一般的なカメラ preview と同様に鏡表示にする
                         SoraLocalVideoWidget(
                           textureId: localTextureId,
-                          mirror: true,
+                          mirror: localPreviewMirror,
                         ),
                         Positioned(
                           top: 8,

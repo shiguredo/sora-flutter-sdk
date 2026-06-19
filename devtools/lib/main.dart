@@ -175,6 +175,11 @@ class _DevToolsPageState extends State<DevToolsPage>
   set _selectedLogTab(DevToolsLogTab value) =>
       _pageNotifier.selectedLogTab = value;
 
+  // ローカルプレビューの水平反転設定。
+  bool get _localPreviewMirror => _pageNotifier.localPreviewMirror;
+  set _localPreviewMirror(bool value) =>
+      _pageNotifier.localPreviewMirror = value;
+
   // 接続中 audio track の enabled 状態を保持する。
   bool get _audioEnabled => _pageNotifier.audioEnabled;
   set _audioEnabled(bool value) => _pageNotifier.audioEnabled = value;
@@ -1396,6 +1401,7 @@ class _DevToolsPageState extends State<DevToolsPage>
       showsLocalPreview: _showsLocalPreview,
       needsCamera: _needsCamera,
       localTextureId: _localTextureId,
+      localPreviewMirror: _localPreviewMirror,
       remoteVideos: _remoteVideos,
       remoteAudios: _remoteAudios,
       remoteClients: _remoteClients,
@@ -1642,6 +1648,29 @@ class _DevToolsPageState extends State<DevToolsPage>
                           onChanged: _canToggleVideoEnabled
                               ? (_) => _toggleVideoEnabled()
                               : null,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 200,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Flexible(
+                          child: Text(
+                            'Mirror Preview',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Switch(
+                          value: _localPreviewMirror,
+                          onChanged: (value) {
+                            _mutateView(() {
+                              _localPreviewMirror = value;
+                            });
+                          },
                         ),
                       ],
                     ),

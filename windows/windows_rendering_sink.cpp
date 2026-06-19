@@ -9,6 +9,15 @@
 #include <webrtc_c/api/video/video_sink_interface.h>
 #include <webrtc_c/libyuv.h>
 
+// libyuv の FOURCC_ABGR 値。
+// webrtc_c/libyuv.h は FOURCC_ARGB / FOURCC_BGRA しかエクスポートしていないため、
+// FOURCC_ABGR を直接定義する。
+// ConvertFromI420 の内部では FOURCC_ABGR がサポートされており、
+// little-endian でメモリ上 [R][G][B][A] (RGBA) バイト順で出力される。
+static constexpr uint32_t kLibyuvFourccAbgr =
+    (uint32_t)('A') | ((uint32_t)('B') << 8) | ((uint32_t)('G') << 16) |
+    ((uint32_t)('R') << 24);
+
 // I420 バッファを指定角度だけ回転させた新規バッファを返す。
 // rotation が 90/180/270 以外の場合は NULL を返す。
 // macOS apple_bridge.c の create_rotated_i420_buffer と同一ロジック。
@@ -221,10 +230,11 @@ bool WindowsRenderingSinkCopyPixelBuffer(WindowsRenderingSink* sink,
     out_buffer.resize(buffer_size);
   }
 
-  // I420 → BGRA (ARGB fourcc) 変換。
-  // libyuv_FOURCC_ARGB は little-endian 環境では BGRA バイト順
-  // (B, G, R, A) で出力される。既存の sora_camera_capturer.cpp と
-  // macOS apple_bridge.c も同じ FOURCC を使用している。
+  // I420 → RGBA 変換。
+  // Flutter Windows の PixelBufferTexture は GL_RGBA を期待するため、
+  // FOURCC_ABGR (little-endian でメモリ上 [R][G][B][A] バイト順) を使用する。
+  // (Apple の CVPixelBuffer は kCVPixelFormatType_32BGRA (BGRA バイト順) のため、
+  //  apple_bridge.c では libyuv_FOURCC_ARGB が正しい。)
   if (libyuv_ConvertFromI420(webrtc_I420Buffer_MutableDataY(sink->i420_buffer),
                              webrtc_I420Buffer_StrideY(sink->i420_buffer),
                              webrtc_I420Buffer_MutableDataU(sink->i420_buffer),
@@ -232,7 +242,7 @@ bool WindowsRenderingSinkCopyPixelBuffer(WindowsRenderingSink* sink,
                              webrtc_I420Buffer_MutableDataV(sink->i420_buffer),
                              webrtc_I420Buffer_StrideV(sink->i420_buffer),
                              out_buffer.data(), w * 4, w, h,
-                             libyuv_FOURCC_ARGB) != 0) {
+                             kLibyuvFourccAbgr) != 0) {
     ReleaseSRWLockExclusive(&sink->lock);
     return false;
   }

@@ -18,6 +18,15 @@
 #include <webrtc_c/libyuv.h>
 #include <webrtc_c/media/base/adapted_video_track_source.h>
 
+// libyuv の FOURCC_ABGR 値。
+// webrtc_c/libyuv.h は FOURCC_ARGB / FOURCC_BGRA しかエクスポートしていないため、
+// FOURCC_ABGR を直接定義する。
+// ConvertFromI420 の内部では FOURCC_ABGR がサポートされており、
+// little-endian でメモリ上 [R][G][B][A] (RGBA) バイト順で出力される。
+static constexpr uint32_t kLibyuvFourccAbgr =
+    (uint32_t)('A') | ((uint32_t)('B') << 8) | ((uint32_t)('G') << 16) |
+    ((uint32_t)('R') << 24);
+
 // ============================================================================
 // static: デバイス列挙
 // ============================================================================
@@ -471,7 +480,9 @@ void SoraCameraCapturer::ProcessSample(IMFSample* sample) {
           webrtc_I420Buffer_StrideV(i420),
           width, height);
 
-      // ローカルプレビュー用に I420 -> ARGB 変換
+      // ローカルプレビュー用に I420 -> RGBA 変換
+      // Flutter Windows の PixelBufferTexture は GL_RGBA を期待するため、
+      // FOURCC_ABGR (little-endian でメモリ上 [R][G][B][A] バイト順) を使用する。
       {
         std::lock_guard<std::mutex> lock(preview_mutex_);
         preview_width_ = width;
@@ -485,7 +496,7 @@ void SoraCameraCapturer::ProcessSample(IMFSample* sample) {
             webrtc_I420Buffer_MutableDataV(i420),
             webrtc_I420Buffer_StrideV(i420),
             preview_buffer_.data(), width * 4,
-            width, height, libyuv_FOURCC_ARGB);
+            width, height, kLibyuvFourccAbgr);
       }
 
       // AdaptedVideoTrackSource にフレームを投入する

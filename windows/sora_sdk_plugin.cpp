@@ -11,6 +11,14 @@ SoraSdkPlugin::SoraSdkPlugin(flutter::BinaryMessenger* messenger,
     : messenger_(messenger), texture_registrar_(texture_registrar) {}
 
 SoraSdkPlugin::~SoraSdkPlugin() {
+  // HandleDisposeClient と同様に、先に EventChannel ハンドラを解除してから
+  // clients_ を破棄する。これを怠ると BinaryMessenger 経由でラムダが
+  // 呼ばれた際に dangling pointer アクセスが発生する。
+  for (auto& pair : clients_) {
+    messenger_->SetMessageHandler(pair.second->event_channel_name, nullptr);
+  }
+  clients_.clear();
+
   for (auto& pair : remote_renderers_) {
     // テクスチャを先に登録解除してからレンダリングシンクを破棄する
     if (pair.second->texture_id >= 0 && texture_registrar_) {
@@ -102,7 +110,7 @@ void SoraSdkPlugin::HandleMethodCall(
 void SoraSdkPlugin::HandleCreateClient(
     const flutter::MethodCall<flutter::EncodableValue>& method_call,
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
-  // config の解析は後続 issue (0035-0037) で実装する
+  // config の解析は後続の対応で実装する
   (void)method_call;
 
   auto client_id = next_client_id_++;
@@ -111,18 +119,22 @@ void SoraSdkPlugin::HandleCreateClient(
   auto wrapper = std::make_unique<ClientWrapper>();
   wrapper->client_id = client_id;
   wrapper->event_channel_name = event_channel_name;
+  wrapper->messenger = messenger_;
 
-  // EventChannel の listen / cancel に応答するハンドラを登録する。
-  // 後続 issue でカメラ・音声・レンダリングのイベントを送信するための基盤。
-  // flutter::EventChannel は Windows C++ ラッパーに存在しないため、
-  // BinaryMessenger の生のメッセージハンドラで代用する。
+  // EventChannel の listen / cancel に応答し、sendEvent() 経由でイベントを送出する
+  ClientWrapper* wrapper_ptr = wrapper.get();
   messenger_->SetMessageHandler(
       event_channel_name,
-      [](const uint8_t* data, size_t size, flutter::BinaryReply reply) {
+      [wrapper_ptr](const uint8_t* data, size_t size,
+                    flutter::BinaryReply reply) {
         auto& codec = flutter::StandardMethodCodec::GetInstance();
         auto call = codec.DecodeMethodCall(data, size);
-        if (call->method_name() == "listen" ||
-            call->method_name() == "cancel") {
+        if (call->method_name() == "listen") {
+          wrapper_ptr->event_sink_active.store(true);
+          auto response = codec.EncodeSuccessEnvelope(nullptr);
+          reply(response->data(), response->size());
+        } else if (call->method_name() == "cancel") {
+          wrapper_ptr->event_sink_active.store(false);
           auto response = codec.EncodeSuccessEnvelope(nullptr);
           reply(response->data(), response->size());
         } else {
@@ -171,6 +183,17 @@ void SoraSdkPlugin::HandleDisposeClient(
                                 nullptr);
   clients_.erase(wrapper_it);
   result->Success();
+}
+
+void SoraSdkPlugin::ClientWrapper::sendEvent(flutter::EncodableMap event) {
+  if (!event_sink_active.load()) {
+    return;
+  }
+  auto& codec = flutter::StandardMethodCodec::GetInstance();
+  flutter::EncodableValue result(event);
+  auto encoded = codec.EncodeSuccessEnvelope(&result);
+  messenger->Send(event_channel_name, encoded->data(), encoded->size(),
+                  nullptr);
 }
 
 int64_t SoraSdkPlugin::GetIntValue(const flutter::EncodableValue& value,

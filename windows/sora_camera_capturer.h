@@ -5,6 +5,7 @@
 #include <flutter/texture_registrar.h>
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -34,6 +35,10 @@ class SoraCameraCapturer {
   void Start();
   void Stop();
 
+  std::function<void(int errorCode)> on_camera_open_error;
+  void set_client_id(int64_t id) { client_id_ = id; }
+  int64_t client_id() const { return client_id_; }
+
   int64_t preview_texture_id() const { return preview_texture_id_; }
 
   const FlutterDesktopPixelBuffer* CopyPreviewPixelBuffer(size_t width,
@@ -52,6 +57,7 @@ class SoraCameraCapturer {
   int requested_height_;
   int requested_fps_;
   flutter::TextureRegistrar* texture_registrar_;
+  int64_t client_id_ = -1;
 
   void* video_source_ptr_ = nullptr;
   SRWLOCK video_source_lock_ = SRWLOCK_INIT;

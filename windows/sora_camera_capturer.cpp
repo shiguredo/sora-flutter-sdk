@@ -255,18 +255,21 @@ void SoraCameraCapturer::Start() {
 void SoraCameraCapturer::CaptureLoop() {
   HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
   if (FAILED(hr)) {
+    if (on_camera_open_error) on_camera_open_error(0);
     running_ = false;
     return;
   }
 
   hr = MFStartup(MF_VERSION);
   if (FAILED(hr)) {
+    if (on_camera_open_error) on_camera_open_error(1);
     CoUninitialize();
     running_ = false;
     return;
   }
 
   if (!CreateMediaSource()) {
+    if (on_camera_open_error) on_camera_open_error(2);
     MFShutdown();
     CoUninitialize();
     running_ = false;
@@ -274,12 +277,14 @@ void SoraCameraCapturer::CaptureLoop() {
   }
 
   if (!CreateSourceReader()) {
+    if (on_camera_open_error) on_camera_open_error(3);
     Cleanup();
     running_ = false;
     return;
   }
 
   if (!SetCurrentMediaType()) {
+    if (on_camera_open_error) on_camera_open_error(4);
     Cleanup();
     running_ = false;
     return;

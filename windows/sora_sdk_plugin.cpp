@@ -116,25 +116,29 @@ void SoraSdkPlugin::HandleCreateClient(
   auto client_id = next_client_id_++;
   auto event_channel_name = "sora_sdk/event/" + std::to_string(client_id);
 
-  auto wrapper = std::make_unique<ClientWrapper>();
+  auto wrapper = std::make_shared<ClientWrapper>();
   wrapper->client_id = client_id;
   wrapper->event_channel_name = event_channel_name;
   wrapper->messenger = messenger_;
 
   // EventChannel の listen / cancel に応答し、sendEvent() 経由でイベントを送出する
-  ClientWrapper* wrapper_ptr = wrapper.get();
+  std::weak_ptr<ClientWrapper> weak_wrapper(wrapper);
   messenger_->SetMessageHandler(
       event_channel_name,
-      [wrapper_ptr](const uint8_t* data, size_t size,
-                    flutter::BinaryReply reply) {
+      [weak_wrapper](const uint8_t* data, size_t size,
+                     flutter::BinaryReply reply) {
+        auto wrapper = weak_wrapper.lock();
+        if (!wrapper) {
+          return;
+        }
         auto& codec = flutter::StandardMethodCodec::GetInstance();
         auto call = codec.DecodeMethodCall(data, size);
         if (call->method_name() == "listen") {
-          wrapper_ptr->event_sink_active.store(true);
+          wrapper->event_sink_active.store(true);
           auto response = codec.EncodeSuccessEnvelope(nullptr);
           reply(response->data(), response->size());
         } else if (call->method_name() == "cancel") {
-          wrapper_ptr->event_sink_active.store(false);
+          wrapper->event_sink_active.store(false);
           auto response = codec.EncodeSuccessEnvelope(nullptr);
           reply(response->data(), response->size());
         } else {
@@ -144,7 +148,7 @@ void SoraSdkPlugin::HandleCreateClient(
         }
       });
 
-  clients_[client_id] = std::move(wrapper);
+  clients_[client_id] = wrapper;
 
   flutter::EncodableMap response;
   response[flutter::EncodableValue("clientId")] =
@@ -181,6 +185,19 @@ void SoraSdkPlugin::HandleDisposeClient(
   // EventChannel のハンドラを解除してからクライアントを削除する
   messenger_->SetMessageHandler(wrapper_it->second->event_channel_name,
                                 nullptr);
+
+  // このクライアントに関連する capturer を停止・削除する
+  std::vector<int64_t> sources_to_remove;
+  for (auto& pair : capturers_) {
+    if (pair.second->client_id() == client_id) {
+      sources_to_remove.push_back(pair.first);
+    }
+  }
+  for (auto source : sources_to_remove) {
+    capturers_[source]->Stop();
+    capturers_.erase(source);
+  }
+
   clients_.erase(wrapper_it);
   result->Success();
 }
@@ -268,6 +285,12 @@ void SoraSdkPlugin::HandleEnsureLocalVideoTrackTexture(
     return;
   }
 
+  int64_t client_id = 0;
+  auto client_id_it = args->find(flutter::EncodableValue("clientId"));
+  if (client_id_it != args->end()) {
+    client_id = GetIntValue(client_id_it->second, 0);
+  }
+
   std::string device_id;
   auto device_id_it = args->find(flutter::EncodableValue("videoDeviceId"));
   if (device_id_it != args->end()) {
@@ -302,6 +325,29 @@ void SoraSdkPlugin::HandleEnsureLocalVideoTrackTexture(
                                                        fps, texture_registrar_);
   capturer->SetVideoSourcePtr(
       reinterpret_cast<void*>(static_cast<intptr_t>(video_source_ptr)));
+  capturer->set_client_id(client_id);
+
+  // カメラキャプチャのエラーをクライアントに通知するコールバックを設定する
+  if (client_id > 0) {
+    auto wrapper_it = clients_.find(client_id);
+    if (wrapper_it != clients_.end()) {
+      std::weak_ptr<ClientWrapper> weak_wrapper = wrapper_it->second;
+      capturer->on_camera_open_error =
+          [weak_wrapper](int error_code) {
+            auto wrapper = weak_wrapper.lock();
+            if (!wrapper) {
+              return;
+            }
+            flutter::EncodableMap event;
+            event[flutter::EncodableValue("type")] =
+                flutter::EncodableValue("camera_open_error");
+            event[flutter::EncodableValue("errorCode")] =
+                flutter::EncodableValue(error_code);
+            wrapper->sendEvent(event);
+          };
+    }
+  }
+
   capturer->Start();
 
   int64_t texture_id = capturer->preview_texture_id();

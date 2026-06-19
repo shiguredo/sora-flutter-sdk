@@ -219,6 +219,11 @@ SoraCameraCapturer::~SoraCameraCapturer() {
 // ビデオソースポインタ設定
 // ============================================================================
 
+void SoraCameraCapturer::SetOnCameraOpenErrorCallback(
+    std::function<void(CameraOpenError error_code)> callback) {
+  on_camera_open_error_ = std::move(callback);
+}
+
 void SoraCameraCapturer::SetVideoSourcePtr(void* video_source_ptr) {
   AcquireSRWLockExclusive(&video_source_lock_);
   video_source_ptr_ = video_source_ptr;
@@ -255,21 +260,24 @@ void SoraCameraCapturer::Start() {
 void SoraCameraCapturer::CaptureLoop() {
   HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
   if (FAILED(hr)) {
-    if (on_camera_open_error) on_camera_open_error(0);
+    if (on_camera_open_error_)
+      on_camera_open_error_(CameraOpenError::CoInitializeFailed);
     running_ = false;
     return;
   }
 
   hr = MFStartup(MF_VERSION);
   if (FAILED(hr)) {
-    if (on_camera_open_error) on_camera_open_error(1);
+    if (on_camera_open_error_)
+      on_camera_open_error_(CameraOpenError::MFStartupFailed);
     CoUninitialize();
     running_ = false;
     return;
   }
 
   if (!CreateMediaSource()) {
-    if (on_camera_open_error) on_camera_open_error(2);
+    if (on_camera_open_error_)
+      on_camera_open_error_(CameraOpenError::DeviceNotFound);
     MFShutdown();
     CoUninitialize();
     running_ = false;
@@ -277,14 +285,16 @@ void SoraCameraCapturer::CaptureLoop() {
   }
 
   if (!CreateSourceReader()) {
-    if (on_camera_open_error) on_camera_open_error(3);
+    if (on_camera_open_error_)
+      on_camera_open_error_(CameraOpenError::SourceReaderFailed);
     Cleanup();
     running_ = false;
     return;
   }
 
   if (!SetCurrentMediaType()) {
-    if (on_camera_open_error) on_camera_open_error(4);
+    if (on_camera_open_error_)
+      on_camera_open_error_(CameraOpenError::MediaTypeFailed);
     Cleanup();
     running_ = false;
     return;
@@ -554,9 +564,6 @@ void SoraCameraCapturer::ProcessSample(IMFSample* sample) {
 // ============================================================================
 
 void SoraCameraCapturer::Stop() {
-  if (!running_) {
-    return;
-  }
   running_ = false;
 
   if (capture_thread_.joinable()) {

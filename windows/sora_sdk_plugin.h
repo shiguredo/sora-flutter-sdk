@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -28,7 +29,7 @@ class SoraSdkPlugin : public flutter::Plugin {
   SoraSdkPlugin& operator=(const SoraSdkPlugin&) = delete;
 
  private:
-  struct ClientWrapper : public std::enable_shared_from_this<ClientWrapper> {
+  struct ClientWrapper {
     int64_t client_id;
     std::string event_channel_name;
     flutter::BinaryMessenger* messenger;
@@ -113,6 +114,7 @@ class SoraSdkPlugin : public flutter::Plugin {
   int64_t next_renderer_id_ = 1;
   std::map<int64_t, std::shared_ptr<ClientWrapper>> clients_;
   std::map<int64_t, std::unique_ptr<SoraCameraCapturer>> capturers_;
+  std::map<int64_t, std::set<int64_t>> client_capturers_;
   std::map<int64_t, std::unique_ptr<RemoteVideoRendererContext>>
       remote_renderers_;
 };

@@ -187,15 +187,16 @@ void SoraSdkPlugin::HandleDisposeClient(
                                 nullptr);
 
   // このクライアントに関連する capturer を停止・削除する
-  std::vector<int64_t> sources_to_remove;
-  for (auto& pair : capturers_) {
-    if (pair.second->client_id() == client_id) {
-      sources_to_remove.push_back(pair.first);
+  auto capturer_it = client_capturers_.find(client_id);
+  if (capturer_it != client_capturers_.end()) {
+    for (auto source : capturer_it->second) {
+      auto cap_it = capturers_.find(source);
+      if (cap_it != capturers_.end()) {
+        cap_it->second->Stop();
+        capturers_.erase(cap_it);
+      }
     }
-  }
-  for (auto source : sources_to_remove) {
-    capturers_[source]->Stop();
-    capturers_.erase(source);
+    client_capturers_.erase(capturer_it);
   }
 
   clients_.erase(wrapper_it);
@@ -325,15 +326,13 @@ void SoraSdkPlugin::HandleEnsureLocalVideoTrackTexture(
                                                        fps, texture_registrar_);
   capturer->SetVideoSourcePtr(
       reinterpret_cast<void*>(static_cast<intptr_t>(video_source_ptr)));
-  capturer->set_client_id(client_id);
-
   // カメラキャプチャのエラーをクライアントに通知するコールバックを設定する
   if (client_id > 0) {
     auto wrapper_it = clients_.find(client_id);
     if (wrapper_it != clients_.end()) {
       std::weak_ptr<ClientWrapper> weak_wrapper = wrapper_it->second;
-      capturer->on_camera_open_error =
-          [weak_wrapper](int error_code) {
+      capturer->SetOnCameraOpenErrorCallback(
+          [weak_wrapper](CameraOpenError error_code) {
             auto wrapper = weak_wrapper.lock();
             if (!wrapper) {
               return;
@@ -342,10 +341,15 @@ void SoraSdkPlugin::HandleEnsureLocalVideoTrackTexture(
             event[flutter::EncodableValue("type")] =
                 flutter::EncodableValue("camera_open_error");
             event[flutter::EncodableValue("errorCode")] =
-                flutter::EncodableValue(error_code);
+                flutter::EncodableValue(static_cast<int>(error_code));
             wrapper->sendEvent(event);
-          };
+          });
     }
+  }
+
+  // このクライアントに関連する capturer として記録する
+  if (client_id > 0) {
+    client_capturers_[client_id].insert(video_source_ptr);
   }
 
   capturer->Start();

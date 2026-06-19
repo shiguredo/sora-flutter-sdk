@@ -64,8 +64,10 @@ if (!SetCurrentMediaType()) {       // ⑤ メディアタイプ設定失敗
 コールバックはキャプチャスレッド（`CaptureLoop` 内）から呼ばれるが、コールバック自体は `std::function` に設定されたラムダであり、ラムダ内で `clients_` にアクセスする。以下の対策が必要:
 
 1. コールバックの設定は `Start()` の前にプラットフォームスレッドで行うため、std::function の代入とキャプチャスレッドからの読み出しにデータ競合はない（代入完了後に `Start()` を呼ぶため）
-2. `clients_` へのアクセスを保護するため、`std::shared_ptr<ClientWrapper>` に変更するか、コールバック内で `capturers_` のキー `video_source_ptr` を辿って `clients_` を検索する前に有効性を確認する
-3. `ClientWrapper` の破棄とコールバック呼び出しの競合は、`HandleDisposeClient()` で `SoraCameraCapturer` も停止することで回避する（`disposeClient` 時に `capturers_` の該当エントリも削除するよう設計を拡張）
+2. `ClientWrapper` の生存期間とコールバック呼び出しの間に use-after-free が発生しない設計にする。以下 2 案のいずれかを採用する:
+   - **推奨: `shared_ptr` / `weak_ptr` 方式**: `ClientWrapper` を `std::enable_shared_from_this<ClientWrapper>` の派生とし、`clients_` を `std::map<int64_t, std::shared_ptr<ClientWrapper>>` に変更する。コールバックは `std::weak_ptr<ClientWrapper>` をキャプチャし、`lock()` で有効性を確認してから `sendEvent()` を呼び出す。EventChannel ハンドララムダも `weak_ptr` をキャプチャするよう変更する。
+   - **代替: 明示的な停止保証方式**: `HandleDisposeClient()` 内で先に該当 `SoraCameraCapturer` を停止し、キャプチャスレッドの終了を待ってから `clients_` を削除する。`disposeClient` 時に `capturers_` の該当エントリも停止するよう設計を拡張する。
+3. `event_sink_active` によるガードだけでは不十分である。`sendEvent()` 内の `load()` と `Send()` の間で `ClientWrapper` が破棄される可能性があるため、`weak_ptr::lock()` による生存確認を呼び出し側で行うこと。
 
 ### エラーハンドリングの実行順序
 
@@ -111,7 +113,8 @@ event[flutter::EncodableValue("errorCode")] = flutter::EncodableValue(errorCode)
 - `windows/sora_camera_capturer.h` — エラーコールバックの型定義とフィールド追加、`#include <functional>` 追加
 - `windows/sora_camera_capturer.cpp` — `CaptureLoop()` 内の全失敗ポイントでコールバック呼び出し
 - `windows/sora_sdk_plugin.cpp` — `HandleEnsureLocalVideoTrackTexture()` で `clientId` パースとコールバック設定
-- `windows/sora_sdk_plugin.h` — 必要に応じて `ClientWrapper` のスレッドセーフアクセス用インターフェース追加
+- `windows/sora_sdk_plugin.h` — `ClientWrapper` を `std::enable_shared_from_this<ClientWrapper>` に変更、`clients_` を `std::shared_ptr<ClientWrapper>` に変更、EventChannel ラムダのキャプチャを `weak_ptr` に変更
+- `windows/sora_sdk_plugin.cpp` — `HandleCreateClient` / `HandleDisposeClient` / デストラクタの `clients_` 操作を `shared_ptr` 対応に修正、EventChannel ラムダで `weak_ptr::lock()` による生存確認を追加
 
 ### 変更内容
 
@@ -123,14 +126,16 @@ event[flutter::EncodableValue("errorCode")] = flutter::EncodableValue(errorCode)
 
 ```cpp
 int64_t client_id = GetIntValue(client_id_it->second, 0);
-capturer->on_camera_open_error = [this, client_id, video_source_ptr](int errorCode) {
-  auto it = clients_.find(client_id);
-  if (it != clients_.end() && it->second->event_sink_active.load()) {
-    flutter::EncodableMap event;
-    event[flutter::EncodableValue("type")] = flutter::EncodableValue("camera_open_error");
-    event[flutter::EncodableValue("errorCode")] = flutter::EncodableValue(errorCode);
-    it->second->sendEvent(event);
+// clients_ は std::map<int64_t, std::shared_ptr<ClientWrapper>> に変更済みとする
+capturer->on_camera_open_error = [weak_wrapper = std::weak_ptr<ClientWrapper>(clients_[client_id])](int errorCode) {
+  auto wrapper = weak_wrapper.lock();
+  if (!wrapper) {
+    return;
   }
+  flutter::EncodableMap event;
+  event[flutter::EncodableValue("type")] = flutter::EncodableValue("camera_open_error");
+  event[flutter::EncodableValue("errorCode")] = flutter::EncodableValue(errorCode);
+  wrapper->sendEvent(event);
 };
 ```
 

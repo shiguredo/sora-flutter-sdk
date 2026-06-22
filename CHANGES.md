@@ -18,3 +18,6 @@
 
 - [FIX] Windows の VideoFormat 重複除去を汎用的な実装に修正する
   - @zztkm
+
+- [FIX] re-offer 受信経路に応じて re-answer の送信先を切り替えるよう修正する
+  - @zztkm

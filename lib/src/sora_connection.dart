@@ -563,6 +563,28 @@ class SoraConnection {
     }
   }
 
+  /// シグナリングチャネルの状態に応じてメッセージを送信する。
+  ///
+  /// WebSocket でのみ扱うメッセージタイプについてはこの関数を通す必要はない。
+  void _sendSignalingMessage(String text, Map<String, Object?> msgMap) {
+    if (_signalingState.signalingSwitched) {
+      _emitDebugMessage('dc(signaling) send: $text');
+      _emitSignalingEvent('datachannel', 'sent', msgMap);
+      final encoded = utf8.encode(text);
+      final Uint8List sendData;
+      if (_dataChannelController.signalingCompress) {
+        sendData = _dataChannelController.deflateEncode(encoded);
+      } else {
+        sendData = encoded;
+      }
+      _webrtcClient.sendSignalingMessage(sendData);
+    } else {
+      _emitDebugMessage('ws send: $text');
+      _emitSignalingEvent('websocket', 'sent', msgMap);
+      _signalingState.webSocketChannel?.sink.add(text);
+    }
+  }
+
   /// Sora 切断の internal 処理
   Future<void> _disconnectBody() async {
     final disconnectMessage = <String, Object?>{
@@ -572,19 +594,14 @@ class SoraConnection {
     final text = jsonEncode(disconnectMessage);
     _emitLogEvent('SIGNALING DISCONNECT MESSAGE', disconnectMessage);
 
+    // 切断メッセージ送信中および後続の teardown 処理中に
+    // _handleWebrtcEvent への再入を防ぐ。
+    _disconnecting = true;
+
     if (_signalingState.signalingSwitched) {
       // DataChannel に switch 済みのため
       // DataChannel シグナリング経由で disconnect を送信する
-      _emitDebugMessage('dc(signaling) send: $text');
-      _emitSignalingEvent('datachannel', 'sent', disconnectMessage);
-      final encoded = utf8.encode(text);
-      final Uint8List sendData;
-      if (_dataChannelController.signalingCompress) {
-        sendData = _dataChannelController.deflateEncode(encoded);
-      } else {
-        sendData = encoded;
-      }
-      _webrtcClient.sendSignalingMessage(sendData);
+      _sendSignalingMessage(text, disconnectMessage);
     } else {
       final channel = _signalingState.webSocketChannel;
       _signalingState.webSocketChannel = null;
@@ -611,9 +628,6 @@ class SoraConnection {
     }
     await channel?.sink.close();
 
-    // _teardownNativeSession() 内の pcRelease() で native PC observer の
-    // peer_connection_closed が同期的に発火し _handleWebrtcEvent へ再入するのを防ぐ。
-    _disconnecting = true;
     await _teardownNativeSession();
 
     // _resetConnectionSessionState() 内の resetSession() で
@@ -1265,6 +1279,10 @@ class SoraConnection {
     }
     // シグナリングメッセージ受信イベント
     if (type == 'signaling_message') {
+      if (_disconnecting) {
+        _emitDebugMessage('Ignore signaling message while disconnecting');
+        return;
+      }
       final message = data['message'];
       if (message is Map) {
         final msgMap = Map<String, Object?>.from(
@@ -1272,27 +1290,13 @@ class SoraConnection {
         );
         final text = jsonEncode(msgMap);
         final msgType = msgMap['type'] as String?;
-        // re-answer は DataChannel 経由で送信する
         if (msgType == 're-answer') {
           _emitLogEvent('SIGNALING RE ANSWER MESSAGE', msgMap);
           if (msgMap['sdp'] case final sdp?) {
             _emitLogEvent('RE ANSWER SDP', sdp);
           }
-          _emitDebugMessage('dc(signaling) send: $text');
-          _emitSignalingEvent('datachannel', 'sent', msgMap);
-          final encoded = utf8.encode(text);
-          final Uint8List sendData;
-          if (_dataChannelController.signalingCompress) {
-            sendData = _dataChannelController.deflateEncode(encoded);
-          } else {
-            sendData = encoded;
-          }
-          _webrtcClient.sendSignalingMessage(sendData);
-        } else {
-          _emitDebugMessage('ws send: $text');
-          _emitSignalingEvent('websocket', 'sent', msgMap);
-          _signalingState.webSocketChannel?.sink.add(text);
         }
+        _sendSignalingMessage(text, msgMap);
       }
       return;
     }

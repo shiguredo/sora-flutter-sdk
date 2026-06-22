@@ -565,8 +565,10 @@ class SoraConnection {
 
   /// シグナリングチャネルの状態に応じてメッセージを送信する。
   ///
+  /// [msgMap] は内部で JSON 文字列に変換される。
   /// WebSocket でのみ扱うメッセージタイプについてはこの関数を通す必要はない。
-  void _sendSignalingMessage(String text, Map<String, Object?> msgMap) {
+  void _sendSignalingMessage(Map<String, Object?> msgMap) {
+    final text = jsonEncode(msgMap);
     if (_signalingState.signalingSwitched) {
       _emitDebugMessage('dc(signaling) send: $text');
       _emitSignalingEvent('datachannel', 'sent', msgMap);
@@ -577,7 +579,11 @@ class SoraConnection {
       } else {
         sendData = encoded;
       }
-      _webrtcClient.sendSignalingMessage(sendData);
+      try {
+        _webrtcClient.sendSignalingMessage(sendData);
+      } catch (error) {
+        _emitDebugMessage('dc(signaling) send failed: $error');
+      }
     } else {
       _emitDebugMessage('ws send: $text');
       _emitSignalingEvent('websocket', 'sent', msgMap);
@@ -601,7 +607,7 @@ class SoraConnection {
     if (_signalingState.signalingSwitched) {
       // DataChannel に switch 済みのため
       // DataChannel シグナリング経由で disconnect を送信する
-      _sendSignalingMessage(text, disconnectMessage);
+      _sendSignalingMessage(disconnectMessage);
     } else {
       final channel = _signalingState.webSocketChannel;
       _signalingState.webSocketChannel = null;
@@ -1278,6 +1284,9 @@ class SoraConnection {
       return;
     }
     // シグナリングメッセージ受信イベント
+    // native SdpNegotiationCallbacks.emitSignalingMessage から転送された
+    // サーバー宛メッセージを _sendSignalingMessage が現在のチャネル状態に
+    // 応じて適切な経路（DataChannel / WebSocket）で送信する。
     if (type == 'signaling_message') {
       if (_disconnecting) {
         _emitDebugMessage('Ignore signaling message while disconnecting');
@@ -1288,15 +1297,7 @@ class SoraConnection {
         final msgMap = Map<String, Object?>.from(
           message.map((key, value) => MapEntry('$key', value)),
         );
-        final text = jsonEncode(msgMap);
-        final msgType = msgMap['type'] as String?;
-        if (msgType == 're-answer') {
-          _emitLogEvent('SIGNALING RE ANSWER MESSAGE', msgMap);
-          if (msgMap['sdp'] case final sdp?) {
-            _emitLogEvent('RE ANSWER SDP', sdp);
-          }
-        }
-        _sendSignalingMessage(text, msgMap);
+        _sendSignalingMessage(msgMap);
       }
       return;
     }

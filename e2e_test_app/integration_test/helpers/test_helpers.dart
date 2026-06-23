@@ -123,3 +123,20 @@ void logE2eMessage(String message) {
   // ignore: avoid_print
   print('[e2e] $message');
 }
+
+/// Cleanup step を実行し、エラーを収集する。
+///
+/// [cleanupErrors] にエラー文言を追記する。例外が発生しても cleanup を中断
+/// せずに次の step へ進むことを可能にする。
+Future<void> runCleanupStep(
+  List<String> cleanupErrors,
+  String name,
+  Future<void> Function() action,
+) async {
+  try {
+    await action();
+  } catch (e) {
+    cleanupErrors.add('$name: $e');
+    logE2eMessage('stage=cleanup_error step=$name error=$e');
+  }
+}

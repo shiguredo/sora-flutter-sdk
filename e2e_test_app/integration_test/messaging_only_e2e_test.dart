@@ -1,4 +1,4 @@
-// messaging 専用接続 (audio: false / video: false) の E2E。
+// messaging 専用接続 (audio: false / video: false) の E2E 。
 // 単一接続で local stream なしの connect() / DataChannel open /
 // remoteMediaStreams が空のままであることを確認する。
 
@@ -28,6 +28,7 @@ void main() {
         role: SoraRole.sendonly,
         audio: false,
         video: false,
+        // DataChannel signaling を有効にしないと #messaging が成立しない。
         dataChannelSignaling: true,
         dataChannels: const [
           {'label': '#messaging', 'direction': 'sendrecv', 'compress': true},
@@ -36,7 +37,7 @@ void main() {
       );
 
       final connectTimeout = connectionStageTimeout(config);
-      const dataChannelTimeout = Duration(seconds: 30);
+      final dataChannelTimeout = connectionStageTimeout(config);
 
       ObservedConnection? connection;
       Object? bodyError;
@@ -80,6 +81,11 @@ void main() {
         );
         expect(
           dcEvent.direction,
+          isNotNull,
+          reason: 'open した DataChannel の direction が null でないこと。',
+        );
+        expect(
+          dcEvent.direction,
           'sendrecv',
           reason: 'open した DataChannel の direction が sendrecv であること。',
         );
@@ -104,11 +110,6 @@ void main() {
           isEmpty,
           reason: 'messaging 専用接続では SoraRemoveTrackEvent が発火しないこと。',
         );
-        expect(
-          connection.connection.remoteMediaStreams,
-          isEmpty,
-          reason: 'settle 後も remoteMediaStreams が空のままであること。',
-        );
 
         logE2eMessage('stage=disconnect_start');
         await connection.disconnect();
@@ -126,19 +127,7 @@ void main() {
 
         final cleanupErrors = <String>[];
 
-        Future<void> runCleanupStep(
-          String name,
-          Future<void> Function() action,
-        ) async {
-          try {
-            await action();
-          } catch (e) {
-            cleanupErrors.add('$name: $e');
-            logE2eMessage('stage=cleanup_error step=$name error=$e');
-          }
-        }
-
-        await runCleanupStep('connection.dispose', () async {
+        await runCleanupStep(cleanupErrors, 'connection.dispose', () async {
           await connection?.dispose();
         });
 

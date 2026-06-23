@@ -108,7 +108,8 @@ final class ObservedConnection {
     }
 
     if (event is SoraDataChannelOpenEvent) {
-      dataChannelOpenEvents.add(event.event);
+      final dcEvent = event.event;
+      dataChannelOpenEvents.add(dcEvent);
       return;
     }
   }

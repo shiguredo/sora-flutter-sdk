@@ -20,7 +20,8 @@ void main() {
     'track_event: sender 接続前後の remote track 追加/削除を検証する',
     (WidgetTester tester) async {
       final env = loadE2eEnvironment();
-      final channelId = buildChannelId(env.channelPrefix, suffix: '-trackevent');
+      final channelId =
+          buildChannelId(env.channelPrefix, suffix: '-trackevent');
 
       final receiverConfig = SoraConnectionConfig(
         signalingUrls: env.signalingUrls,
@@ -140,8 +141,7 @@ void main() {
         expect(
           videoTrackEventsForTrack.length,
           1,
-          reason:
-              '同一 remote video track に対する SoraTrackEvent は 1 回だけ発火すること。',
+          reason: '同一 remote video track に対する SoraTrackEvent は 1 回だけ発火すること。',
         );
 
         // sender を切断し、receiver で SoraRemoveTrackEvent を待つ。
@@ -155,8 +155,7 @@ void main() {
         );
 
         // sender 切断後、receiver 側の subscription は生存したまま remove event を待つ。
-        final trackRemovedObs =
-            await receiver.waitForRemoteVideoTrackRemoved(
+        final trackRemovedObs = await receiver.waitForRemoteVideoTrackRemoved(
           tester,
           remoteConnectionId: senderConnectionId,
           timeout: receiverRemoveTimeout,
@@ -217,49 +216,41 @@ void main() {
 
         final cleanupErrors = <String>[];
 
-        Future<void> runCleanupStep(
-          String name,
-          Future<void> Function() action,
-        ) async {
-          try {
-            await action();
-          } catch (e) {
-            cleanupErrors.add('$name: $e');
-            logE2eMessage('stage=cleanup_error step=$name error=$e');
-          }
-        }
-
         try {
           videoSource?.stop();
         } catch (e) {
           cleanupErrors.add('videoSource.stop: $e');
           logE2eMessage('stage=cleanup_error step=videoSource.stop error=$e');
         }
-        await runCleanupStep('sender.disconnect', () async {
+        await runCleanupStep(cleanupErrors, 'sender.disconnect', () async {
           if (sender != null) {
             await sender.disconnect();
             await sender.waitUntilDisconnected(senderDisconnectTimeout);
           }
         });
-        await runCleanupStep('receiver.disconnect', () async {
+        await runCleanupStep(cleanupErrors, 'receiver.disconnect', () async {
           if (receiver != null) {
             await receiver.disconnect();
             await receiver.waitUntilDisconnected(receiverDisconnectTimeout);
           }
         });
         await runCleanupStep(
+          cleanupErrors,
           'receiver.dispose',
           () async => await receiver?.dispose(),
         );
         await runCleanupStep(
+          cleanupErrors,
           'sender.dispose',
           () async => await sender?.dispose(),
         );
         await runCleanupStep(
+          cleanupErrors,
           'stream.dispose',
           () async => await stream?.dispose(),
         );
         await runCleanupStep(
+          cleanupErrors,
           'videoTrack.dispose',
           () async => await videoTrack?.dispose(),
         );

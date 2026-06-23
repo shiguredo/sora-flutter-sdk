@@ -1,5 +1,5 @@
 // dispose 後の API 呼び出しが StateError で拒否されることを確認する E2E 。
-// 接続前と接続後（messaging / video）の 2 系列で検証する。
+// 接続前と接続後（messaging / video）の 3 系列で検証する。
 
 import 'dart:async';
 import 'dart:typed_data';
@@ -139,10 +139,9 @@ void main() {
 
         final cleanupErrors = <String>[];
 
-        await runCleanupStep(
-          'connection.dispose',
-          () async => await connection?.dispose(),
-        );
+        await runCleanupStep(cleanupErrors, 'connection.dispose', () async {
+          await connection?.dispose();
+        });
 
         if (cleanupErrors.isNotEmpty) {
           logE2eMessage(
@@ -255,26 +254,21 @@ void main() {
 
         final cleanupErrors = <String>[];
 
-        await runCleanupStep(
-          'sub.cancel',
-          () async => await sub?.cancel(),
-        );
-        await runCleanupStep(
-          'connection.dispose',
-          () async => await connection?.dispose(),
-        );
-        await runCleanupStep(
-          'stream.dispose',
-          () async => await stream?.dispose(),
-        );
-        await runCleanupStep(
-          'videoTrack1.dispose',
-          () async => await videoTrack1?.dispose(),
-        );
-        await runCleanupStep(
-          'videoTrack2.dispose',
-          () async => await videoTrack2?.dispose(),
-        );
+        await runCleanupStep(cleanupErrors, 'sub.cancel', () async {
+          await sub?.cancel();
+        });
+        await runCleanupStep(cleanupErrors, 'connection.dispose', () async {
+          await connection?.dispose();
+        });
+        await runCleanupStep(cleanupErrors, 'stream.dispose', () async {
+          await stream?.dispose();
+        });
+        await runCleanupStep(cleanupErrors, 'videoTrack1.dispose', () async {
+          await videoTrack1?.dispose();
+        });
+        await runCleanupStep(cleanupErrors, 'videoTrack2.dispose', () async {
+          await videoTrack2?.dispose();
+        });
 
         if (cleanupErrors.isNotEmpty) {
           logE2eMessage(

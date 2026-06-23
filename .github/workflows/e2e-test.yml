@@ -54,6 +54,8 @@ jobs:
             target: integration_test/remote_media_stream_e2e_test.dart
           - name: local media toggle
             target: integration_test/local_media_toggle_e2e_test.dart
+          - name: messaging only
+            target: integration_test/messaging_only_e2e_test.dart
     defaults:
       run:
         shell: bash
@@ -174,6 +176,8 @@ jobs:
             target: integration_test/remote_media_stream_e2e_test.dart
           - name: local media toggle
             target: integration_test/local_media_toggle_e2e_test.dart
+          - name: messaging only
+            target: integration_test/messaging_only_e2e_test.dart
           - name: windows audio device
             target: integration_test/windows_audio_device_test.dart
     defaults:

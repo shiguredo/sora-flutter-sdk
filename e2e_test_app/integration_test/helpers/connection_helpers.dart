@@ -48,6 +48,8 @@ final class ObservedConnection {
   final List<RemoteTrackObservation> trackEvents = <RemoteTrackObservation>[];
   final List<RemoteTrackObservation> removeTrackEvents =
       <RemoteTrackObservation>[];
+  final List<SoraDataChannelEvent> dataChannelOpenEvents =
+      <SoraDataChannelEvent>[];
 
   final Completer<void> _connected = Completer<void>();
   final Completer<void> _disconnected = Completer<void>();
@@ -102,6 +104,11 @@ final class ObservedConnection {
           connectionId: event.track.connectionId,
         ),
       );
+      return;
+    }
+
+    if (event is SoraDataChannelOpenEvent) {
+      dataChannelOpenEvents.add(event.event);
       return;
     }
   }
@@ -308,12 +315,42 @@ final class ObservedConnection {
         .toList();
   }
 
+  /// #messaging 等の DataChannel が open するまで待つ。
+  Future<SoraDataChannelEvent> waitForDataChannelOpen(
+    WidgetTester tester, {
+    required String label,
+    required Duration timeout,
+  }) async {
+    const interval = Duration(milliseconds: 200);
+    final deadline = DateTime.now().add(timeout);
+
+    while (DateTime.now().isBefore(deadline)) {
+      throwIfHasErrors();
+
+      for (final event in dataChannelOpenEvents) {
+        if (event.label == label) {
+          return event;
+        }
+      }
+
+      await tester.pump(interval);
+    }
+
+    throw StateError(
+      'Timed out while waiting for DataChannel open on $name. '
+      'label=$label '
+      'dataChannelOpenEvents=${dataChannelOpenEvents.map((e) => e.label).toList()} '
+      'milestones=$milestones',
+    );
+  }
+
   String debugSummary() {
     return 'name=$name '
         'connectionId=$connectionId '
         'milestones=$milestones '
         'trackEvents=$trackEvents '
         'removeTrackEvents=$removeTrackEvents '
+        'dataChannelOpenEvents=${dataChannelOpenEvents.map((e) => e.label).toList()} '
         'errors=${errorSummaries()}';
   }
 

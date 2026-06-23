@@ -2,6 +2,7 @@
 
 - Priority: High
 - Created: 2026-06-03
+- Completed: 2026-06-23
 - Model: GPT-5 Codex
 - Branch: feature/add-dispose-api-guard-e2e-coverage
 - Polished: 2026-06-03

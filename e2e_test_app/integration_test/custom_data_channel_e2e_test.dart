@@ -51,8 +51,8 @@ void main() {
         metadata: env.metadata,
       );
 
-      final connectTimeout = connectionStageTimeout(senderConfig);
-      final dataChannelTimeout = connectionStageTimeout(senderConfig);
+      final senderTimeout = connectionStageTimeout(senderConfig);
+      final receiverTimeout = connectionStageTimeout(receiverConfig);
 
       ObservedConnection? sender;
       ObservedConnection? receiver;
@@ -74,7 +74,7 @@ void main() {
           'bundleId=${receiver.connection.bundleId}',
         );
         await receiver.connect();
-        await receiver.waitUntilConnected(connectTimeout);
+        await receiver.waitUntilConnected(receiverTimeout);
         receiver.throwIfHasErrors();
         logE2eMessage(
           'stage=receiver_connected channelId=$channelId '
@@ -86,7 +86,7 @@ void main() {
           'bundleId=${sender.connection.bundleId}',
         );
         await sender.connect();
-        await sender.waitUntilConnected(connectTimeout);
+        await sender.waitUntilConnected(senderTimeout);
         sender.throwIfHasErrors();
         logE2eMessage(
           'stage=sender_connected channelId=$channelId '
@@ -97,7 +97,7 @@ void main() {
         final senderDcEvent = await sender.waitForDataChannelOpen(
           tester,
           label: testLabel,
-          timeout: dataChannelTimeout,
+          timeout: senderTimeout,
         );
         logE2eMessage(
           'stage=sender_data_channel_open channelId=$channelId '
@@ -108,7 +108,7 @@ void main() {
         final receiverDcEvent = await receiver.waitForDataChannelOpen(
           tester,
           label: testLabel,
-          timeout: dataChannelTimeout,
+          timeout: receiverTimeout,
         );
         logE2eMessage(
           'stage=receiver_data_channel_open channelId=$channelId '
@@ -153,7 +153,7 @@ void main() {
         final receivedMessage = await receiver.waitForDataChannelMessage(
           tester,
           label: testLabel,
-          timeout: dataChannelTimeout,
+          timeout: receiverTimeout,
         );
         logE2eMessage(
           'stage=receiver_received_message channelId=$channelId '
@@ -187,7 +187,7 @@ void main() {
         final receivedRoundtrip = await sender.waitForDataChannelMessage(
           tester,
           label: testLabel,
-          timeout: dataChannelTimeout,
+          timeout: senderTimeout,
         );
         logE2eMessage(
           'stage=sender_received_roundtrip channelId=$channelId '
@@ -208,20 +208,11 @@ void main() {
               '一致すること。',
         );
 
-        // 切断前に受信済みメッセージの一貫性をログに残す。
-        logE2eMessage(
-          'stage=message_summary channelId=$channelId '
-          'senderSent=${senderPayload} '
-          'receiverReceived=${receivedMessage.data} '
-          'receiverSent=${receiverPayload} '
-          'senderReceivedRoundtrip=${receivedRoundtrip.data}',
-        );
-
         logE2eMessage('stage=disconnect_start');
         await sender.disconnect();
-        await sender.waitUntilDisconnected(connectTimeout);
+        await sender.waitUntilDisconnected(senderTimeout);
         await receiver.disconnect();
-        await receiver.waitUntilDisconnected(connectTimeout);
+        await receiver.waitUntilDisconnected(receiverTimeout);
         logE2eMessage('stage=disconnected');
       } catch (e) {
         bodyError = e;
@@ -237,6 +228,18 @@ void main() {
 
         final cleanupErrors = <String>[];
 
+        await runCleanupStep(cleanupErrors, 'sender.disconnect', () async {
+          if (sender != null) {
+            await sender.disconnect();
+            await sender.waitUntilDisconnected(senderTimeout);
+          }
+        });
+        await runCleanupStep(cleanupErrors, 'receiver.disconnect', () async {
+          if (receiver != null) {
+            await receiver.disconnect();
+            await receiver.waitUntilDisconnected(receiverTimeout);
+          }
+        });
         await runCleanupStep(cleanupErrors, 'sender.dispose', () async {
           await sender?.dispose();
         });

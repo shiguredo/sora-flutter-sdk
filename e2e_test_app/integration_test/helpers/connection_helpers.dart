@@ -50,7 +50,7 @@ final class ObservedConnection {
       <RemoteTrackObservation>[];
   final List<SoraDataChannelEvent> dataChannelOpenEvents =
       <SoraDataChannelEvent>[];
-  final List<SoraDataChannelMessage> dataChannelMessageEvents =
+  final List<SoraDataChannelMessage> dataChannelMessages =
       <SoraDataChannelMessage>[];
 
   final Completer<void> _connected = Completer<void>();
@@ -116,7 +116,7 @@ final class ObservedConnection {
     }
 
     if (event is SoraDataChannelMessageEvent) {
-      dataChannelMessageEvents.add(event.message);
+      dataChannelMessages.add(event.message);
       return;
     }
   }
@@ -329,26 +329,16 @@ final class ObservedConnection {
     required String label,
     required Duration timeout,
   }) async {
-    const interval = Duration(milliseconds: 200);
-    final deadline = DateTime.now().add(timeout);
-
-    while (DateTime.now().isBefore(deadline)) {
-      throwIfHasErrors();
-
-      for (final event in dataChannelOpenEvents) {
-        if (event.label == label) {
-          return event;
-        }
-      }
-
-      await tester.pump(interval);
-    }
-
-    throw StateError(
-      'Timed out while waiting for DataChannel open on $name. '
-      'label=$label '
-      'dataChannelOpenEvents=${dataChannelOpenEvents.map((e) => e.label).toList()} '
-      'milestones=$milestones',
+    return _waitForCondition<SoraDataChannelEvent>(
+      tester,
+      source: dataChannelOpenEvents,
+      predicate: (event) => event.label == label,
+      timeout: timeout,
+      buildTimeoutMessage: () =>
+          'Timed out while waiting for DataChannel open on $name. '
+          'label=$label '
+          'dataChannelOpenEvents=${dataChannelOpenEvents.map((e) => e.label).toList()} '
+          'milestones=$milestones',
     );
   }
 
@@ -358,27 +348,43 @@ final class ObservedConnection {
     required String label,
     required Duration timeout,
   }) async {
+    return _waitForCondition<SoraDataChannelMessage>(
+      tester,
+      source: dataChannelMessages,
+      predicate: (message) => message.label == label,
+      timeout: timeout,
+      buildTimeoutMessage: () =>
+          'Timed out while waiting for DataChannel message on $name. '
+          'label=$label '
+          'dataChannelMessageLabels=${dataChannelMessages.map((m) => m.label).toList()} '
+          'milestones=$milestones',
+    );
+  }
+
+  /// 条件を満たす要素が見つかるまで polling する共通ヘルパー。
+  Future<T> _waitForCondition<T>(
+    WidgetTester tester, {
+    required Iterable<T> source,
+    required bool Function(T) predicate,
+    required Duration timeout,
+    required String Function() buildTimeoutMessage,
+  }) async {
     const interval = Duration(milliseconds: 200);
     final deadline = DateTime.now().add(timeout);
 
     while (DateTime.now().isBefore(deadline)) {
       throwIfHasErrors();
 
-      for (final message in dataChannelMessageEvents) {
-        if (message.label == label) {
-          return message;
+      for (final item in source) {
+        if (predicate(item)) {
+          return item;
         }
       }
 
       await tester.pump(interval);
     }
 
-    throw StateError(
-      'Timed out while waiting for DataChannel message on $name. '
-      'label=$label '
-      'dataChannelMessageLabels=${dataChannelMessageEvents.map((m) => m.label).toList()} '
-      'milestones=$milestones',
-    );
+    throw StateError(buildTimeoutMessage());
   }
 
   String debugSummary() {
@@ -388,7 +394,7 @@ final class ObservedConnection {
         'trackEvents=$trackEvents '
         'removeTrackEvents=$removeTrackEvents '
         'dataChannelOpenEvents=${dataChannelOpenEvents.map((e) => e.label).toList()} '
-        'dataChannelMessages=${dataChannelMessageEvents.length} '
+        'dataChannelMessages=${dataChannelMessages.length} '
         'errors=${errorSummaries()}';
   }
 

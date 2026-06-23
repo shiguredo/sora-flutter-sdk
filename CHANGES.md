@@ -30,3 +30,6 @@
 
 - [FIX] re-offer 受信経路に応じて re-answer の送信先を切り替えるよう修正する
   - @zztkm
+
+- [ADD] 接続失敗系の E2E テストを追加する
+  - @zztkm

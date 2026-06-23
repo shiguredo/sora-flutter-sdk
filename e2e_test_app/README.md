@@ -22,6 +22,11 @@ Sora Flutter SDK の recvonly / sendonly / sendrecv 接続と、2 クライア�
 | `TEST_CHANNEL_ID_PREFIX` | チャンネル ID のプレフィックス。CI では `GITHUB_RUN_ID` を連結し、ローカルでは時刻でユニーク化する |
 | `TEST_SEND_DURATION` | （任意）sendonly / sendrecv テストの送信継続秒数（例: `60`） |
 
+接続失敗系 E2E の前提:
+
+- 認証失敗テスト: 有効な `TEST_SIGNALING_URLS` が必要。無効な metadata で接続試行し、接続が成功しないことを確認する。エラーコードの完全一致は server 実装差があるため行わない。
+- 全 URL 不達テスト: `signalingCandidateTimeout` を短く設定し、存在しない URL への接続で `SoraConnectionErrorEvent(code: signaling_candidate_timeout)` が発火することを確認する。`signalingUrls` は `localhost` で上書きされるが、`loadE2eEnvironment()` が `TEST_SIGNALING_URLS` の existence check を含むためダミー値の設定が必要。
+
 2 クライアント E2E の前提:
 
 - sender / receiver は同じ `channelId` を共有する
@@ -52,6 +57,7 @@ flutter test integration_test/track_event_e2e_test.dart -d macos
 flutter test integration_test/two_party_media_e2e_test.dart -d macos
 flutter test integration_test/remote_media_stream_e2e_test.dart -d macos
 flutter test integration_test/local_media_toggle_e2e_test.dart -d macos
+flutter test integration_test/connection_failure_e2e_test.dart -d macos
 ```
 
 ## ローカル実行例（Windows）

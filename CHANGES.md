@@ -33,3 +33,6 @@
 
 - [ADD] 接続失敗系の E2E テストを追加する
   - @zztkm
+
+- [ADD] dispose 後の API 拒否を確認する E2E テストを追加する
+  - @zztkm

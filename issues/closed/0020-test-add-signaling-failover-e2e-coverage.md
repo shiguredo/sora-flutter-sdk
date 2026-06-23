@@ -5,6 +5,7 @@
 - Model: GPT-5 Codex
 - Branch: feature/add-signaling-failover-e2e-coverage
 - Polished: 2026-06-03
+- Completed: 2026-06-23
 
 ## 目的
 

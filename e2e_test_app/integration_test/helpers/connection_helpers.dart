@@ -50,6 +50,8 @@ final class ObservedConnection {
       <RemoteTrackObservation>[];
   final List<SoraDataChannelEvent> dataChannelOpenEvents =
       <SoraDataChannelEvent>[];
+  final List<SoraDataChannelMessage> dataChannelMessageEvents =
+      <SoraDataChannelMessage>[];
 
   final Completer<void> _connected = Completer<void>();
   final Completer<void> _disconnected = Completer<void>();
@@ -110,6 +112,11 @@ final class ObservedConnection {
     if (event is SoraDataChannelOpenEvent) {
       final dcEvent = event.event;
       dataChannelOpenEvents.add(dcEvent);
+      return;
+    }
+
+    if (event is SoraDataChannelMessageEvent) {
+      dataChannelMessageEvents.add(event.message);
       return;
     }
   }
@@ -345,6 +352,35 @@ final class ObservedConnection {
     );
   }
 
+  /// 指定 label の DataChannel メッセージを受信するまで待つ。
+  Future<SoraDataChannelMessage> waitForDataChannelMessage(
+    WidgetTester tester, {
+    required String label,
+    required Duration timeout,
+  }) async {
+    const interval = Duration(milliseconds: 200);
+    final deadline = DateTime.now().add(timeout);
+
+    while (DateTime.now().isBefore(deadline)) {
+      throwIfHasErrors();
+
+      for (final message in dataChannelMessageEvents) {
+        if (message.label == label) {
+          return message;
+        }
+      }
+
+      await tester.pump(interval);
+    }
+
+    throw StateError(
+      'Timed out while waiting for DataChannel message on $name. '
+      'label=$label '
+      'dataChannelMessageLabels=${dataChannelMessageEvents.map((m) => m.label).toList()} '
+      'milestones=$milestones',
+    );
+  }
+
   String debugSummary() {
     return 'name=$name '
         'connectionId=$connectionId '
@@ -352,6 +388,7 @@ final class ObservedConnection {
         'trackEvents=$trackEvents '
         'removeTrackEvents=$removeTrackEvents '
         'dataChannelOpenEvents=${dataChannelOpenEvents.map((e) => e.label).toList()} '
+        'dataChannelMessages=${dataChannelMessageEvents.length} '
         'errors=${errorSummaries()}';
   }
 

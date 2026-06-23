@@ -22,6 +22,9 @@
 - [ADD] messaging 専用接続の E2E テストを追加する
   - @zztkm
 
+- [ADD] ユーザー定義 DataChannel の送受信 E2E テストを追加する
+  - @zztkm
+
 - [FIX] Windows の VideoFormat 重複除去を汎用的な実装に修正する
   - @zztkm
 

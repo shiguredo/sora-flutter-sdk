@@ -5,7 +5,7 @@
 - Completed: {YYYY-MM-DD}
 - Model: DeepSeek V4 Pro
 - Branch: feature/add-dummy-audio-support
-- Polished: {YYYY-MM-DD}
+- Polished: 2026-06-23
 
 ## 目的
 
@@ -33,10 +33,11 @@ Medium: 既存の E2E テストでは音声送信を回避して対応してい�
 - `MediaDevices.createAudioTrack()` (`lib/src/sora_media_devices.dart:160`) は `pcFactoryCreateAudioSource` でマイク入力の `AudioSourceInterface` を生成し、そこから `AudioTrack` を作成する
 - `LocalAudioTrack` (`lib/src/sora_media_stream.dart:393`) には `writeFrame` 相当のデータ注入メソッドが存在しない
 - libwebrtc-c の C API には `AdaptedVideoTrackSource` の音声版 (`AdaptedAudioTrackSource`) が存在しない
-  - audio 関連のヘッダーは `api/audio/audio_device.h`、`api/audio/audio_device_defines.h`、`api/audio/audio_processing.h` のみ
-  - `mediastream_interface.h` の `AudioSourceInterface` は refcounted ハンドルのみで、データ注入 API を持たない
+  - audio 関連のヘッダーは `api/audio/audio_device.h`、`api/audio/audio_device_defines.h`、`api/audio/audio_processing.h` と `api/media_stream_interface.h` (AudioSourceInterface / AudioTrackSinkInterface)
+  - `AudioSourceInterface` は refcounted ハンドルのみで、データ注入のための API (`AddSink` / `RemoveSink` に相当するもの) を持たない
+  - `AudioTrackSinkInterface` は受信側のシンク (`OnData`) であり、送信 encoder へのデータ注入には使えない
 - 統計ヘルパーには音声用の `AudioOutboundStats` / `AudioInboundStats` が存在しない
-- libwebrtc-c はプリビルドアーカイブで配布されており、ソースは別リポジトリ (shiguredo/libwebrtc-c) で管理されている (v0.149.0, webrtc m149.7827.5.0 ベース)
+- libwebrtc-c はプリビルドアーカイブで配布されており、ソースは別リポジトリ (shiguredo/libwebrtc-c) で管理されている
 
 ## 設計方針
 
@@ -57,7 +58,11 @@ webrtc_AdaptedAudioTrackSource_CastToAudioSourceInterface(source);
 webrtc_AdaptedAudioTrackSource_refcounted_get / Release
 ```
 
-**C++ 実装**: `rtc::AdaptedAudioTrackSource` クラスを新設し、`webrtc::AudioSourceInterface` を継承する。`OnData(const int16_t* audio_data, size_t samples_per_channel)` で PCM データを受け取り、内部で `webrtc::AudioTrackSinkInterface::OnData()` を呼び出して downstream へ配送する。
+**C++ 実装**: `rtc::AdaptedAudioTrackSource` クラスを新設し、`webrtc::AudioSourceInterface` を継承する。`OnData(const int16_t* audio_data, size_t samples_per_channel)` で PCM データを受け取る。
+
+**注意 (audio pipeline の違い)**: 映像の `AdaptedVideoTrackSource` は `OnFrame()` で直接 encoder へ配送する push モデルだが、audio の送信 pipeline は video と異なり、encoder へのデータ経路が `AudioDeviceModule` → `AudioTransport` → `AudioSendStream` を経由する。`AdaptedAudioTrackSource` を既存の audio pipeline に統合する方法は libwebrtc-c (webrtc-rs) の実装に依存するため、実装時に以下を検証する:
+- `AudioSourceInterface` の `Sink<>` 経由で encoder に到達できるか
+- 到達できない場合、`AudioTransport` レベルでの注入、またはカスタム `AudioDeviceModule` の採用を検討する
 
 **変更対象**:
 - `include/webrtc_c/media/base/adapted_audio_track_source.h` (新規)
@@ -79,13 +84,29 @@ webrtc_AdaptedAudioTrackSource_refcounted_get / Release
 ### 3. Dart SDK 側
 
 **`lib/src/sora_media_stream.dart`**:
-- `ExternalAudioFrame` クラスを新設する (PCM データ、サンプルレート、チャンネル数、サンプル数を保持)
-- `LocalAudioTrack` に `writeAudioSamples(ExternalAudioFrame frame)` メソッドを追加する
-  - `captureType` 相当のフィールドを `LocalAudioTrack` に追加し、external audio track 以外での呼び出しを拒否する
+- `AudioTrackCaptureType` enum (`microphone` / `external`) を新設する
+- `ExternalAudioFrame` クラスを新設する
+  - PCM データは signed 16-bit little-endian 整数列とし、Dart 側では `Int16List` で保持する
+  - フィールド: `audioData` (Int16List)、`sampleRate` (int)、`channels` (int)
+  - `validateExternalAudioFrame(ExternalAudioFrame frame)` 関数: `sampleRate > 0`、`channels >= 1`、`audioData.length >= channels` を検証する
+- `LocalAudioTrack` に以下を追加する:
+  - コンストラクタで `AudioTrackCaptureType` と `AdaptedAudioTrackSource` のポインタ参照を受け取る
+  - `writeAudioSamples(ExternalAudioFrame frame)` メソッド
+    - `captureType != AudioTrackCaptureType.external` なら `StateError`
+    - 先頭で `validateExternalAudioFrame()` を呼び出す
+    - native の `adaptedAudioTrackSourceOnData()` を呼び出して PCM データを注入する
+- `LocalMediaStream` に以下を追加する:
+  - `_LocalAudioTrackMetadata` 内部クラス（`_LocalVideoTrackMetadata` 相当）
+  - `_audioTrackMetadata` フィールド
+  - `addTrack()` での metadata 保存
+  - `_reuseOrCreateAudioTrack()` での metadata 復元
+  - `removeTrack()` での metadata クリア
 
 **`lib/src/sora_media_devices.dart`**:
+- `AudioTrackCaptureType` enum (`microphone` / `external`) を新設する
 - `MediaDevices.createExternalAudioTrack({required int sampleRate, required int channels})` を追加する
-  - `adaptedAudioTrackSourceCreate()` → `pcFactoryCreateAudioTrack()` の流れで external audio track を生成する
+  - `adaptedAudioTrackSourceCreate(sampleRate, channels)` → `adaptedAudioTrackSourceCastToAudioSourceInterface()` → `pcFactoryCreateAudioTrack()` の流れで external audio track を生成する
+  - 生成した `LocalAudioTrack` に `AudioTrackCaptureType.external` と audio source 参照を保持させる
 
 ### 4. E2E テストヘルパー側
 
@@ -94,10 +115,15 @@ webrtc_AdaptedAudioTrackSource_refcounted_get / Release
   - コンストラクタ: `sampleRate` (Hz)、`frequency` (Hz)、`channels`、`amplitude`
   - `start(LocalAudioTrack track)` / `stop()` で周期的に `writeAudioSamples()` を呼ぶ
   - 内部で `Timer.periodic` を使って一定間隔の PCM バッファを生成する
+  - 1 回の `writeAudioSamples()` あたり 10ms 相当 (`sampleRate / 100` samples/channel) を上限とし、UI スレッドへの影響を抑制する
+  - E2E テスト専用のヘルパーであり、production 用途への流用は想定しない
 
 **`e2e_test_app/integration_test/helpers/stats_helpers.dart`**:
-- `AudioOutboundStats` クラス (bytesSent, packetsSent, mimeType 等)
-- `AudioInboundStats` クラス (bytesReceived, packetsReceived, mimeType 等)
+- `AudioOutboundStats` クラス
+  - video 版と異なり `framesEncoded` / `framesSent` 等のフレーム系フィールドは存在しない
+  - `bytesSent`、`packetsSent`、`mimeType`、`totalAudioEnergy`、`totalSamplesDuration` 等 audio 固有フィールドを保持する
+- `AudioInboundStats` クラス
+  - `bytesReceived`、`packetsReceived`、`mimeType`、`jitter`、`audioLevel` 等 audio 固有フィールドを保持する
 - `extractAudioOutboundStats(String raw)` 関数
 - `extractAudioInboundStats(String raw)` 関数
 - `waitForAudioOutboundStats()` 関数
@@ -115,15 +141,6 @@ webrtc_AdaptedAudioTrackSource_refcounted_get / Release
 - `LocalAudioTrack.writeAudioSamples(ExternalAudioFrame)` が利用可能である
 - `SineWaveAudioSource` がダミー音声を生成し external audio track に注入できる
 - `AudioOutboundStats` / `AudioInboundStats` と extract / wait 関数が利用可能である
-- 既存のテストが回帰していない
+- 既存の E2E テスト全件が回帰していない
 - `dart analyze --fatal-infos lib test` がパスする
-
-## 解決方法
-
-1. libwebrtc-c リポジトリで `adapted_audio_track_source.h` と C++ 実装を追加し、新しいバージョンをリリースする
-2. 本リポジトリの libwebrtc-c 依存バージョンを更新する
-3. `lib/src/ffi/bindings.dart` に新規 FFI バインディングを追加する
-4. `lib/src/sora_media_devices.dart` に `createExternalAudioTrack()` を追加する
-5. `lib/src/sora_media_stream.dart` に `ExternalAudioFrame` クラス、`LocalAudioTrack.writeAudioSamples()`、`LocalAudioTrack` の capture type 管理を追加する
-6. `e2e_test_app/integration_test/helpers/audio_source.dart` に `SineWaveAudioSource` を追加する
-7. `e2e_test_app/integration_test/helpers/stats_helpers.dart` に音声統計ヘルパーを追加する
+- `CHANGES.md` の `## develop` にエントリが追加されている

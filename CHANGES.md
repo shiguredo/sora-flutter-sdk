@@ -42,3 +42,6 @@
 
 - [FIX] re-offer 受信経路に応じて re-answer の送信先を切り替えるよう修正する
   - @zztkm
+
+- [ADD] 同一 bundleId 間の受信分離を確認する E2E テストを追加する
+  - @zztkm

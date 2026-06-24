@@ -40,6 +40,14 @@ DataChannel signaling E2E の前提:
 - sender 側は external video track を使うため、カメラ権限には依存しない
 - audio track を含むテスト（`remote_media_stream_e2e_test.dart`、`local_media_toggle_e2e_test.dart`）は `MediaDevices.createAudioTrack()` を使用するため、macOS のマイク権限と入力デバイスが必要
 
+bundleId 分離 E2E（`bundle_id_isolation_e2e_test.dart`）の前提:
+
+- 3 接続（observer / sender-same / sender-other）が同じ `channelId` を共有する
+- observer と sender-same は同じ `bundleId`（`bundle-a`）を設定する
+- sender-other は異なる `bundleId`（`bundle-b`）を設定する
+- 同じ `bundleId` を持つ observer と sender-same 間では互いのメディアを受信しない
+- 異なる `bundleId` を持つ sender-other のメディアは observer が受信する
+
 `TEST_SECRET_KEY` の扱い:
 
 - `{` で始まる場合は JSON として `metadata` にそのまま使う
@@ -63,6 +71,7 @@ flutter test integration_test/track_event_e2e_test.dart -d macos
 flutter test integration_test/two_party_media_e2e_test.dart -d macos
 flutter test integration_test/remote_media_stream_e2e_test.dart -d macos
 flutter test integration_test/local_media_toggle_e2e_test.dart -d macos
+flutter test integration_test/bundle_id_isolation_e2e_test.dart -d macos
 flutter test integration_test/connection_failure_e2e_test.dart -d macos
 flutter test integration_test/signaling_failover_e2e_test.dart -d macos
 ```

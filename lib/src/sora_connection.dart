@@ -359,8 +359,8 @@ class SoraConnection {
     } on TimeoutException catch (e, st) {
       // 切断後始末とエラー通知を行い、元のスタックトレースを保って再スローする。
       // TimeoutException 以外はここを通らず、呼び出し元へそのまま伝播する。
-      await disconnect();
       _failConnectReady(e, st);
+      await disconnect();
       _emitConnectionErrorEvent(
         code: SoraErrorCode.connectionTimeout,
         message: e.toString(),
@@ -391,8 +391,8 @@ class SoraConnection {
       channel = await _connectWebSocket();
     } on TimeoutException catch (e, st) {
       // signalingCandidateTimeout は connectionTimeout とは区別してハンドリングする
-      await disconnect();
       _failConnectReady(e, st);
+      await disconnect();
       _emitConnectionErrorEvent(
         code: SoraErrorCode.signalingCandidateTimeout,
         message: e.toString(),
@@ -444,8 +444,8 @@ class SoraConnection {
 
       await _waitForConnected();
     } catch (e, st) {
-      await disconnect();
       _failConnectReady(e, st);
+      await disconnect();
       Error.throwWithStackTrace(e, st);
     }
   }

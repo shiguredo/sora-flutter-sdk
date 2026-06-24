@@ -26,7 +26,7 @@ void main() {
         role: SoraRole.recvonly,
         metadata: env.metadata,
         timeoutOptions: const SoraTimeoutOptions(
-          connectionTimeout: Duration(seconds: 10),
+          connectionTimeout: Duration(seconds: 20),
           signalingCandidateTimeout: Duration(seconds: 2),
         ),
       );

@@ -54,6 +54,8 @@ final class ObservedConnection {
       <SoraDataChannelMessage>[];
   final List<Map<String, Object?>> switchedEvents =
       <Map<String, Object?>>[];
+  final List<Map<String, Object?>> notifyEvents = <Map<String, Object?>>[];
+  final List<Map<String, Object?>> pushEvents = <Map<String, Object?>>[];
 
   final Completer<void> _connected = Completer<void>();
   final Completer<void> _disconnected = Completer<void>();
@@ -124,6 +126,16 @@ final class ObservedConnection {
 
     if (event is SoraSwitchedEvent) {
       switchedEvents.add(event.message);
+      return;
+    }
+
+    if (event is SoraNotifyEvent) {
+      notifyEvents.add(event.message);
+      return;
+    }
+
+    if (event is SoraPushEvent) {
+      pushEvents.add(event.message);
       return;
     }
   }
@@ -385,6 +397,50 @@ final class ObservedConnection {
     );
   }
 
+  /// event_type が connection.created で、指定 connectionId に一致する
+  /// SoraNotifyEvent を待つ。
+  ///
+  /// connection.created notify の payload には connection_id が常に含まれる
+  /// ことを前提とする。
+  Future<Map<String, Object?>> waitForNotifyCreatedEvent(
+    WidgetTester tester, {
+    required String connectionId,
+    required Duration timeout,
+  }) async {
+    return _waitForCondition<Map<String, Object?>>(
+      tester,
+      source: notifyEvents,
+      predicate: (message) =>
+          message['event_type'] == 'connection.created' &&
+          message['connection_id'] == connectionId,
+      timeout: timeout,
+      buildTimeoutMessage: () =>
+          'Timed out while waiting for connection.created notify on $name. '
+          'connectionId=$connectionId '
+          'notifyEvents.length=${notifyEvents.length} '
+          'milestones=$milestones',
+    );
+  }
+
+  /// SoraPushEvent を待つ。
+  /// predicate が null の場合は最初の push を返す。
+  Future<Map<String, Object?>> waitForPushEvent(
+    WidgetTester tester, {
+    required Duration timeout,
+    bool Function(Map<String, Object?> message)? predicate,
+  }) async {
+    return _waitForCondition<Map<String, Object?>>(
+      tester,
+      source: pushEvents,
+      predicate: predicate ?? (_) => true,
+      timeout: timeout,
+      buildTimeoutMessage: () =>
+          'Timed out while waiting for SoraPushEvent on $name. '
+          'pushEvents.length=${pushEvents.length} '
+          'milestones=$milestones',
+    );
+  }
+
   /// 条件を満たす要素が見つかるまで polling する共通ヘルパー。
   Future<T> _waitForCondition<T>(
     WidgetTester tester, {
@@ -420,6 +476,8 @@ final class ObservedConnection {
         'dataChannelOpenEvents=${dataChannelOpenEvents.map((e) => e.label).toList()} '
         'dataChannelMessages=${dataChannelMessages.length} '
         'switchedEvents=${switchedEvents.length} '
+        'notifyEvents=${notifyEvents.length} '
+        'pushEvents=${pushEvents.length} '
         'errors=${errorSummaries()}';
   }
 

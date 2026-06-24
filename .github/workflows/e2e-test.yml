@@ -56,6 +56,8 @@ jobs:
             target: integration_test/local_media_toggle_e2e_test.dart
           - name: messaging only
             target: integration_test/messaging_only_e2e_test.dart
+          - name: notify metadata
+            target: integration_test/notify_metadata_e2e_test.dart
           - name: custom data channel
             target: integration_test/custom_data_channel_e2e_test.dart
           - name: signaling failover
@@ -182,6 +184,8 @@ jobs:
             target: integration_test/local_media_toggle_e2e_test.dart
           - name: messaging only
             target: integration_test/messaging_only_e2e_test.dart
+          - name: notify metadata
+            target: integration_test/notify_metadata_e2e_test.dart
           - name: custom data channel
             target: integration_test/custom_data_channel_e2e_test.dart
           - name: windows audio device

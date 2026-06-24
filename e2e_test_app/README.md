@@ -21,6 +21,7 @@ Sora Flutter SDK の recvonly / sendonly / sendrecv 接続と、2 クライア�
 | `TEST_SIGNALING_URLS` | シグナリング URL をカンマまたは空白区切り（例: `wss://a/signaling,wss://b/signaling`） |
 | `TEST_CHANNEL_ID_PREFIX` | チャンネル ID のプレフィックス。CI では `GITHUB_RUN_ID` を連結し、ローカルでは時刻でユニーク化する |
 | `TEST_SEND_DURATION` | （任意）sendonly / sendrecv テストの送信継続秒数（例: `60`） |
+| `TEST_PUSH_EXPECTED_TYPE` | （任意）notify metadata テストで push 受信を確認する場合、期待する `event_type` 値を設定する |
 
 接続失敗系 E2E の前提:
 
@@ -32,6 +33,13 @@ DataChannel signaling E2E の前提:
 
 - `dataChannelSignaling` を有効にした接続テスト（`custom_data_channel_e2e_test.dart`）は、DataChannel signaling に対応した Sora サーバーが必要。
 - サーバー側で `data_channel_signaling` が有効になっていない場合、`SoraSwitchedEvent` が発火せずテストがタイムアウトする。
+
+Notify metadata E2E（`notify_metadata_e2e_test.dart`）の前提:
+
+- `signalingNotifyMetadata` をサポートする Sora サーバーが必要。
+- sender の接続時に発行される `connection.created` notify が channel 内の全参加者にブロードキャストされる必要がある。
+- notify payload 上の key 名はサーバー実装によって `authn_metadata` または `signaling_notify_metadata` のどちらかになる。テストコードは両方をフォールバックして確認する。
+- push 検証はサーバー側から push メッセージを送信できる検証環境が必要。push は sender 側で受信することを前提とする。`TEST_PUSH_EXPECTED_TYPE` 環境変数で期待する `event_type` 値を設定すると、接続後に push 受信を確認する。未設定の場合は push 検証をスキップする。
 
 2 クライアント E2E の前提:
 
@@ -70,6 +78,7 @@ flutter test integration_test/sendonly_dummy_video_e2e_test.dart -d macos
 flutter test integration_test/sendrecv_smoke_e2e_test.dart -d macos
 flutter test integration_test/track_event_e2e_test.dart -d macos
 flutter test integration_test/two_party_media_e2e_test.dart -d macos
+flutter test integration_test/notify_metadata_e2e_test.dart -d macos
 flutter test integration_test/remote_media_stream_e2e_test.dart -d macos
 flutter test integration_test/local_media_toggle_e2e_test.dart -d macos
 flutter test integration_test/bundle_id_isolation_e2e_test.dart -d macos

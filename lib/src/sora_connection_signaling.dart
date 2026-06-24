@@ -26,16 +26,6 @@ extension _SoraConnectionSignaling on SoraConnection {
         _signalingState.connectingWebSocketChannel = channel;
         _signalingState.webSocketClosedCompleter =
             Completer<SoraDisconnectCloseInfo?>();
-        // WebSocket ストリームを購読し、受信・エラー・切断の各ハンドラを設定する。
-        _signalingState.webSocketSubscription = channel.stream.listen(
-          (Object? message) => _handleWebSocketMessage(message),
-          onError: (Object error, StackTrace stackTrace) {
-            _handleWebSocketError(error, stackTrace, channel);
-          },
-          onDone: () {
-            _handleWebSocketDone(channel);
-          },
-        );
         // シグナリング URL ごとの接続タイムアウト。
         // channel.ready が完了しない場合、次のシグナリング URL に移る
         await channel.ready.timeout(
@@ -47,15 +37,26 @@ extension _SoraConnectionSignaling on SoraConnection {
             );
           },
         );
+        // WebSocket ストリームを購読し、受信・エラー・切断の各ハンドラを設定する。
+        // channel.ready 成功後に購読することで、接続失敗時の error event が
+        // _handleWebSocketError 経由で漏れることを防ぐ
+        _signalingState.webSocketSubscription = channel.stream.listen(
+          (Object? message) => _handleWebSocketMessage(message),
+          onError: (Object error, StackTrace stackTrace) {
+            _handleWebSocketError(error, stackTrace, channel);
+          },
+          onDone: () {
+            _handleWebSocketDone(channel);
+          },
+        );
         _emitDebugMessage('ws connected: $url');
         return channel;
       } on TimeoutException catch (error) {
-        // タイムアウトした URL の購読・Completer・channel を後始末し、
+        // タイムアウトした URL の Completer・channel を後始末し、
         // lastError に記録して次の候補 URL へ進む。ここでは throw しない。
+        // channel.ready 成功前に catch に到達するため subscription は未設定。
         _emitDebugMessage('ws connect timeout: $url error=$error');
         lastError = error;
-        await _signalingState.webSocketSubscription?.cancel();
-        _signalingState.webSocketSubscription = null;
         _completeWebSocketClosedCompleter(null);
         _signalingState.webSocketClosedCompleter = null;
         if (identical(_signalingState.connectingWebSocketChannel, channel)) {
@@ -63,11 +64,10 @@ extension _SoraConnectionSignaling on SoraConnection {
         }
         await channel?.sink.close();
       } catch (error) {
-        // タイムアウト以外の接続エラー。 TimeoutException 時同様に後始末して次の候補 URL へ進む
+        // タイムアウト以外の接続エラー。TimeoutException 時同様に後始末して次の候補 URL へ進む
+        // channel.ready 成功前に catch に到達するため subscription は未設定。
         _emitDebugMessage('ws connect failed: $url error=$error');
         lastError = error;
-        await _signalingState.webSocketSubscription?.cancel();
-        _signalingState.webSocketSubscription = null;
         _completeWebSocketClosedCompleter(null);
         _signalingState.webSocketClosedCompleter = null;
         if (identical(_signalingState.connectingWebSocketChannel, channel)) {
@@ -218,15 +218,6 @@ extension _SoraConnectionSignaling on SoraConnection {
     _signalingState.webSocketChannel = newChannel;
     _signalingState.webSocketClosedCompleter =
         Completer<SoraDisconnectCloseInfo?>();
-    _signalingState.webSocketSubscription = newChannel.stream.listen(
-      (Object? message) => _handleWebSocketMessage(message),
-      onError: (Object error, StackTrace stackTrace) {
-        _handleWebSocketError(error, stackTrace, newChannel);
-      },
-      onDone: () {
-        _handleWebSocketDone(newChannel, name: 'Redirect WebSocket');
-      },
-    );
     try {
       await newChannel.ready.timeout(
         config.timeoutOptions.signalingCandidateTimeout,
@@ -238,6 +229,17 @@ extension _SoraConnectionSignaling on SoraConnection {
           );
         },
       );
+      // ready 成功後に subscription を設定することで、接続失敗時の error event が
+      // _handleWebSocketError 経由で漏れることを防ぐ
+      _signalingState.webSocketSubscription = newChannel.stream.listen(
+        (Object? message) => _handleWebSocketMessage(message),
+        onError: (Object error, StackTrace stackTrace) {
+          _handleWebSocketError(error, stackTrace, newChannel);
+        },
+        onDone: () {
+          _handleWebSocketDone(newChannel, name: 'Redirect WebSocket');
+        },
+      );
     } on TimeoutException catch (e, st) {
       _failConnectReady(
         StateError('Redirect signaling candidate timeout: $e'),
@@ -247,8 +249,7 @@ extension _SoraConnectionSignaling on SoraConnection {
         code: SoraErrorCode.signalingCandidateTimeout,
         message: e.toString(),
       );
-      await _signalingState.webSocketSubscription?.cancel();
-      _signalingState.webSocketSubscription = null;
+      // 到達時点では subscription 未設定のため cancel 不要
       _signalingState.webSocketChannel = null;
       _signalingState.webSocketClosedCompleter = null;
       await newChannel.sink.close();

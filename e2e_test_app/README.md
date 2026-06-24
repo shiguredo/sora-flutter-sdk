@@ -47,6 +47,7 @@ bundleId 分離 E2E（`bundle_id_isolation_e2e_test.dart`）の前提:
 - sender-other は異なる `bundleId`（`bundle-b`）を設定する
 - 同じ `bundleId` を持つ observer と sender-same 間では互いのメディアを受信しない
 - 異なる `bundleId` を持つ sender-other のメディアは observer が受信する
+- `bundleId` 未対応の Sora サーバーでは bundleId フィルタが機能せず、observer が sender-same の media も受信するためテストが失敗する
 
 `TEST_SECRET_KEY` の扱い:
 

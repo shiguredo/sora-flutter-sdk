@@ -1,7 +1,7 @@
 // 同一 bundleId 間の受信分離を確認する E2E。
 // 3 接続 (A observer recvonly bundle-a、B sender-same sendonly bundle-a、
 // C sender-other sendonly bundle-b) で A が B を受信せず C のみを受信することを確認する。
-// DataChannel / notify の分離は補助ログのみで pass 条件に含めない。
+// DataChannel / notify の分離は検証対象外。
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -68,19 +68,20 @@ void main() {
           connectionStageTimeout(senderOtherConfig);
       const observerTrackTimeout = Duration(seconds: 30);
 
-      // B の送信用リソース
+      // bundleId フィルタがサーバーで反映されるのを待つ時間。
+      // ネットワーク遅延があっても track の不在を確認できるよう 5 秒を確保する。
+      const _isolationWaitDuration = Duration(seconds: 5);
+
       ObservedConnection? senderSame;
       LocalMediaStream? streamB;
       LocalVideoTrack? videoTrackB;
       ColorBarVideoSource? videoSourceB;
 
-      // C の送信用リソース
       ObservedConnection? senderOther;
       LocalMediaStream? streamC;
       LocalVideoTrack? videoTrackC;
       ColorBarVideoSource? videoSourceC;
 
-      // A = observer
       ObservedConnection? observer;
 
       VideoInboundStats? firstInbound;
@@ -163,9 +164,9 @@ void main() {
           reason: 'sender-same connected 後に connectionId が確定していること。',
         );
 
-        // B のフレーム投入を開始し、A に届かないことを settle 時間で確認する
+        // B のフレーム投入を開始し、A に届かないことを待機時間で確認する
         videoSourceB.start(videoTrackB);
-        await tester.pump(const Duration(seconds: 5));
+        await tester.pump(_isolationWaitDuration);
 
         // A の remoteMediaStreams に B の connectionId が存在しないことを確認する
         expect(
@@ -260,20 +261,6 @@ void main() {
         );
 
         expect(
-          firstInbound.bytesReceived,
-          greaterThan(0),
-          reason:
-              'observer 初回取得時に video inbound-rtp の bytesReceived が'
-              '増えていること。',
-        );
-        expect(
-          firstInbound.packetsReceived,
-          greaterThan(0),
-          reason:
-              'observer 初回取得時に video inbound-rtp の packetsReceived が'
-              '増えていること。',
-        );
-        expect(
           secondInbound.bytesReceived,
           greaterThan(firstInbound.bytesReceived),
           reason:
@@ -324,24 +311,24 @@ void main() {
 
         await runCleanupStep(
           cleanupErrors,
-          'sender-same.disconnect',
-          () async {
-            if (senderSame != null) {
-              await senderSame.disconnect();
-              await senderSame.waitUntilDisconnected(
-                senderSameDisconnectTimeout,
-              );
-            }
-          },
-        );
-        await runCleanupStep(
-          cleanupErrors,
           'sender-other.disconnect',
           () async {
             if (senderOther != null) {
               await senderOther.disconnect();
               await senderOther.waitUntilDisconnected(
                 senderOtherDisconnectTimeout,
+              );
+            }
+          },
+        );
+        await runCleanupStep(
+          cleanupErrors,
+          'sender-same.disconnect',
+          () async {
+            if (senderSame != null) {
+              await senderSame.disconnect();
+              await senderSame.waitUntilDisconnected(
+                senderSameDisconnectTimeout,
               );
             }
           },

@@ -4,7 +4,7 @@
 
 ### misc
 
-- [ADD] notify と signalingNotifyMetadata の E2E テストを追加する
+- [ADD] notify と push と signalingNotifyMetadata の E2E テストを追加する
   - @zztkm
 
 - [ADD] devtools を Windows でも使えるようにする

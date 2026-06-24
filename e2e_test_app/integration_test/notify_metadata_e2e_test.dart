@@ -1,8 +1,8 @@
 // signalingNotifyMetadata を含む接続で connection.created notify を検証する E2E。
 // sender 側に設定した signalingNotifyMetadata が receiver 側で受信した
-// connection.created notify の signaling_notify_metadata に含まれることを確認する。
+// connection.created notify の authn_metadata または
+// signaling_notify_metadata に含まれることを確認する。
 
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -111,10 +111,6 @@ void main() {
           reason: 'sender connected 後に connectionId が確定していること。',
         );
 
-        // sender の接続完了後にフレーム投入を開始する。
-        videoSource.start(videoTrack);
-        await tester.pump(const Duration(seconds: 1));
-
         // receiver 側で sender 由来の connection.created notify を待つ。
         final notifyPayload = await receiver.waitForNotifyCreatedEvent(
           tester,
@@ -127,9 +123,10 @@ void main() {
           'event_type=${notifyPayload['event_type']}',
         );
 
-        // notify payload に authn_metadata（サーバーが
-        // signaling_notify_metadata をエコーバックした値）が含まれることを確認する。
-        // サーバー実装によって key 名が異なる可能性があるため、両方を試す。
+        // notify payload に authn_metadata または signaling_notify_metadata が
+        // 含まれることを確認する。SDK は connect メッセージの
+        // signaling_notify_metadata として送信するが、サーバー実装によって
+        // notify  payload 上での key 名が異なるため両方を試す。
         var metadataMap =
             notifyPayload['authn_metadata'] as Map<String, Object?>?;
         if (metadataMap == null) {
@@ -164,21 +161,23 @@ void main() {
             'stage=push_wait_start channelId=$channelId '
             'expectedType=$pushExpectedType',
           );
+          // event_type で照合する。Sora サーバーの push メッセージは
+          // event_type フィールドで種類を区別する。
           final pushPayload = await sender.waitForPushEvent(
             tester,
             timeout: _pushWaitTimeout,
             predicate: (message) =>
-                message['type'] == pushExpectedType,
+                message['event_type'] == pushExpectedType,
           );
           logE2eMessage(
             'stage=push_received channelId=$channelId '
-            'type=${pushPayload['type']}',
+            'event_type=${pushPayload['event_type']}',
           );
           expect(
-            pushPayload['type'],
+            pushPayload['event_type'],
             pushExpectedType,
             reason:
-                'SoraPushEvent の type が TEST_PUSH_EXPECTED_TYPE '
+                'SoraPushEvent の event_type が TEST_PUSH_EXPECTED_TYPE '
                 'と一致すること。',
           );
         } else {

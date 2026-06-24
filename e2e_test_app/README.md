@@ -33,6 +33,12 @@ DataChannel signaling E2E の前提:
 - `dataChannelSignaling` を有効にした接続テスト（`custom_data_channel_e2e_test.dart`）は、DataChannel signaling に対応した Sora サーバーが必要。
 - サーバー側で `data_channel_signaling` が有効になっていない場合、`SoraSwitchedEvent` が発火せずテストがタイムアウトする。
 
+Notify metadata E2E（`notify_metadata_e2e_test.dart`）の前提:
+
+- `signalingNotifyMetadata` をサポートする Sora サーバーが必要。
+- sender の接続時に発行される `connection.created` notify に `signaling_notify_metadata` が含まれることを前提とする。
+- push 検証はサーバー側から push メッセージを送信できる検証環境が必要。`TEST_PUSH_EXPECTED_TYPE` 環境変数で期待する `type` 値を設定すると、接続後に push 受信を確認する。未設定の場合は push 検証をスキップする。
+
 2 クライアント E2E の前提:
 
 - sender / receiver は同じ `channelId` を共有する
@@ -70,6 +76,7 @@ flutter test integration_test/sendonly_dummy_video_e2e_test.dart -d macos
 flutter test integration_test/sendrecv_smoke_e2e_test.dart -d macos
 flutter test integration_test/track_event_e2e_test.dart -d macos
 flutter test integration_test/two_party_media_e2e_test.dart -d macos
+flutter test integration_test/notify_metadata_e2e_test.dart -d macos
 flutter test integration_test/remote_media_stream_e2e_test.dart -d macos
 flutter test integration_test/local_media_toggle_e2e_test.dart -d macos
 flutter test integration_test/bundle_id_isolation_e2e_test.dart -d macos

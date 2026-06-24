@@ -274,6 +274,27 @@ void main() {
               'observer 2 回目取得時に video inbound-rtp の packetsReceived が'
               '増えていること。',
         );
+
+        // C 検証完了後も B の不在が維持されていることを再確認する。
+        // 同一 bundleId の接続からの遅延到着を検出するため。
+        expect(
+          observer.connection.remoteMediaStreams
+              .containsKey(senderSameConnectionId),
+          isFalse,
+          reason:
+              'C 検証後も同一 bundleId の sender-same'
+              'からの remoteMediaStreams を受信しないこと。',
+        );
+        expect(
+          observer.trackEvents.where(
+            (RemoteTrackObservation o) =>
+                o.connectionId == senderSameConnectionId,
+          ),
+          isEmpty,
+          reason:
+              'C 検証後も同一 bundleId の sender-same'
+              'からの SoraTrackEvent を受信しないこと。',
+        );
       } catch (e) {
         bodyError = e;
         rethrow;

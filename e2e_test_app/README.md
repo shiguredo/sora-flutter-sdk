@@ -28,6 +28,11 @@ Sora Flutter SDK の recvonly / sendonly / sendrecv 接続と、2 クライア�
 - 全 URL 不達テスト: `signalingCandidateTimeout` を短く設定し、存在しない URL への接続で `SoraConnectionErrorEvent(code: signaling_candidate_timeout)` が発火することを確認する。`signalingUrls` は `localhost` で上書きされるが、`loadE2eEnvironment()` が `TEST_SIGNALING_URLS` の existence check を含むためダミー値の設定が必要。
 - フェイルオーバーテスト: 先頭 URL に `localhost` (不達) を置き、2 件目以降の有効 URL で接続成功することを確認する。`signalingCandidateTimeout` を短く設定し、1 件目のタイムアウト後速やかに次候補へ進む。`signalingUrls` の先頭は `localhost` で上書きされるが、`loadE2eEnvironment()` が `TEST_SIGNALING_URLS` の existence check を含むため環境変数に有効値を設定する必要がある。
 
+DataChannel signaling E2E の前提:
+
+- `dataChannelSignaling` を有効にした接続テスト（`custom_data_channel_e2e_test.dart`）は、DataChannel signaling に対応した Sora サーバーが必要。
+- サーバー側で `data_channel_signaling` が有効になっていない場合、`SoraSwitchedEvent` が発火せずテストがタイムアウトする。
+
 2 クライアント E2E の前提:
 
 - sender / receiver は同じ `channelId` を共有する

@@ -52,6 +52,8 @@ final class ObservedConnection {
       <SoraDataChannelEvent>[];
   final List<SoraDataChannelMessage> dataChannelMessages =
       <SoraDataChannelMessage>[];
+  final List<Map<String, Object?>> switchedEvents =
+      <Map<String, Object?>>[];
 
   final Completer<void> _connected = Completer<void>();
   final Completer<void> _disconnected = Completer<void>();
@@ -117,6 +119,11 @@ final class ObservedConnection {
 
     if (event is SoraDataChannelMessageEvent) {
       dataChannelMessages.add(event.message);
+      return;
+    }
+
+    if (event is SoraSwitchedEvent) {
+      switchedEvents.add(event.message);
       return;
     }
   }
@@ -361,6 +368,23 @@ final class ObservedConnection {
     );
   }
 
+  /// switched メッセージを受信するまで待つ。
+  Future<Map<String, Object?>> waitForSwitched(
+    WidgetTester tester, {
+    required Duration timeout,
+  }) async {
+    return _waitForCondition<Map<String, Object?>>(
+      tester,
+      source: switchedEvents,
+      predicate: (_) => true,
+      timeout: timeout,
+      buildTimeoutMessage: () =>
+          'Timed out while waiting for SoraSwitchedEvent on $name. '
+          'switchedEvents=${switchedEvents.length} '
+          'milestones=$milestones',
+    );
+  }
+
   /// 条件を満たす要素が見つかるまで polling する共通ヘルパー。
   Future<T> _waitForCondition<T>(
     WidgetTester tester, {
@@ -395,6 +419,7 @@ final class ObservedConnection {
         'removeTrackEvents=$removeTrackEvents '
         'dataChannelOpenEvents=${dataChannelOpenEvents.map((e) => e.label).toList()} '
         'dataChannelMessages=${dataChannelMessages.length} '
+        'switchedEvents=${switchedEvents.length} '
         'errors=${errorSummaries()}';
   }
 

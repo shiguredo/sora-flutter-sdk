@@ -1,6 +1,8 @@
-// ユーザー定義 DataChannel (#test-channel) の open と送受信を検証する E2E 。
+// ユーザー定義 DataChannel (#test-channel) の open と送受信、および
+// DataChannel signaling の switched イベントを検証する E2E 。
 // 2 クライアント間で #test-channel の open を確認し、バイナリメッセージの
-// 送受信が成功することを確認する。
+// 送受信が成功することを確認する。また、dataChannelSignaling 有効時に
+// SoraSwitchedEvent が発火し、switched 後も signaling が継続することを確認する。
 
 import 'dart:typed_data';
 
@@ -15,7 +17,8 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets(
-    'custom_data_channel: #test-channel の open とメッセージ送受信を検証する',
+    'custom_data_channel: #test-channel の open とメッセージ送受信、'
+        'SoraSwitchedEvent の発火を検証する',
     (WidgetTester tester) async {
       final env = loadE2eEnvironment();
       final channelId = buildChannelId(env.channelPrefix, suffix: '-custom-dc');
@@ -81,6 +84,14 @@ void main() {
           'connectionId=${receiver.connectionId}',
         );
 
+        // dataChannelSignaling 有効時に SoraSwitchedEvent が発火することを確認する。
+        logE2eMessage('stage=receiver_wait_switched channelId=$channelId');
+        await receiver.waitForSwitched(
+          tester,
+          timeout: receiverTimeout,
+        );
+        logE2eMessage('stage=receiver_switched channelId=$channelId');
+
         logE2eMessage(
           'stage=sender_connect_start channelId=$channelId '
           'bundleId=${sender.connection.bundleId}',
@@ -92,6 +103,14 @@ void main() {
           'stage=sender_connected channelId=$channelId '
           'connectionId=${sender.connectionId}',
         );
+
+        // sender 側でも SoraSwitchedEvent が発火することを確認する。
+        logE2eMessage('stage=sender_wait_switched channelId=$channelId');
+        await sender.waitForSwitched(
+          tester,
+          timeout: senderTimeout,
+        );
+        logE2eMessage('stage=sender_switched channelId=$channelId');
 
         // sender / receiver 双方で #test-channel の open を待つ。
         final senderDcEvent = await sender.waitForDataChannelOpen(
@@ -140,6 +159,18 @@ void main() {
           isTrue,
           reason: 'receiver 側で open した DataChannel の compress が '
               'true であること。',
+        );
+
+        // 双方で SoraSwitchedEvent が 1 回だけ発火したことを確認する。
+        expect(
+          sender.switchedEvents.length,
+          1,
+          reason: 'sender で SoraSwitchedEvent が 1 回発火すること。',
+        );
+        expect(
+          receiver.switchedEvents.length,
+          1,
+          reason: 'receiver で SoraSwitchedEvent が 1 回発火すること。',
         );
 
         // sender -> receiver へのメッセージ送信。

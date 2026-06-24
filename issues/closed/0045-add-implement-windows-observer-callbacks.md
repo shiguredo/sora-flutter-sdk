@@ -152,8 +152,6 @@ macOS 版 (`apple_bridge.c:1063-1091`) と同様の 4 段階の破棄手順に�
 
 ## 解決方法
 
-- 2026-06-18 devtools (sora_devtools.exe) の Windows Release ビルドで、sendrecv のブラウザ間送受信を確認した
-
 ### 変更対象
 
 - `windows/windows_bridge.c`

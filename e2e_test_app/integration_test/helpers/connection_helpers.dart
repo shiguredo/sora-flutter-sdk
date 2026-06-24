@@ -399,6 +399,9 @@ final class ObservedConnection {
 
   /// event_type が connection.created で、指定 connectionId に一致する
   /// SoraNotifyEvent を待つ。
+  ///
+  /// connection.created notify の payload には connection_id が常に含まれる
+  /// ことを前提とする。
   Future<Map<String, Object?>> waitForNotifyCreatedEvent(
     WidgetTester tester, {
     required String connectionId,

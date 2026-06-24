@@ -5,6 +5,7 @@
 - Model: GPT-5 Codex
 - Branch: feature/add-datachannel-signaling-switched-e2e-coverage
 - Polished: 2026-06-03
+- Completed: 2026-06-24
 
 ## 目的
 
@@ -38,8 +39,7 @@
 
 ## 解決方法
 
-1. `dataChannelSignaling: true` の接続設定を用意する
-2. `SoraSwitchedEvent` を待つ helper を追加する
-3. switched 後に `getStats()` または custom DataChannel の疎通で接続継続を確認する
-4. `ignoreDisconnectWebSocket` の挙動差は補助ログに残してよいが、本 issue の pass 条件には含めない
-5. 前提条件を `e2e_test_app/README.md` とルート `README.md` に追記する
+1. `ObservedConnection` に `switchedEvents` フィールドと `waitForSwitched()` メソッドを追加した
+2. `custom_data_channel_e2e_test.dart` に `SoraSwitchedEvent` の発火確認と、switched 後の DataChannel 疎通継続確認を追加した
+3. `e2e_test_app/README.md` に DataChannel signaling 対応サーバーが必要である旨の前提条件を追記した
+4. `CHANGES.md` に変更履歴を追記した

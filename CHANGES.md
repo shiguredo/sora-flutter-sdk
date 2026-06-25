@@ -12,6 +12,10 @@
   - Linux の PeerConnectionFactory 生成時に `kPlatformDefaultAudio` で ADM を初期化し、音声入出力を有効化する
   - @zztkm
 
+- [ADD] Linux カメラキャプチャ (V4L2) を実装する
+  - V4L2 によるデバイス列挙・フォーマット取得・フレームキャプチャ・I420 変換・ローカルプレビューを実装する
+  - @zztkm
+
 ### misc
 
 - [ADD] notify と push と signalingNotifyMetadata の E2E テストを追加する

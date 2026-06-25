@@ -2,6 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-03
+- Completed: 2026-06-25
 - Model: Opus 4.8
 - Branch: feature/add-linux-remote-video-rendering
 
@@ -51,8 +52,23 @@ Linux でリモート映像を表示できるようにする。リモートビ�
 
 ## 解決方法
 
-1. Linux 版 RenderingSink を C ブリッジ (`linux_bridge.c`) に実装し、`linux/CMakeLists.txt` の `libsora_sdk.so` ターゲットに追加する
-2. I420 → RGBA 変換 (libyuv 利用) と `FlTextureRegistrar` への `FlPixelBufferTexture` 配信を実装する
-3. フレーム更新通知とスレッド安全なバッファ管理を実装する
-4. 0026 の MethodChannel ハンドラ (`createRemoteVideoRenderer` / `disposeRemoteVideoRenderer`) から接続する
-5. `CHANGES.md` に担当者行付きで `[ADD]` エントリを追記する
+- `linux/linux_bridge.c` に `LinuxRenderingSink` を実装した
+  - `VideoSinkInterface` コールバックで I420 フレーム受信、回転処理、RGBA 変換 (libyuv)
+  - `FlPixelBufferTexture` 用の `copy_pixels` API (`linux_rendering_sink_copy_pixels`)
+  - pthread mutex + cond による inflight 管理と安全な破棄
+  - `sora_video_frame_create` 他 3 関数のスタブを実体に置き換え
+- `linux/sora_sdk_plugin.cc` に MethodChannel ハンドラを実装した
+  - `SoraRemoteVideoTexture`: `FlPixelBufferTexture` の GObject サブクラス
+  - `createRemoteVideoRenderer` / `disposeRemoteVideoRenderer` ハンドラ
+  - クライアント dispose 時のレンダラー全停止
+- `linux/include/sora_sdk/sora_video_constants.h` を新設し FOURCC 定数を共通化
+- `/review-diff-code` の指摘に対応した
+  - `copy_pixels` のバッファ欠落時に FALSE を返すよう修正
+  - `buffer_ref` の NULL チェック追加
+  - pthread 系の戻り値チェック追加
+  - 未使用フィールド削除、重複コードのヘルパー化
+
+### 未検証項目
+
+- 実機 (Linux) での recvonly 接続によるリモート映像表示は未検証
+- Sora サーバーとの実機検証は後日実施する

@@ -18,6 +18,7 @@
 #include <webrtc_c/api/video/video_rotation.h>
 #include <webrtc_c/libyuv.h>
 #include <webrtc_c/media/base/adapted_video_track_source.h>
+#include "sora_sdk/sora_video_constants.h"
 
 // ============================================================================
 // GObject 型: SoraLocalPreviewTexture (FlPixelBufferTexture のサブクラス)
@@ -54,14 +55,6 @@ static void sora_local_preview_texture_class_init(
       reinterpret_cast<FlPixelBufferTextureClass*>(klass);
   fb_klass->copy_pixels = sora_local_preview_texture_copy_pixels;
 }
-
-// ============================================================================
-// libyuv の FOURCC_RGBA 値
-// ============================================================================
-
-static constexpr uint32_t kLibyuvFourccRgba =
-    (uint32_t)('R') | ((uint32_t)('G') << 8) | ((uint32_t)('B') << 16) |
-    ((uint32_t)('A') << 24);
 
 // ============================================================================
 // RGB24 → I420 変換 (MJPEG フォールバック用、BT.601)
@@ -633,7 +626,7 @@ void SoraCameraCapturer::ProcessFrame(const void* data,
         webrtc_I420Buffer_MutableDataV(i420),
         webrtc_I420Buffer_StrideV(i420),
         preview_buffer_.data(), width * 4,
-        width, height, kLibyuvFourccRgba);
+        width, height, SORA_LIBYUV_FOURCC_RGBA);
   }
 
   // AdaptedVideoTrackSource にフレームを投入する

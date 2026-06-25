@@ -314,6 +314,19 @@ class WebrtcClient {
           throw StateError('AudioDeviceModule init failed: rc=$initRcWin');
         }
       }
+    } else if (Platform.isLinux) {
+      final env = sharedLib.createEnvironment();
+      final adm = sharedLib.createAudioDeviceModule(
+        env,
+        sharedConsts.kPlatformDefaultAudio,
+      );
+      sharedLib.environmentDelete(env);
+      if (adm != nullptr) {
+        sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+        sharedLib.audioDeviceModuleRelease(
+          sharedLib.audioDeviceModuleRefcountedGet(adm),
+        );
+      }
     }
 
     final eventLogFactory = sharedLib.rtcEventLogFactoryCreate();

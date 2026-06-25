@@ -2,6 +2,12 @@
 
 ## develop
 
+### sora_sdk
+
+- [ADD] WebrtcClient に Linux の AudioDeviceModule 初期化パスを追加する
+  - Linux の PeerConnectionFactory 生成時に `kPlatformDefaultAudio` で ADM を初期化し、音声入出力を有効化する
+  - @zztkm
+
 ### misc
 
 - [ADD] notify と push と signalingNotifyMetadata の E2E テストを追加する

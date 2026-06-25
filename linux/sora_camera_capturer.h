@@ -5,7 +5,6 @@
 
 #include <atomic>
 #include <functional>
-#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -76,7 +75,7 @@ class SoraCameraCapturer {
  private:
   void CaptureLoop();
   void ProcessFrame(const void* data, size_t size, uint32_t pixelformat,
-                    int width, int height);
+                    int width, int height, int bytesperline);
   void CleanupV4l2();
 
   std::string device_id_;
@@ -91,8 +90,10 @@ class SoraCameraCapturer {
   std::mutex video_source_mutex_;
 
   // V4L2 リソース
-  int v4l2_fd_ = -1;
+  // v4l2_fd_ は CaptureLoop と Stop の両方から参照されるため atomic にする
+  std::atomic<int> v4l2_fd_{-1};
   uint32_t v4l2_pixelformat_ = 0;
+  int v4l2_bytesperline_ = 0;  // VIDIOC_S_FMT で設定された Y プレーンの stride
   struct Buffer {
     void* start;
     size_t length;

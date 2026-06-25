@@ -1,7 +1,6 @@
 #include "sora_camera_capturer.h"
 
 #include <dirent.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <linux/videodev2.h>
 #include <sys/ioctl.h>
@@ -10,7 +9,6 @@
 #include <unistd.h>
 
 #include <cstring>
-#include <sstream>
 
 #include <jpeglib.h>
 
@@ -32,6 +30,8 @@ static gboolean sora_local_preview_texture_copy_pixels(
     GError** error) {
   (void)error;
   auto* self = SORA_LOCAL_PREVIEW_TEXTURE(texture);
+  // capturer は Stop() で明示的に nullptr に設定される前に
+  // copy_pixels が呼ばれる可能性があるため、必ずチェックする
   if (!self->capturer) {
     return FALSE;
   }
@@ -129,9 +129,11 @@ FlValue* SoraCameraCapturer::EnumerateDevices() {
     FlValue* device_map = fl_value_new_map();
     fl_value_set_string_take(device_map, "deviceId",
                              fl_value_new_string(device_path.c_str()));
+    // cap.card は固定長 32 バイト。ヌル終端保証のため strnlen 境界で文字列化する
     fl_value_set_string_take(
         device_map, "label",
-        fl_value_new_string(reinterpret_cast<const char*>(cap.card)));
+        fl_value_new_string(
+            reinterpret_cast<const char*>(cap.card)));
     fl_value_append_take(result, device_map);
   }
   closedir(dir);
@@ -369,9 +371,10 @@ void SoraCameraCapturer::CaptureLoop() {
     return;
   }
 
-  // 実際に設定された解像度を反映する
+  // 実際に設定された解像度とバイトストライドを反映する
   requested_width_ = static_cast<int>(fmt.fmt.pix.width);
   requested_height_ = static_cast<int>(fmt.fmt.pix.height);
+  v4l2_bytesperline_ = static_cast<int>(fmt.fmt.pix.bytesperline);
 
   // FPS 設定
   struct v4l2_streamparm parm;
@@ -430,7 +433,12 @@ void SoraCameraCapturer::CaptureLoop() {
     buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     buf.memory = V4L2_MEMORY_MMAP;
     buf.index = i;
-    ioctl(fd, VIDIOC_QBUF, &buf);
+    if (ioctl(fd, VIDIOC_QBUF, &buf) < 0) {
+      // QBUF 失敗時はストリーミング開始前に異常を検出して終了する
+      CleanupV4l2();
+      running_ = false;
+      return;
+    }
   }
 
   // ストリーミング開始
@@ -448,13 +456,13 @@ void SoraCameraCapturer::CaptureLoop() {
     fd_set fds;
     FD_ZERO(&fds);
     FD_SET(fd, &fds);
-    struct timeval tv = {0, 100000};  // 100ms timeout
+    struct timeval tv = {0, 100000};  // 100ms タイムアウト
     int r = select(fd + 1, &fds, nullptr, nullptr, &tv);
     if (r < 0) {
       break;
     }
     if (r == 0) {
-      continue;  // timeout, check running_
+      continue;  // タイムアウト、running_ を再確認
     }
 
     struct v4l2_buffer buf;
@@ -467,10 +475,13 @@ void SoraCameraCapturer::CaptureLoop() {
 
     if (buf.index < v4l2_buffers_.size()) {
       ProcessFrame(v4l2_buffers_[buf.index].start, buf.bytesused,
-                   v4l2_pixelformat_, requested_width_, requested_height_);
+                   v4l2_pixelformat_, requested_width_,
+                   requested_height_, v4l2_bytesperline_);
     }
 
-    ioctl(fd, VIDIOC_QBUF, &buf);
+    if (ioctl(fd, VIDIOC_QBUF, &buf) < 0) {
+      break;
+    }
   }
 
   CleanupV4l2();
@@ -484,7 +495,8 @@ void SoraCameraCapturer::ProcessFrame(const void* data,
                                       size_t size,
                                       uint32_t pixelformat,
                                       int width,
-                                      int height) {
+                                      int height,
+                                      int bytesperline) {
   if (!data || size == 0) {
     return;
   }
@@ -498,8 +510,9 @@ void SoraCameraCapturer::ProcessFrame(const void* data,
 
   switch (pixelformat) {
     case V4L2_PIX_FMT_YUYV: {
+      // YUYV の 1 行あたりのバイト数は bytesperline (≧ width * 2)
       libyuv_YUY2ToI420(
-          static_cast<const uint8_t*>(data), width * 2,
+          static_cast<const uint8_t*>(data), bytesperline,
           webrtc_I420Buffer_MutableDataY(i420),
           webrtc_I420Buffer_StrideY(i420),
           webrtc_I420Buffer_MutableDataU(i420),
@@ -509,10 +522,11 @@ void SoraCameraCapturer::ProcessFrame(const void* data,
       break;
     }
     case V4L2_PIX_FMT_NV12: {
+      // NV12 の Y プレーンは bytesperline × height の領域
       const uint8_t* y_plane = static_cast<const uint8_t*>(data);
-      const uint8_t* uv_plane = y_plane + width * height;
+      const uint8_t* uv_plane = y_plane + bytesperline * height;
       libyuv_NV12ToI420(
-          y_plane, width, uv_plane, width,
+          y_plane, bytesperline, uv_plane, bytesperline,
           webrtc_I420Buffer_MutableDataY(i420),
           webrtc_I420Buffer_StrideY(i420),
           webrtc_I420Buffer_MutableDataU(i420),
@@ -527,42 +541,50 @@ void SoraCameraCapturer::ProcessFrame(const void* data,
       cinfo.err = jpeg_std_error(&jerr);
       jpeg_create_decompress(&cinfo);
       jpeg_mem_src(&cinfo, static_cast<const unsigned char*>(data), size);
+      bool decoded = false;
       if (jpeg_read_header(&cinfo, TRUE) == JPEG_HEADER_OK) {
-        jpeg_start_decompress(&cinfo);
-        int row_stride = cinfo.output_width * cinfo.output_components;
-        std::vector<uint8_t> rgb_buffer(row_stride * cinfo.output_height);
-        uint8_t* rows[1];
-        while (cinfo.output_scanline < cinfo.output_height) {
-          rows[0] = rgb_buffer.data() +
-                    row_stride * static_cast<size_t>(cinfo.output_scanline);
-          jpeg_read_scanlines(&cinfo, rows, 1);
-        }
-        int decoded_w = static_cast<int>(cinfo.output_width);
-        int decoded_h = static_cast<int>(cinfo.output_height);
-        // 実際のデコードサイズと要求サイズが異なる場合は i420 を再作成する
-        if (decoded_w != width || decoded_h != height) {
-          webrtc_I420Buffer_Release(i420);
-          i420_buffer = webrtc_I420Buffer_Create(decoded_w, decoded_h);
-          if (!i420_buffer) {
-            jpeg_finish_decompress(&cinfo);
-            jpeg_destroy_decompress(&cinfo);
-            return;
+        if (jpeg_start_decompress(&cinfo)) {
+          int row_stride = cinfo.output_width * cinfo.output_components;
+          std::vector<uint8_t> rgb_buffer(row_stride * cinfo.output_height);
+          uint8_t* rows[1];
+          while (cinfo.output_scanline < cinfo.output_height) {
+            rows[0] = rgb_buffer.data() +
+                      row_stride * static_cast<size_t>(cinfo.output_scanline);
+            jpeg_read_scanlines(&cinfo, rows, 1);
           }
-          i420 = webrtc_I420Buffer_refcounted_get(i420_buffer);
-          width = decoded_w;
-          height = decoded_h;
+          int decoded_w = static_cast<int>(cinfo.output_width);
+          int decoded_h = static_cast<int>(cinfo.output_height);
+          // 実際のデコードサイズと要求サイズが異なる場合は i420 を再作成する
+          if (decoded_w != width || decoded_h != height) {
+            webrtc_I420Buffer_Release(i420);
+            i420_buffer = webrtc_I420Buffer_Create(decoded_w, decoded_h);
+            if (!i420_buffer) {
+              jpeg_finish_decompress(&cinfo);
+              jpeg_destroy_decompress(&cinfo);
+              return;
+            }
+            i420 = webrtc_I420Buffer_refcounted_get(i420_buffer);
+            width = decoded_w;
+            height = decoded_h;
+          }
+          Rgb24ToI420(
+              rgb_buffer.data(), width, height,
+              webrtc_I420Buffer_MutableDataY(i420),
+              webrtc_I420Buffer_StrideY(i420),
+              webrtc_I420Buffer_MutableDataU(i420),
+              webrtc_I420Buffer_StrideU(i420),
+              webrtc_I420Buffer_MutableDataV(i420),
+              webrtc_I420Buffer_StrideV(i420));
+          decoded = true;
+          jpeg_finish_decompress(&cinfo);
         }
-        Rgb24ToI420(
-            rgb_buffer.data(), width, height,
-            webrtc_I420Buffer_MutableDataY(i420),
-            webrtc_I420Buffer_StrideY(i420),
-            webrtc_I420Buffer_MutableDataU(i420),
-            webrtc_I420Buffer_StrideU(i420),
-            webrtc_I420Buffer_MutableDataV(i420),
-            webrtc_I420Buffer_StrideV(i420));
-        jpeg_finish_decompress(&cinfo);
       }
       jpeg_destroy_decompress(&cinfo);
+      if (!decoded) {
+        // デコード失敗時は I420 を解放して終了する
+        webrtc_I420Buffer_Release(i420);
+        return;
+      }
       break;
     }
     default:
@@ -649,25 +671,30 @@ void SoraCameraCapturer::Stop() {
   running_ = false;
 
   // StreamOff を発行して DQBUF のブロックを解除する
-  if (v4l2_fd_ >= 0) {
+  int fd = v4l2_fd_.load();
+  if (fd >= 0) {
     int v4l2_type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    ioctl(v4l2_fd_, VIDIOC_STREAMOFF, &v4l2_type);
+    ioctl(fd, VIDIOC_STREAMOFF, &v4l2_type);
   }
 
   if (capture_thread_.joinable()) {
     capture_thread_.join();
   }
 
-  // ローカルプレビューテクスチャを登録解除する
+  // ローカルプレビューテクスチャを登録解除する。
+  // GObject 解放の前に capturer ポインタをクリアし、
+  // レンダースレッドからの copy_pixels コールバックを安全にする。
   if (preview_texture_ && texture_registrar_) {
     fl_texture_registrar_unregister_texture(
         texture_registrar_, FL_TEXTURE(preview_texture_));
+    preview_texture_->capturer = nullptr;
     g_object_unref(preview_texture_);
     preview_texture_ = nullptr;
   }
   preview_texture_id_ = -1;
 
-  CleanupV4l2();
+  // CleanupV4l2 は CaptureLoop() の終了時に呼ばれるため、
+  // ここでは呼ばない。二重解放を防ぐ。
 
   {
     std::lock_guard<std::mutex> lock(video_source_mutex_);
@@ -681,14 +708,14 @@ void SoraCameraCapturer::Stop() {
 
 void SoraCameraCapturer::CleanupV4l2() {
   for (auto& buf : v4l2_buffers_) {
-    if (buf.start != MAP_FAILED && buf.start != nullptr) {
+    if (buf.start != nullptr) {
       munmap(buf.start, buf.length);
     }
   }
   v4l2_buffers_.clear();
 
-  if (v4l2_fd_ >= 0) {
-    close(v4l2_fd_);
-    v4l2_fd_ = -1;
+  int fd = v4l2_fd_.exchange(-1);
+  if (fd >= 0) {
+    close(fd);
   }
 }

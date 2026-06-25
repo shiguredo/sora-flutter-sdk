@@ -287,17 +287,6 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
         reinterpret_cast<void*>(static_cast<intptr_t>(video_source_ptr)));
 
     if (client_id > 0) {
-      gpointer key = GSIZE_TO_POINTER(static_cast<gsize>(client_id));
-      auto* client = static_cast<SoraClient*>(
-          g_hash_table_lookup(self->clients, key));
-      if (client) {
-        // エラーコールバックは EventChannel の sendEvent に相当する実装が必要だが、
-        // Linux では未対応のため省略する。必要に応じて後続 issue で対応する。
-        (void)client;
-      }
-    }
-
-    if (client_id > 0) {
       self->context->client_capturers[client_id].insert(video_source_ptr);
     }
 
@@ -316,7 +305,8 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
   if (strcmp(method, "disposeLocalVideoTrackTexture") == 0) {
     FlValue* args = fl_method_call_get_args(method_call);
     if (args == nullptr || fl_value_get_type(args) != FL_VALUE_TYPE_MAP) {
-      fl_method_call_respond_success(method_call, nullptr, &error);
+      fl_method_call_respond_error(method_call, "invalid_argument",
+                                   "Arguments are required.", nullptr, &error);
       return;
     }
     int64_t video_source_ptr =
@@ -343,7 +333,8 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
   if (strcmp(method, "stopCameraCapturer") == 0) {
     FlValue* args = fl_method_call_get_args(method_call);
     if (args == nullptr || fl_value_get_type(args) != FL_VALUE_TYPE_MAP) {
-      fl_method_call_respond_success(method_call, nullptr, &error);
+      fl_method_call_respond_error(method_call, "invalid_argument",
+                                   "Arguments are required.", nullptr, &error);
       return;
     }
     int64_t video_source_ptr =
@@ -353,6 +344,7 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
       auto it = self->context->capturers.find(video_source_ptr);
       if (it != self->context->capturers.end()) {
         it->second->Stop();
+        self->context->capturers.erase(it);
       }
     }
 

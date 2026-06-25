@@ -8,6 +8,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
+#include <csetjmp>
 #include <cstring>
 
 #include <jpeglib.h>
@@ -548,12 +549,26 @@ void SoraCameraCapturer::ProcessFrame(const void* data,
       break;
     }
     case V4L2_PIX_FMT_MJPEG: {
+      struct MjpegErrorMgr {
+        struct jpeg_error_mgr pub;
+        jmp_buf setjmp_buffer;
+      };
       struct jpeg_decompress_struct cinfo;
-      struct jpeg_error_mgr jerr;
-      cinfo.err = jpeg_std_error(&jerr);
-      jpeg_create_decompress(&cinfo);
-      jpeg_mem_src(&cinfo, static_cast<const unsigned char*>(data), size);
+      MjpegErrorMgr jerr;
+      cinfo.err = jpeg_std_error(&jerr.pub);
+      jerr.pub.error_exit = [](j_common_ptr cinfo) {
+        auto* mgr = reinterpret_cast<MjpegErrorMgr*>(cinfo->err);
+        longjmp(mgr->setjmp_buffer, 1);
+      };
       bool decoded = false;
+      jpeg_create_decompress(&cinfo);
+      if (setjmp(jerr.setjmp_buffer)) {
+        // libjpeg のエラー発生時はここに飛ぶ。exit() を回避する
+        jpeg_destroy_decompress(&cinfo);
+        webrtc_I420Buffer_Release(i420);
+        return;
+      }
+      jpeg_mem_src(&cinfo, static_cast<const unsigned char*>(data), size);
       if (jpeg_read_header(&cinfo, TRUE) == JPEG_HEADER_OK) {
         if (jpeg_start_decompress(&cinfo)) {
           int row_stride = cinfo.output_width * cinfo.output_components;

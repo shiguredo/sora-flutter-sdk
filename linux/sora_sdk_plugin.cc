@@ -289,8 +289,12 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
     capturer->Start();
     int64_t texture_id = capturer->preview_texture_id();
     if (texture_id < 0) {
-      // テクスチャ登録に失敗した場合は capturer を破棄してエラーを返す
+      // テクスチャ登録に失敗した場合は capturer を破棄してエラーを返す。
+      // client_capturers に追加済みのエントリも削除する。
       capturer->Stop();
+      if (client_id > 0) {
+        self->context->client_capturers[client_id].erase(video_source_ptr);
+      }
       fl_method_call_respond_error(method_call, "capture_start_failed",
                                    "Failed to start camera capture.", nullptr,
                                    &error);

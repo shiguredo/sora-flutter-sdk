@@ -282,6 +282,32 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
     capturer->SetVideoSourcePtr(
         reinterpret_cast<void*>(static_cast<intptr_t>(video_source_ptr)));
 
+    // カメラキャプチャのエラーをクライアントに通知するコールバックを設定する
+    if (client_id > 0) {
+      gpointer key = GSIZE_TO_POINTER(static_cast<gsize>(client_id));
+      auto* client = static_cast<SoraClient*>(
+          g_hash_table_lookup(self->clients, key));
+      if (client && client->event_channel) {
+        capturer->SetOnCameraOpenErrorCallback(
+            [channel = client->event_channel,
+             streaming_ptr = &client->is_streaming]
+            (CameraOpenError error_code) {
+              if (!*streaming_ptr) {
+                return;
+              }
+              FlValue* event = fl_value_new_map();
+              fl_value_set_string_take(
+                  event, "type",
+                  fl_value_new_string("camera_open_error"));
+              fl_value_set_string_take(
+                  event, "errorCode",
+                  fl_value_new_int(static_cast<int>(error_code)));
+              g_autoptr(GError) send_error = nullptr;
+              fl_event_channel_send(channel, event, nullptr, &send_error);
+            });
+      }
+    }
+
     if (client_id > 0) {
       self->context->client_capturers[client_id].insert(video_source_ptr);
     }

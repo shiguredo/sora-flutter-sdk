@@ -9,6 +9,7 @@
 #include <webrtc_c/api/video/i420_buffer.h>
 #include <webrtc_c/api/video/video_frame.h>
 #include <webrtc_c/libyuv.h>
+#include "sora_sdk/sora_video_constants.h"
 
 // --- audio_device_module ---
 
@@ -81,14 +82,6 @@ typedef struct LinuxRenderingSink {
 } LinuxRenderingSink;
 
 // ===========================================================================
-// libyuv FOURCC 定数
-// ===========================================================================
-
-static const uint32_t kLibyuvFourccRgba =
-    (uint32_t)('R') | ((uint32_t)('G') << 8) | ((uint32_t)('B') << 16) |
-    ((uint32_t)('A') << 24);
-
-// ===========================================================================
 // I420 回転ヘルパー
 // ===========================================================================
 
@@ -120,6 +113,8 @@ static struct webrtc_I420Buffer* create_rotated_i420_buffer(
   struct webrtc_I420Buffer* rotated =
       webrtc_I420Buffer_refcounted_get(rotated_ref);
   if (rotated == NULL) {
+    // rotated_ref は借用ハンドル (WEBRTC_DECLARE_REFCOUNTED) であり
+    // 専用の Release API が存在しないため解放不要。
     return NULL;
   }
 
@@ -153,7 +148,8 @@ static void on_linux_frame(const struct webrtc_VideoFrame* frame,
   if (sink == NULL)
     return;
 
-  pthread_mutex_lock(&sink->lock);
+  if (pthread_mutex_lock(&sink->lock) != 0)
+    return;
   if (sink->disposed) {
     pthread_mutex_unlock(&sink->lock);
     return;
@@ -161,6 +157,10 @@ static void on_linux_frame(const struct webrtc_VideoFrame* frame,
 
   struct webrtc_VideoFrameBuffer_refcounted* buffer_ref =
       webrtc_VideoFrame_video_frame_buffer(frame);
+  if (buffer_ref == NULL) {
+    pthread_mutex_unlock(&sink->lock);
+    return;
+  }
   struct webrtc_VideoFrameBuffer* frame_buffer =
       webrtc_VideoFrameBuffer_refcounted_get(buffer_ref);
   if (frame_buffer == NULL) {
@@ -214,10 +214,11 @@ static void on_linux_frame(const struct webrtc_VideoFrame* frame,
   if (cb != NULL) {
     cb(ctx);
 
-    pthread_mutex_lock(&sink->lock);
-    sink->inflight_count--;
-    pthread_cond_broadcast(&sink->inflight_cond);
-    pthread_mutex_unlock(&sink->lock);
+    if (pthread_mutex_lock(&sink->lock) == 0) {
+      sink->inflight_count--;
+      pthread_cond_broadcast(&sink->inflight_cond);
+      pthread_mutex_unlock(&sink->lock);
+    }
   }
 }
 
@@ -240,7 +241,10 @@ linux_rendering_sink_create(void) {
   if (sink == NULL)
     return NULL;
 
-  pthread_mutex_init(&sink->lock, NULL);
+  if (pthread_mutex_init(&sink->lock, NULL) != 0) {
+    free(sink);
+    return NULL;
+  }
   if (pthread_cond_init(&sink->inflight_cond, NULL) != 0) {
     pthread_mutex_destroy(&sink->lock);
     free(sink);
@@ -253,6 +257,12 @@ linux_rendering_sink_create(void) {
   cbs.OnDiscardedFrame = on_linux_discarded;
   cbs.OnDestroy = on_linux_destroy;
   sink->sink = webrtc_VideoSinkInterface_new(&cbs, sink);
+  if (sink->sink == NULL) {
+    pthread_cond_destroy(&sink->inflight_cond);
+    pthread_mutex_destroy(&sink->lock);
+    free(sink);
+    return NULL;
+  }
 
   return sink;
 }
@@ -263,7 +273,8 @@ linux_rendering_sink_set_frame_callback(LinuxRenderingSink* sink,
                                         void* context) {
   if (sink == NULL)
     return;
-  pthread_mutex_lock(&sink->lock);
+  if (pthread_mutex_lock(&sink->lock) != 0)
+    return;
   sink->on_frame_available = callback;
   sink->frame_callback_context = context;
   pthread_mutex_unlock(&sink->lock);
@@ -283,7 +294,8 @@ linux_rendering_sink_copy_pixels(LinuxRenderingSink* sink,
   if (sink == NULL)
     return NULL;
 
-  pthread_mutex_lock(&sink->lock);
+  if (pthread_mutex_lock(&sink->lock) != 0)
+    return NULL;
   if (sink->disposed || sink->i420_buffer == NULL) {
     pthread_mutex_unlock(&sink->lock);
     return NULL;
@@ -317,7 +329,7 @@ linux_rendering_sink_copy_pixels(LinuxRenderingSink* sink,
       webrtc_I420Buffer_StrideU(sink->i420_buffer),
       webrtc_I420Buffer_MutableDataV(sink->i420_buffer),
       webrtc_I420Buffer_StrideV(sink->i420_buffer),
-      sink->rgba_buffer, w * 4, w, h, kLibyuvFourccRgba);
+      sink->rgba_buffer, w * 4, w, h, SORA_LIBYUV_FOURCC_RGBA);
 
   *out_width = (uint32_t)w;
   *out_height = (uint32_t)h;
@@ -332,12 +344,17 @@ __attribute__((visibility("default"))) void linux_rendering_sink_delete(
   if (sink == NULL)
     return;
 
-  pthread_mutex_lock(&sink->lock);
+  if (pthread_mutex_lock(&sink->lock) != 0)
+    return;
   sink->disposed = 1;
   sink->on_frame_available = NULL;
   sink->frame_callback_context = NULL;
   while (sink->inflight_count > 0) {
-    pthread_cond_wait(&sink->inflight_cond, &sink->lock);
+    // pthread_cond_wait が失敗した場合でも mutex は保持されている。
+    // inflight_count の変化がなければ再度待機することで安全性を保つ。
+    if (pthread_cond_wait(&sink->inflight_cond, &sink->lock) != 0) {
+      continue;
+    }
   }
 
   if (sink->i420_buffer != NULL) {

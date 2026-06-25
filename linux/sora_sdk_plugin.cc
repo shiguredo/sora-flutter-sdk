@@ -61,7 +61,12 @@ static gboolean sora_remote_video_texture_copy_pixels(
   if (!self->sink) {
     return FALSE;
   }
-  *out_buffer = linux_rendering_sink_copy_pixels(self->sink, width, height);
+  const uint8_t* pixels =
+      linux_rendering_sink_copy_pixels(self->sink, width, height);
+  if (!pixels) {
+    return FALSE;
+  }
+  *out_buffer = pixels;
   return TRUE;
 }
 
@@ -85,7 +90,6 @@ static void sora_remote_video_texture_class_init(
 // ---------------------------------------------------------------------------
 
 struct RemoteVideoRendererEntry {
-  int64_t renderer_id;
   SoraRemoteVideoTexture* texture;
   struct LinuxRenderingSink* sink;
   FlTextureRegistrar* registrar;
@@ -131,6 +135,24 @@ struct _SoraSdkPlugin {
 };
 
 G_DEFINE_TYPE(SoraSdkPlugin, sora_sdk_plugin, g_object_get_type())
+
+// ---------------------------------------------------------------------------
+// リモートレンダラーエントリの解放ヘルパー
+// ---------------------------------------------------------------------------
+
+static void release_remote_video_renderer_entry(
+    SoraSdkPlugin* self,
+    RemoteVideoRendererEntry& entry) {
+  if (entry.texture && self->texture_registrar) {
+    fl_texture_registrar_unregister_texture(
+        self->texture_registrar, FL_TEXTURE(entry.texture));
+    entry.texture->sink = nullptr;
+    g_object_unref(entry.texture);
+  }
+  if (entry.sink) {
+    linux_rendering_sink_delete(entry.sink);
+  }
+}
 
 static void sora_client_free(gpointer data) {
   auto* client = static_cast<SoraClient*>(data);
@@ -231,15 +253,7 @@ static void stop_client_renderers(SoraSdkPlugin* self, int64_t client_id) {
     return;
   }
   for (auto& [renderer_id, entry] : it->second) {
-    if (entry.texture && self->texture_registrar) {
-      fl_texture_registrar_unregister_texture(
-          self->texture_registrar, FL_TEXTURE(entry.texture));
-      entry.texture->sink = nullptr;
-      g_object_unref(entry.texture);
-    }
-    if (entry.sink) {
-      linux_rendering_sink_delete(entry.sink);
-    }
+    release_remote_video_renderer_entry(self, entry);
   }
   self->context->client_renderers.erase(it);
 }
@@ -588,7 +602,6 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
     // 登録エントリを作成する
     int64_t renderer_id = self->context->next_renderer_id++;
     RemoteVideoRendererEntry entry;
-    entry.renderer_id = renderer_id;
     entry.texture = tex;
     entry.sink = sink;
     entry.registrar = self->texture_registrar;
@@ -669,15 +682,7 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
     }
 
     RemoteVideoRendererEntry& entry = renderer_it->second;
-    if (entry.texture && self->texture_registrar) {
-      fl_texture_registrar_unregister_texture(
-          self->texture_registrar, FL_TEXTURE(entry.texture));
-      entry.texture->sink = nullptr;
-      g_object_unref(entry.texture);
-    }
-    if (entry.sink) {
-      linux_rendering_sink_delete(entry.sink);
-    }
+    release_remote_video_renderer_entry(self, entry);
     client_it->second.erase(renderer_it);
 
     fl_method_call_respond_success(method_call, nullptr, &error);
@@ -689,7 +694,7 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
 }
 
 // ---------------------------------------------------------------------------
-// GObject lifecycle
+// GObject ライフサイクル
 // ---------------------------------------------------------------------------
 
 static void sora_sdk_plugin_dispose(GObject* object) {
@@ -706,15 +711,7 @@ static void sora_sdk_plugin_dispose(GObject* object) {
     // 全リモートレンダラーを停止する
     for (auto& [client_id, renderers] : self->context->client_renderers) {
       for (auto& [renderer_id, entry] : renderers) {
-        if (entry.texture && self->texture_registrar) {
-          fl_texture_registrar_unregister_texture(
-              self->texture_registrar, FL_TEXTURE(entry.texture));
-          entry.texture->sink = nullptr;
-          g_object_unref(entry.texture);
-        }
-        if (entry.sink) {
-          linux_rendering_sink_delete(entry.sink);
-        }
+        release_remote_video_renderer_entry(self, entry);
       }
     }
     self->context->client_renderers.clear();
@@ -753,7 +750,7 @@ static void sora_sdk_plugin_init(SoraSdkPlugin* self) {
 }
 
 // ---------------------------------------------------------------------------
-// MethodChannel callback
+// MethodChannel コールバック
 // ---------------------------------------------------------------------------
 
 static void method_call_cb(FlMethodChannel* channel,

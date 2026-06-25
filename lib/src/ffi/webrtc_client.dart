@@ -144,7 +144,7 @@ class WebrtcClient {
     return sharedLib.pcFactoryRefcountedGet(_sharedFactoryRef!);
   }
 
-  // macOS で保持している `AudioDeviceModule` の raw pointer を返す。
+  // macOS / Windows / Linux で保持している `AudioDeviceModule` の raw pointer を返す。
   //
   // 録音デバイスの切り替え API で再利用するため、PCF に渡した後も
   // `_sharedAdmRef` を握り続けている。未生成プラットフォームでは `nullptr`。

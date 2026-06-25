@@ -18,7 +18,7 @@ class SoraAudioDevices {
   // 各要素は {"deviceId": <sink_name>, "label": <description>} のマップ。
   static FlValue* EnumerateOutputDevices();
 
-  // 既定の音声入力デバイス ID (PulseAudio の既定ソース名) を返す。
+  // 既定の音声入力デバイス ID を返す。
   static std::string GetDefaultInputDeviceId();
 };
 

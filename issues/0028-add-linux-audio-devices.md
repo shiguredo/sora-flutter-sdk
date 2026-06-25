@@ -69,3 +69,29 @@ Linux で音声入出力デバイスを列挙・選択できるようにする�
 3. 入力デバイス切り替えを実装する (ADM 取得方式は libwebrtc-c の実装確認後に確定)
 4. 0026 の MethodChannel ハンドラから接続する
 5. `CHANGES.md` に担当者行付きで `[ADD]` エントリを追記する
+
+## 実装状況
+
+2026-06-25 時点でコード実装は完了している。ブランチ `feature/add-linux-audio-devices` にコミット済み。
+
+実装内容:
+
+- `linux/sora_audio_devices.h` / `linux/sora_audio_devices.cc`: PulseAudio を用いたデバイス列挙・既定入力取得
+- `linux/sora_sdk_plugin.cc`: MethodChannel ハンドラ (enumerate, getDefault) 実装
+- `linux/CMakeLists.txt`: PulseAudio のリンク追加
+- `lib/src/ffi/webrtc_client.dart`: Linux で `_sharedAdmRef` を保持し FFI 経由で `SetRecordingDevice` を呼ぶ方式 (Plan B) を採用
+- `lib/src/media/sora_media_device_platform.dart`: Linux を FFI パスに追加
+- `lib/src/sora_media_devices.dart`: `createAudioTrack` に `Platform.isLinux` を追加
+- `CHANGES.md`: エントリ追記
+
+### 未完了: 実機確認
+
+- Linux 実機 + PulseAudio 環境でのデバイス列挙・既定マイク取得・録音デバイス切り替えの動作確認が未実施
+- PulseAudio 不在環境でのフォールバック確認が未実施
+- テスト未追加
+
+以下の残件を実機確認後に実施すること:
+
+- テストの追加 (列挙・既定入力取得・デバイス切り替え・PulseAudio 不在時フォールバック)
+- 実機確認完了後に issue を close する
+- `_sharedAdmRef` 方式 (Plan B) で実際に録音デバイスが切り替わることの検証

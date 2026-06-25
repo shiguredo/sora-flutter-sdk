@@ -303,6 +303,14 @@ void SoraCameraCapturer::Start() {
     return;
   }
 
+  // 前回のキャプチャスレッドが joinable な場合は join してから再作成する。
+  // CaptureLoop がエラーで早期リターンした場合、running_ は false だが
+  // capture_thread_ は joinable なまま残っているため、
+  // そのまま代入すると std::terminate が発生する。
+  if (capture_thread_.joinable()) {
+    capture_thread_.join();
+  }
+
   // FlPixelBufferTexture の GObject サブクラスを作成してテクスチャ登録する
   preview_texture_ = static_cast<SoraLocalPreviewTexture*>(
       g_object_new(SORA_TYPE_LOCAL_PREVIEW_TEXTURE, nullptr));

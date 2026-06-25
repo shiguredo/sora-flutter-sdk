@@ -288,6 +288,14 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
 
     capturer->Start();
     int64_t texture_id = capturer->preview_texture_id();
+    if (texture_id < 0) {
+      // テクスチャ登録に失敗した場合は capturer を破棄してエラーを返す
+      capturer->Stop();
+      fl_method_call_respond_error(method_call, "capture_start_failed",
+                                   "Failed to start camera capture.", nullptr,
+                                   &error);
+      return;
+    }
     self->context->capturers[video_source_ptr] = std::move(capturer);
 
     g_autoptr(FlValue) response = fl_value_new_map();
@@ -307,6 +315,12 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
     }
     int64_t video_source_ptr =
         get_int64_from_map(args, "videoSourcePtr", 0);
+    if (video_source_ptr == 0) {
+      fl_method_call_respond_error(
+          method_call, "invalid_argument",
+          "videoSourcePtr must be a non-zero integer.", nullptr, &error);
+      return;
+    }
 
     if (self->context) {
       auto it = self->context->capturers.find(video_source_ptr);
@@ -335,6 +349,12 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
     }
     int64_t video_source_ptr =
         get_int64_from_map(args, "videoSourcePtr", 0);
+    if (video_source_ptr == 0) {
+      fl_method_call_respond_error(
+          method_call, "invalid_argument",
+          "videoSourcePtr must be a non-zero integer.", nullptr, &error);
+      return;
+    }
 
     if (self->context) {
       auto it = self->context->capturers.find(video_source_ptr);

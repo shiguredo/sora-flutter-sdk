@@ -106,7 +106,7 @@ class WebrtcClient {
   static Pointer<WebrtcThreadUnique>? _sharedSignalingThread;
   static Pointer<WebrtcPeerConnectionFactoryInterfaceRefcounted>?
   _sharedFactoryRef;
-  // macOS で明示生成した AudioDeviceModule の参照を保持する。
+  // macOS / Windows / Linux で明示生成した AudioDeviceModule の参照を保持する。
   // Dart 側で SetRecordingDevice を呼ぶために PCF に渡した後も release せず持ち続ける。
   static Pointer<WebrtcAudioDeviceModuleRefcounted>? _sharedAdmRef;
   static SimulcastVideoEncoderFactory? _sharedSimulcastVideoEncoderFactory;
@@ -323,9 +323,19 @@ class WebrtcClient {
       sharedLib.environmentDelete(env);
       if (adm != nullptr) {
         sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
-        sharedLib.audioDeviceModuleRelease(
+        // Dart から SetRecordingDevice を呼ぶために参照を保持しておく
+        if (_sharedAdmRef != null) {
+          sharedLib.audioDeviceModuleRelease(
+            sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+          );
+        }
+        _sharedAdmRef = adm;
+        final initRcLinux = sharedLib.audioDeviceModuleInit(
           sharedLib.audioDeviceModuleRefcountedGet(adm),
         );
+        if (initRcLinux != 0) {
+          throw StateError('AudioDeviceModule init failed: rc=$initRcLinux');
+        }
       }
     }
 

@@ -163,6 +163,7 @@ abstract final class MediaDevices {
     if (Platform.isMacOS ||
         Platform.isIOS ||
         Platform.isWindows ||
+        Platform.isLinux ||
         audioDeviceId != null) {
       // オーディオ入力デバイスが存在しない環境（CI 等）では
       // setAudioInputDevice が失敗する可能性があるが、ネイティブの

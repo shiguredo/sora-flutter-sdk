@@ -16,6 +16,10 @@
   - V4L2 によるデバイス列挙・フォーマット取得・フレームキャプチャ・I420 変換・ローカルプレビューを実装する
   - @zztkm
 
+- [ADD] Linux 音声デバイスの列挙と選択を実装する
+  - PulseAudio を用いた音声入出力デバイスの列挙と入力デバイス切り替えを実装する
+  - @zztkm
+
 ### misc
 
 - [ADD] notify と push と signalingNotifyMetadata の E2E テストを追加する

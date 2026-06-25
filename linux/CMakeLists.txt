@@ -17,6 +17,7 @@ set(WEBRTC_LIB "${LIBWEBRTC_C_BUILD_DIR}/_deps/webrtc/lib/libwebrtc.a")
 # 単一の共有ライブラリに統合する。
 
 add_library(${PLUGIN_NAME} SHARED
+  "sora_audio_devices.cc"
   "sora_camera_capturer.cc"
   "sora_sdk_plugin.cc"
   "linux_bridge.c"
@@ -39,6 +40,8 @@ if(PkgConfig_FOUND)
   pkg_check_modules(X11 x11 IMPORTED_TARGET)
   # libjpeg-turbo: V4L2 MJPEG デコード用
   pkg_check_modules(JPEG libjpeg IMPORTED_TARGET)
+  # PulseAudio: 音声デバイス列挙用
+  pkg_check_modules(PULSEAUDIO libpulse IMPORTED_TARGET)
 endif()
 if(X11_FOUND)
   target_link_libraries(${PLUGIN_NAME} PRIVATE flutter dl pthread PkgConfig::X11)
@@ -50,6 +53,12 @@ if(JPEG_FOUND)
   target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::JPEG)
 else()
   target_link_libraries(${PLUGIN_NAME} PRIVATE jpeg)
+endif()
+# PulseAudio リンク (音声デバイス列挙用)
+if(PULSEAUDIO_FOUND)
+  target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::PULSEAUDIO)
+else()
+  target_link_libraries(${PLUGIN_NAME} PRIVATE pulse)
 endif()
 
 if(EXISTS "${LIBWEBRTC_C_LIB}")

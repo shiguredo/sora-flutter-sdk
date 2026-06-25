@@ -11,6 +11,7 @@
 #include <memory>
 #include <set>
 
+#include "sora_audio_devices.h"
 #include "sora_camera_capturer.h"
 
 // ---------------------------------------------------------------------------
@@ -214,14 +215,28 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
 
   // --- enumerateAudioInputDevices ---
   if (strcmp(method, "enumerateAudioInputDevices") == 0) {
-    g_autoptr(FlValue) result = fl_value_new_list();
+    FlValue* result = SoraAudioDevices::EnumerateInputDevices();
     fl_method_call_respond_success(method_call, result, &error);
     return;
   }
 
   // --- enumerateAudioOutputDevices ---
   if (strcmp(method, "enumerateAudioOutputDevices") == 0) {
-    g_autoptr(FlValue) result = fl_value_new_list();
+    FlValue* result = SoraAudioDevices::EnumerateOutputDevices();
+    fl_method_call_respond_success(method_call, result, &error);
+    return;
+  }
+
+  // --- getDefaultAudioInputDevice ---
+  if (strcmp(method, "getDefaultAudioInputDevice") == 0) {
+    std::string device_id = SoraAudioDevices::GetDefaultInputDeviceId();
+    if (device_id.empty()) {
+      fl_method_call_respond_error(method_call, "device_not_found",
+                                   "Default audio input device not found.",
+                                   nullptr, &error);
+      return;
+    }
+    g_autoptr(FlValue) result = fl_value_new_string(device_id.c_str());
     fl_method_call_respond_success(method_call, result, &error);
     return;
   }

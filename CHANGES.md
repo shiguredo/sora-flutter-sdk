@@ -4,6 +4,10 @@
 
 ### sora_sdk
 
+- [ADD] Linux ネイティブプラグイン基盤と MethodChannel ハンドラを追加する
+  - CMake で `libsora_sdk.so` を生成し、MethodChannel / EventChannel によるクライアント管理を実装する
+  - @zztkm
+
 - [ADD] WebrtcClient に Linux の AudioDeviceModule 初期化パスを追加する
   - Linux の PeerConnectionFactory 生成時に `kPlatformDefaultAudio` で ADM を初期化し、音声入出力を有効化する
   - @zztkm

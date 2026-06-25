@@ -129,11 +129,14 @@ FlValue* SoraCameraCapturer::EnumerateDevices() {
     FlValue* device_map = fl_value_new_map();
     fl_value_set_string_take(device_map, "deviceId",
                              fl_value_new_string(device_path.c_str()));
-    // cap.card は固定長 32 バイト。ヌル終端保証のため strnlen 境界で文字列化する
+    // cap.card は固定長 32 バイト。ヌル終端が保証されないため、
+    // strnlen で範囲を制限した上で文字列化する
     fl_value_set_string_take(
         device_map, "label",
-        fl_value_new_string(
-            reinterpret_cast<const char*>(cap.card)));
+        fl_value_new_string_sized(
+            reinterpret_cast<const char*>(cap.card),
+            strnlen(reinterpret_cast<const char*>(cap.card),
+                    sizeof(cap.card))));
     fl_value_append_take(result, device_map);
   }
   closedir(dir);
@@ -337,8 +340,8 @@ void SoraCameraCapturer::CaptureLoop() {
       !(cap.capabilities & V4L2_CAP_VIDEO_CAPTURE)) {
     if (on_camera_open_error_)
       on_camera_open_error_(CameraOpenError::DeviceOpenFailed);
-    close(fd);
     v4l2_fd_ = -1;
+    close(fd);
     running_ = false;
     return;
   }
@@ -365,8 +368,8 @@ void SoraCameraCapturer::CaptureLoop() {
   if (!format_set) {
     if (on_camera_open_error_)
       on_camera_open_error_(CameraOpenError::VidiocSFmtFailed);
-    close(fd);
     v4l2_fd_ = -1;
+    close(fd);
     running_ = false;
     return;
   }
@@ -394,8 +397,8 @@ void SoraCameraCapturer::CaptureLoop() {
   if (ioctl(fd, VIDIOC_REQBUFS, &req) < 0) {
     if (on_camera_open_error_)
       on_camera_open_error_(CameraOpenError::VidiocReqbufsFailed);
-    close(fd);
     v4l2_fd_ = -1;
+    close(fd);
     running_ = false;
     return;
   }
@@ -485,6 +488,7 @@ void SoraCameraCapturer::CaptureLoop() {
   }
 
   CleanupV4l2();
+  running_ = false;
 }
 
 // ============================================================================

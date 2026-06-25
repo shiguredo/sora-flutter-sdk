@@ -20,8 +20,6 @@
 struct SoraClient {
   int64_t client_id;
   FlEventChannel* event_channel;
-  FlEventChannelHandler listen_handler;
-  FlEventChannelHandler cancel_handler;
   bool is_streaming;
 };
 
@@ -160,8 +158,6 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
     auto* client = static_cast<SoraClient*>(g_malloc(sizeof(SoraClient)));
     client->client_id = client_id;
     client->event_channel = event_channel;
-    client->listen_handler = sora_event_listen_cb;
-    client->cancel_handler = sora_event_cancel_cb;
     client->is_streaming = false;
 
     g_hash_table_insert(self->clients,
@@ -345,6 +341,11 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
       if (it != self->context->capturers.end()) {
         it->second->Stop();
         self->context->capturers.erase(it);
+      }
+
+      // client_capturers からも削除する
+      for (auto& pair : self->context->client_capturers) {
+        pair.second.erase(video_source_ptr);
       }
     }
 

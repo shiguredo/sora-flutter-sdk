@@ -1,6 +1,6 @@
 #!/usr/bin/env dart
-// 各プラットフォーム向けのネイティブ依存関係（libwebrtc-c / webrtc）をダウンロード・展開・インストールするスクリプト。
-// 引数でプラットフォーム名（android_arm64 等）を受け取る。
+// Android / Linux / Windows 向けのネイティブ依存関係（libwebrtc-c / webrtc）をダウンロード・展開・インストールするスクリプト。
+// 引数でプラットフォーム名（android_arm64 / linux_ubuntu_22_04_x86_64 等）を受け取る。
 //
 // native_deps.json に各依存のバージョン、ダウンロード URL、アーカイブの SHA256 が定義されている。
 // 取得済みの依存情報は .state.json に保存され、バージョン・アーカイブ名に変更がない場合は再取得をスキップする。
@@ -37,6 +37,26 @@ const platformConfig = {
       'build-android_arm64/_deps/webrtc/include',
       'build-android_arm64/_deps/webrtc/lib/arm64-v8a/libwebrtc.a',
       'build-android_arm64/_deps/webrtc/jar/webrtc.jar',
+    ],
+  },
+  'linux_ubuntu_22_04_x86_64': {
+    'build_dir': 'build-linux_ubuntu_22_04_x86_64',
+    'extract_paths': ['build-linux_ubuntu_22_04_x86_64'],
+    'required_paths': [
+      'include/webrtc_c.h',
+      'build-linux_ubuntu_22_04_x86_64/libwebrtc-c.a',
+      'build-linux_ubuntu_22_04_x86_64/_deps/webrtc/include',
+      'build-linux_ubuntu_22_04_x86_64/_deps/webrtc/lib/libwebrtc.a',
+    ],
+  },
+  'linux_ubuntu_24_04_x86_64': {
+    'build_dir': 'build-linux_ubuntu_24_04_x86_64',
+    'extract_paths': ['build-linux_ubuntu_24_04_x86_64'],
+    'required_paths': [
+      'include/webrtc_c.h',
+      'build-linux_ubuntu_24_04_x86_64/libwebrtc-c.a',
+      'build-linux_ubuntu_24_04_x86_64/_deps/webrtc/include',
+      'build-linux_ubuntu_24_04_x86_64/_deps/webrtc/lib/libwebrtc.a',
     ],
   },
   'windows_x86_64': {

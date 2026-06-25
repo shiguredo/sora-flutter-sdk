@@ -12,6 +12,14 @@
         "file": "libwebrtc_c-android_arm64.tar.gz",
         "sha256": "c20e0d85f6401bdff89e1bdaccd044af92b12f3caf5fb7f806155f2132378fd0"
       },
+      "linux_ubuntu_22_04_x86_64": {
+        "file": "libwebrtc_c-ubuntu-22.04_x86_64.tar.gz",
+        "sha256": "f5519176f4ad3e4eb6b6a99c0a4a9c892a83f65c45c01defe9732f62fd433150"
+      },
+      "linux_ubuntu_24_04_x86_64": {
+        "file": "libwebrtc_c-ubuntu-24.04_x86_64.tar.gz",
+        "sha256": "c273dad494987773ae904d6ee1311357d59ab3b02470e80566d92a300c720eca"
+      },
       "windows_x86_64": {
         "file": "libwebrtc_c-windows_x86_64.tar.gz",
         "sha256": "3baadabb7dc7cb96d200e987cc195ddf06ee3f78d4ce80472e5f7e495679ffa5"
@@ -25,6 +33,14 @@
       "android_arm64": {
         "file": "webrtc.android.tar.gz",
         "sha256": "907c4712fd5b0e44a08048c59b60971a4d047788d89be967be3bbc47cbfd1014"
+      },
+      "linux_ubuntu_22_04_x86_64": {
+        "file": "webrtc.ubuntu-22.04_x86_64.tar.gz",
+        "sha256": "296133d67c9820fe60bbae695160705338d894855f0c49f9815be97017d26bdd"
+      },
+      "linux_ubuntu_24_04_x86_64": {
+        "file": "webrtc.ubuntu-24.04_x86_64.tar.gz",
+        "sha256": "4fcc3759771cb35df021bdddfb4fd540314a90e9636647c1280d73802e1413ec"
       },
       "windows_x86_64": {
         "file": "webrtc.windows_x86_64.zip",

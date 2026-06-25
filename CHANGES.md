@@ -4,6 +4,10 @@
 
 ### sora_sdk
 
+- [ADD] Linux リモート映像レンダリングを実装する
+  - RenderingSink による I420 フレーム受信・RGBA 変換・Flutter Texture 配信を実装する
+  - @zztkm
+
 - [ADD] Linux ネイティブプラグイン基盤と MethodChannel ハンドラを追加する
   - CMake で `libsora_sdk.so` を生成し、MethodChannel / EventChannel によるクライアント管理を実装する
   - @zztkm

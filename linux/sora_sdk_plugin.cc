@@ -15,6 +15,83 @@
 #include "sora_camera_capturer.h"
 
 // ---------------------------------------------------------------------------
+// C ブリッジのレンダリングシンク API 宣言
+// ---------------------------------------------------------------------------
+
+extern "C" {
+struct LinuxRenderingSink;
+struct LinuxRenderingSink* linux_rendering_sink_create(void);
+void linux_rendering_sink_set_frame_callback(
+    struct LinuxRenderingSink* sink,
+    void (*callback)(void*),
+    void* context);
+void* linux_rendering_sink_get_sink_ptr(struct LinuxRenderingSink* sink);
+const uint8_t* linux_rendering_sink_copy_pixels(
+    struct LinuxRenderingSink* sink,
+    uint32_t* out_width,
+    uint32_t* out_height);
+void linux_rendering_sink_delete(struct LinuxRenderingSink* sink);
+}
+
+// ---------------------------------------------------------------------------
+// SoraRemoteVideoTexture: FlPixelBufferTexture の GObject サブクラス
+// ---------------------------------------------------------------------------
+
+typedef struct _SoraRemoteVideoTexture SoraRemoteVideoTexture;
+struct _SoraRemoteVideoTexture {
+  FlPixelBufferTexture parent_instance;
+  struct LinuxRenderingSink* sink;
+};
+
+#define SORA_TYPE_REMOTE_VIDEO_TEXTURE sora_remote_video_texture_get_type()
+G_DECLARE_FINAL_TYPE(SoraRemoteVideoTexture,
+                     sora_remote_video_texture,
+                     SORA,
+                     REMOTE_VIDEO_TEXTURE,
+                     FlPixelBufferTexture)
+
+static gboolean sora_remote_video_texture_copy_pixels(
+    FlPixelBufferTexture* texture,
+    const uint8_t** out_buffer,
+    uint32_t* width,
+    uint32_t* height,
+    GError** error) {
+  (void)error;
+  auto* self = SORA_REMOTE_VIDEO_TEXTURE(texture);
+  if (!self->sink) {
+    return FALSE;
+  }
+  *out_buffer = linux_rendering_sink_copy_pixels(self->sink, width, height);
+  return TRUE;
+}
+
+G_DEFINE_TYPE(SoraRemoteVideoTexture,
+              sora_remote_video_texture,
+              fl_pixel_buffer_texture_get_type())
+
+static void sora_remote_video_texture_init(SoraRemoteVideoTexture* self) {
+  self->sink = nullptr;
+}
+
+static void sora_remote_video_texture_class_init(
+    SoraRemoteVideoTextureClass* klass) {
+  FlPixelBufferTextureClass* fb_klass =
+      reinterpret_cast<FlPixelBufferTextureClass*>(klass);
+  fb_klass->copy_pixels = sora_remote_video_texture_copy_pixels;
+}
+
+// ---------------------------------------------------------------------------
+// RemoteVideoRendererEntry: リモートビデオレンダラーの管理構造体
+// ---------------------------------------------------------------------------
+
+struct RemoteVideoRendererEntry {
+  int64_t renderer_id;
+  SoraRemoteVideoTexture* texture;
+  struct LinuxRenderingSink* sink;
+  FlTextureRegistrar* registrar;
+};
+
+// ---------------------------------------------------------------------------
 // SoraClient: EventChannel を保持するクライアント単位のコンテキスト
 // ---------------------------------------------------------------------------
 
@@ -33,6 +110,11 @@ struct SoraSdkPluginContext {
   std::map<int64_t, std::unique_ptr<SoraCameraCapturer>> capturers;
   // client_id -> videoSourcePtr の set
   std::map<int64_t, std::set<int64_t>> client_capturers;
+  // client_id -> renderer_id -> RemoteVideoRendererEntry
+  std::map<int64_t, std::map<int64_t, RemoteVideoRendererEntry>>
+      client_renderers;
+  // リモートレンダラーの ID 採番用
+  int64_t next_renderer_id = 1;
 };
 
 // ---------------------------------------------------------------------------
@@ -137,6 +219,32 @@ static void stop_client_capturers(SoraSdkPlugin* self, int64_t client_id) {
 }
 
 // ---------------------------------------------------------------------------
+// クライアントのリモートレンダラーを停止する
+// ---------------------------------------------------------------------------
+
+static void stop_client_renderers(SoraSdkPlugin* self, int64_t client_id) {
+  if (!self->context) {
+    return;
+  }
+  auto it = self->context->client_renderers.find(client_id);
+  if (it == self->context->client_renderers.end()) {
+    return;
+  }
+  for (auto& [renderer_id, entry] : it->second) {
+    if (entry.texture && self->texture_registrar) {
+      fl_texture_registrar_unregister_texture(
+          self->texture_registrar, FL_TEXTURE(entry.texture));
+      entry.texture->sink = nullptr;
+      g_object_unref(entry.texture);
+    }
+    if (entry.sink) {
+      linux_rendering_sink_delete(entry.sink);
+    }
+  }
+  self->context->client_renderers.erase(it);
+}
+
+// ---------------------------------------------------------------------------
 // MethodChannel ハンドラ
 // ---------------------------------------------------------------------------
 
@@ -195,10 +303,12 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
 
     // このクライアントに関連する capturer を停止する
     stop_client_capturers(self, client_id);
+    // このクライアントに関連するリモートレンダラーを停止する
+    stop_client_renderers(self, client_id);
 
     if (g_hash_table_lookup(self->clients, key) == nullptr) {
       fl_method_call_respond_error(method_call, "client_not_found",
-                                   "Client not found.", nullptr, &error);
+                                    "Client not found.", nullptr, &error);
       return;
     }
     g_hash_table_remove(self->clients, key);
@@ -418,6 +528,162 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
     return;
   }
 
+  // --- createRemoteVideoRenderer ---
+  if (strcmp(method, "createRemoteVideoRenderer") == 0) {
+    FlValue* args = fl_method_call_get_args(method_call);
+    if (args == nullptr || fl_value_get_type(args) != FL_VALUE_TYPE_MAP) {
+      fl_method_call_respond_error(method_call, "invalid_argument",
+                                    "Arguments are required.", nullptr, &error);
+      return;
+    }
+    int64_t client_id = get_int64_from_map(args, "clientId", 0);
+    if (client_id == 0) {
+      fl_method_call_respond_error(method_call, "invalid_argument",
+                                    "clientId is required.", nullptr, &error);
+      return;
+    }
+
+    gpointer key = GSIZE_TO_POINTER(static_cast<gsize>(client_id));
+    auto* client = static_cast<SoraClient*>(
+        g_hash_table_lookup(self->clients, key));
+    if (client == nullptr) {
+      fl_method_call_respond_error(method_call, "client_not_found",
+                                    "Client not found.", nullptr, &error);
+      return;
+    }
+
+    if (!self->context || !self->texture_registrar) {
+      fl_method_call_respond_error(method_call, "internal_error",
+                                    "Plugin not initialized.", nullptr, &error);
+      return;
+    }
+
+    // C ブリッジでレンダリングシンクを作成する
+    LinuxRenderingSink* sink = linux_rendering_sink_create();
+    if (sink == nullptr) {
+      fl_method_call_respond_error(method_call, "renderer_create_failed",
+                                    "Failed to create rendering sink.", nullptr,
+                                    &error);
+      return;
+    }
+
+    // FlPixelBufferTexture を作成してテクスチャ登録する
+    SoraRemoteVideoTexture* tex = SORA_REMOTE_VIDEO_TEXTURE(
+        g_object_new(SORA_TYPE_REMOTE_VIDEO_TEXTURE, nullptr));
+    tex->sink = sink;
+
+    gboolean registered = fl_texture_registrar_register_texture(
+        self->texture_registrar, FL_TEXTURE(tex));
+    if (!registered) {
+      tex->sink = nullptr;
+      g_object_unref(tex);
+      linux_rendering_sink_delete(sink);
+      fl_method_call_respond_error(method_call, "texture_register_failed",
+                                    "Failed to register texture.", nullptr,
+                                    &error);
+      return;
+    }
+    int64_t texture_id = fl_texture_get_id(FL_TEXTURE(tex));
+
+    // 登録エントリを作成する
+    int64_t renderer_id = self->context->next_renderer_id++;
+    RemoteVideoRendererEntry entry;
+    entry.renderer_id = renderer_id;
+    entry.texture = tex;
+    entry.sink = sink;
+    entry.registrar = self->texture_registrar;
+
+    self->context->client_renderers[client_id][renderer_id] = entry;
+
+    // フレーム到着時にテクスチャ更新を通知するコールバックを設定する
+    linux_rendering_sink_set_frame_callback(
+        sink,
+        [](void* context) {
+          auto* e =
+              static_cast<RemoteVideoRendererEntry*>(context);
+          if (e && e->registrar && e->texture) {
+            fl_texture_registrar_mark_texture_frame_available(
+                e->registrar, FL_TEXTURE(e->texture));
+          }
+        },
+        &self->context->client_renderers[client_id][renderer_id]);
+
+    // VideoSinkInterface のポインタを取得する
+    void* video_sink_ptr = linux_rendering_sink_get_sink_ptr(sink);
+
+    g_autoptr(FlValue) result = fl_value_new_map();
+    fl_value_set_string_take(result, "rendererId",
+                             fl_value_new_int(renderer_id));
+    fl_value_set_string_take(result, "renderingSinkPtr",
+                             fl_value_new_int(
+                                 static_cast<int64_t>(
+                                     reinterpret_cast<intptr_t>(sink))));
+    fl_value_set_string_take(result, "videoSinkPtr",
+                             fl_value_new_int(
+                                 static_cast<int64_t>(
+                                     reinterpret_cast<intptr_t>(
+                                         video_sink_ptr))));
+    fl_value_set_string_take(result, "textureId",
+                             fl_value_new_int(texture_id));
+    fl_method_call_respond_success(method_call, result, &error);
+    return;
+  }
+
+  // --- disposeRemoteVideoRenderer ---
+  if (strcmp(method, "disposeRemoteVideoRenderer") == 0) {
+    FlValue* args = fl_method_call_get_args(method_call);
+    if (args == nullptr || fl_value_get_type(args) != FL_VALUE_TYPE_MAP) {
+      fl_method_call_respond_error(method_call, "invalid_argument",
+                                    "Arguments are required.", nullptr, &error);
+      return;
+    }
+    int64_t client_id = get_int64_from_map(args, "clientId", 0);
+    int64_t renderer_id = get_int64_from_map(args, "rendererId", 0);
+    if (client_id == 0 || renderer_id == 0) {
+      fl_method_call_respond_error(
+          method_call, "invalid_argument",
+          "clientId and rendererId are required.", nullptr, &error);
+      return;
+    }
+
+    if (!self->context) {
+      fl_method_call_respond_error(method_call, "internal_error",
+                                    "Plugin context not initialized.", nullptr,
+                                    &error);
+      return;
+    }
+
+    auto client_it =
+        self->context->client_renderers.find(client_id);
+    if (client_it == self->context->client_renderers.end()) {
+      fl_method_call_respond_error(method_call, "renderer_not_found",
+                                    "Renderer not found.", nullptr, &error);
+      return;
+    }
+
+    auto renderer_it = client_it->second.find(renderer_id);
+    if (renderer_it == client_it->second.end()) {
+      fl_method_call_respond_error(method_call, "renderer_not_found",
+                                    "Renderer not found.", nullptr, &error);
+      return;
+    }
+
+    RemoteVideoRendererEntry& entry = renderer_it->second;
+    if (entry.texture && self->texture_registrar) {
+      fl_texture_registrar_unregister_texture(
+          self->texture_registrar, FL_TEXTURE(entry.texture));
+      entry.texture->sink = nullptr;
+      g_object_unref(entry.texture);
+    }
+    if (entry.sink) {
+      linux_rendering_sink_delete(entry.sink);
+    }
+    client_it->second.erase(renderer_it);
+
+    fl_method_call_respond_success(method_call, nullptr, &error);
+    return;
+  }
+
   // --- 未実装メソッドは FlMethodNotImplemented を返す ---
   fl_method_call_respond_not_implemented(method_call, &error);
 }
@@ -436,6 +702,23 @@ static void sora_sdk_plugin_dispose(GObject* object) {
     }
     self->context->capturers.clear();
     self->context->client_capturers.clear();
+
+    // 全リモートレンダラーを停止する
+    for (auto& [client_id, renderers] : self->context->client_renderers) {
+      for (auto& [renderer_id, entry] : renderers) {
+        if (entry.texture && self->texture_registrar) {
+          fl_texture_registrar_unregister_texture(
+              self->texture_registrar, FL_TEXTURE(entry.texture));
+          entry.texture->sink = nullptr;
+          g_object_unref(entry.texture);
+        }
+        if (entry.sink) {
+          linux_rendering_sink_delete(entry.sink);
+        }
+      }
+    }
+    self->context->client_renderers.clear();
+
     delete self->context;
     self->context = nullptr;
   }

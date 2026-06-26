@@ -8,6 +8,8 @@
 #include <sys/select.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <cerrno>
 #include <csetjmp>
 #include <cstring>
 
@@ -98,12 +100,30 @@ FlValue* SoraCameraCapturer::EnumerateDevices() {
     return result;
   }
 
+  // デバイス候補を一時的に保持する。
+  // ファイルシステムの readdir 順に依存せず、必ず video0 から並べるために
+  // インデックスでソートする。
+  struct CandidateDevice {
+    int index;
+    std::string path;
+    std::string label;
+    bool has_capture_format = false;
+  };
+  std::vector<CandidateDevice> candidates;
+
   struct dirent* entry;
   while ((entry = readdir(dir)) != nullptr) {
     if (strncmp(entry->d_name, "video", 5) != 0) {
       continue;
     }
     std::string device_path = std::string("/dev/") + entry->d_name;
+
+    // デバイスインデックスを抽出する
+    int device_index = 0;
+    if (sscanf(entry->d_name, "video%d", &device_index) != 1) {
+      continue;
+    }
+
     int fd = open(device_path.c_str(), O_RDWR);
     if (fd < 0) {
       continue;
@@ -118,22 +138,57 @@ FlValue* SoraCameraCapturer::EnumerateDevices() {
       close(fd);
       continue;
     }
+
+    // V4L2_CAP_VIDEO_CAPTURE フラグが立っていても実際のキャプチャ
+    // フォーマットに対応していないデバイス (C922 の /dev/video1 など) を
+    // 除外するため、VIDIOC_ENUM_FMT で実効的なフォーマット有無を確認する。
+    bool has_format = false;
+    struct v4l2_fmtdesc fmt_desc;
+    memset(&fmt_desc, 0, sizeof(fmt_desc));
+    fmt_desc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    for (int i = 0; i < 16; i++) {
+      fmt_desc.index = i;
+      if (ioctl(fd, VIDIOC_ENUM_FMT, &fmt_desc) < 0) {
+        break;
+      }
+      if (fmt_desc.pixelformat == V4L2_PIX_FMT_YUYV ||
+          fmt_desc.pixelformat == V4L2_PIX_FMT_NV12 ||
+          fmt_desc.pixelformat == V4L2_PIX_FMT_MJPEG ||
+          fmt_desc.pixelformat == V4L2_PIX_FMT_YUV420) {
+        has_format = true;
+        break;
+      }
+    }
     close(fd);
 
-    FlValue* device_map = fl_value_new_map();
-    fl_value_set_string_take(device_map, "deviceId",
-                             fl_value_new_string(device_path.c_str()));
-    // cap.card は固定長 32 バイト。ヌル終端が保証されないため、
-    // strnlen で範囲を制限した上で文字列化する
-    fl_value_set_string_take(
-        device_map, "label",
-        fl_value_new_string_sized(
-            reinterpret_cast<const char*>(cap.card),
-            strnlen(reinterpret_cast<const char*>(cap.card),
-                    sizeof(cap.card))));
-    fl_value_append_take(result, device_map);
+    if (!has_format) {
+      continue;
+    }
+
+    CandidateDevice candidate;
+    candidate.index = device_index;
+    candidate.path = device_path;
+    candidate.label = std::string(
+        reinterpret_cast<const char*>(cap.card),
+        strnlen(reinterpret_cast<const char*>(cap.card), sizeof(cap.card)));
+    candidates.push_back(candidate);
   }
   closedir(dir);
+
+  // デバイスインデックスでソートする
+  std::sort(candidates.begin(), candidates.end(),
+            [](const CandidateDevice& a, const CandidateDevice& b) {
+              return a.index < b.index;
+            });
+
+  for (const auto& candidate : candidates) {
+    FlValue* device_map = fl_value_new_map();
+    fl_value_set_string_take(device_map, "deviceId",
+                             fl_value_new_string(candidate.path.c_str()));
+    fl_value_set_string_take(device_map, "label",
+                             fl_value_new_string(candidate.label.c_str()));
+    fl_value_append_take(result, device_map);
+  }
 
   return result;
 }
@@ -380,6 +435,18 @@ void SoraCameraCapturer::CaptureLoop() {
   requested_width_ = static_cast<int>(fmt.fmt.pix.width);
   requested_height_ = static_cast<int>(fmt.fmt.pix.height);
   v4l2_bytesperline_ = static_cast<int>(fmt.fmt.pix.bytesperline);
+
+  // bytesperline が 0 の場合はピクセルフォーマットから計算する。
+  // 一部のドライバはパックドフォーマットで bytesperline を 0 に設定する。
+  if (v4l2_bytesperline_ <= 0) {
+    if (v4l2_pixelformat_ == V4L2_PIX_FMT_YUYV) {
+      v4l2_bytesperline_ = requested_width_ * 2;
+    } else if (v4l2_pixelformat_ == V4L2_PIX_FMT_NV12) {
+      v4l2_bytesperline_ = requested_width_;
+    } else {
+      v4l2_bytesperline_ = requested_width_ * 2;
+    }
+  }
 
   // FPS 設定
   struct v4l2_streamparm parm;

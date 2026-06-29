@@ -61,29 +61,28 @@ else()
   target_link_libraries(${PLUGIN_NAME} PRIVATE pulse)
 endif()
 
-if(EXISTS "${LIBWEBRTC_C_LIB}")
-  target_link_libraries(${PLUGIN_NAME} PRIVATE "${LIBWEBRTC_C_LIB}")
-endif()
-if(EXISTS "${WEBRTC_LIB}")
-  target_link_libraries(${PLUGIN_NAME} PRIVATE "${WEBRTC_LIB}")
-endif()
-
-# libwebrtc_c_api.ldflags で dart:ffi から参照する C API シンボルを保持する
-set(LIBWEBRTC_C_API_LDFLAGS "${CMAKE_CURRENT_SOURCE_DIR}/libwebrtc_c_api.ldflags")
-if(EXISTS "${LIBWEBRTC_C_API_LDFLAGS}")
-  target_link_options(${PLUGIN_NAME} PRIVATE "@${LIBWEBRTC_C_API_LDFLAGS}")
-endif()
-
-# ビルド時にネイティブ依存を自動取得する
+# cmake configure 時にネイティブ依存を自動取得する。
+# add_custom_target ではビルド時にしか実行されず、
+# その後に target_link_libraries でリンク対象を決めても反映されないため、
+# configure 時に execute_process で実行する。
 find_program(DART_EXECUTABLE dart)
 if(DART_EXECUTABLE)
-  add_custom_target(fetch_native_deps_linux
+  execute_process(
     COMMAND "${DART_EXECUTABLE}" run
       "${SORA_SDK_ROOT}/../scripts/fetch_native_deps.dart"
       linux_ubuntu_24_04_x86_64
     WORKING_DIRECTORY "${SORA_SDK_ROOT}/.."
   )
-  add_dependencies(${PLUGIN_NAME} fetch_native_deps_linux)
+endif()
+
+# execute_process で依存取得済みのため LIBWEBRTC_C_LIB / WEBRTC_LIB は必ず存在する。
+target_link_libraries(${PLUGIN_NAME} PRIVATE "${LIBWEBRTC_C_LIB}")
+target_link_libraries(${PLUGIN_NAME} PRIVATE "${WEBRTC_LIB}")
+
+# libwebrtc_c_api.ldflags で dart:ffi から参照する C API シンボルを保持する
+set(LIBWEBRTC_C_API_LDFLAGS "${CMAKE_CURRENT_SOURCE_DIR}/libwebrtc_c_api.ldflags")
+if(EXISTS "${LIBWEBRTC_C_API_LDFLAGS}")
+  target_link_options(${PLUGIN_NAME} PRIVATE "@${LIBWEBRTC_C_API_LDFLAGS}")
 endif()
 
 # dart:ffi コードはプラグイン共有ライブラリに統合済みのため、

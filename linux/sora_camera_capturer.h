@@ -12,11 +12,11 @@
 
 // CaptureLoop() 内でカメラキャプチャの初期化に失敗した際のエラーコード
 enum class CameraOpenError {
-  DeviceOpenFailed = 0,   // open(/dev/videoX) 失敗
-  VidiocSFmtFailed = 1,   // VIDIOC_S_FMT 失敗
-  VidiocReqbufsFailed = 2,// VIDIOC_REQBUFS 失敗
-  MmapFailed = 3,        // mmap バッファ確保失敗
-  VidiocStreamonFailed = 4,// VIDIOC_STREAMON 失敗
+  DeviceOpenFailed = 0,      // open(/dev/videoX) 失敗
+  VidiocSFmtFailed = 1,      // VIDIOC_S_FMT 失敗
+  VidiocReqbufsFailed = 2,   // VIDIOC_REQBUFS 失敗
+  MmapFailed = 3,            // mmap バッファ確保失敗
+  VidiocStreamonFailed = 4,  // VIDIOC_STREAMON 失敗
 };
 
 // ---------------------------------------------------------------------------
@@ -74,8 +74,12 @@ class SoraCameraCapturer {
 
  private:
   void CaptureLoop();
-  void ProcessFrame(const void* data, size_t size, uint32_t pixelformat,
-                    int width, int height, int bytesperline);
+  void ProcessFrame(const void* data,
+                    size_t size,
+                    uint32_t pixelformat,
+                    int width,
+                    int height,
+                    int bytesperline);
   void CleanupV4l2();
 
   std::string device_id_;

@@ -24,10 +24,8 @@ void AppendDeviceToFlValueList(FlValue* list,
                                const char* device_id,
                                const char* label) {
   g_autoptr(FlValue) map = fl_value_new_map();
-  fl_value_set_string_take(map, "deviceId",
-                           fl_value_new_string(device_id));
-  fl_value_set_string_take(map, "label",
-                           fl_value_new_string(label));
+  fl_value_set_string_take(map, "deviceId", fl_value_new_string(device_id));
+  fl_value_set_string_take(map, "label", fl_value_new_string(label));
   fl_value_append(list, map);
 }
 
@@ -45,9 +43,10 @@ bool WaitForContextReady(pa_mainloop* mainloop, pa_context* ctx) {
       return false;
     }
     if (g_get_monotonic_time() >= deadline) {
-      g_warning("PulseAudio context did not become ready within %" G_GINT64_FORMAT
-                " us",
-                kTimeoutUs);
+      g_warning(
+          "PulseAudio context did not become ready within %" G_GINT64_FORMAT
+          " us",
+          kTimeoutUs);
       return false;
     }
     pa_mainloop_iterate(mainloop, 1, nullptr);
@@ -179,10 +178,11 @@ void ServerInfoCallback(pa_context* /*ctx*/,
 // start_fn で PulseAudio の列挙操作を開始し、完了を同期的に待つ。
 // 接続失敗・操作発行失敗時は空リストを返し g_warning でログを残す。
 template <typename PaCallback>
-FlValue* EnumerateDevicesInternal(
-    pa_operation* (*start_fn)(pa_context*, PaCallback, void*),
-    PaCallback callback,
-    const char* log_label) {
+FlValue* EnumerateDevicesInternal(pa_operation* (*start_fn)(pa_context*,
+                                                            PaCallback,
+                                                            void*),
+                                  PaCallback callback,
+                                  const char* log_label) {
   PulseSyncContext<FlValue*> sync_ctx;
   sync_ctx.data = fl_value_new_list();
 
@@ -222,12 +222,13 @@ std::string SoraAudioDevices::GetDefaultInputDeviceId() {
 
   PulseConnection conn;
   if (!conn.IsReady()) {
-    g_warning("PulseAudio connection failed: unable to get default input device");
+    g_warning(
+        "PulseAudio connection failed: unable to get default input device");
     return "";
   }
 
-  pa_operation* op = pa_context_get_server_info(conn.context(),
-                                                ServerInfoCallback, &sync_ctx);
+  pa_operation* op =
+      pa_context_get_server_info(conn.context(), ServerInfoCallback, &sync_ctx);
   if (!op) {
     g_warning("PulseAudio pa_context_get_server_info() failed");
     return "";

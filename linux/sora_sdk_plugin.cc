@@ -21,15 +21,13 @@
 extern "C" {
 struct LinuxRenderingSink;
 struct LinuxRenderingSink* linux_rendering_sink_create(void);
-void linux_rendering_sink_set_frame_callback(
-    struct LinuxRenderingSink* sink,
-    void (*callback)(void*),
-    void* context);
+void linux_rendering_sink_set_frame_callback(struct LinuxRenderingSink* sink,
+                                             void (*callback)(void*),
+                                             void* context);
 void* linux_rendering_sink_get_sink_ptr(struct LinuxRenderingSink* sink);
-const uint8_t* linux_rendering_sink_copy_pixels(
-    struct LinuxRenderingSink* sink,
-    uint32_t* out_width,
-    uint32_t* out_height);
+const uint8_t* linux_rendering_sink_copy_pixels(struct LinuxRenderingSink* sink,
+                                                uint32_t* out_width,
+                                                uint32_t* out_height);
 void linux_rendering_sink_delete(struct LinuxRenderingSink* sink);
 }
 
@@ -144,8 +142,8 @@ static void release_remote_video_renderer_entry(
     SoraSdkPlugin* self,
     RemoteVideoRendererEntry& entry) {
   if (entry.texture && self->texture_registrar) {
-    fl_texture_registrar_unregister_texture(
-        self->texture_registrar, FL_TEXTURE(entry.texture));
+    fl_texture_registrar_unregister_texture(self->texture_registrar,
+                                            FL_TEXTURE(entry.texture));
     entry.texture->sink = nullptr;
     g_object_unref(entry.texture);
   }
@@ -188,16 +186,16 @@ static gboolean remote_frame_available_idle_cb(gpointer user_data) {
 // ---------------------------------------------------------------------------
 
 static FlMethodErrorResponse* sora_event_listen_cb(FlEventChannel* channel,
-                                                    FlValue* args,
-                                                    gpointer user_data) {
+                                                   FlValue* args,
+                                                   gpointer user_data) {
   auto* client = static_cast<SoraClient*>(user_data);
   client->is_streaming = true;
   return nullptr;
 }
 
 static FlMethodErrorResponse* sora_event_cancel_cb(FlEventChannel* channel,
-                                                    FlValue* args,
-                                                    gpointer user_data) {
+                                                   FlValue* args,
+                                                   gpointer user_data) {
   auto* client = static_cast<SoraClient*>(user_data);
   client->is_streaming = false;
   return nullptr;
@@ -207,7 +205,8 @@ static FlMethodErrorResponse* sora_event_cancel_cb(FlEventChannel* channel,
 // int64_t ヘルパー
 // ---------------------------------------------------------------------------
 
-static int64_t get_int64_from_map(FlValue* map, const char* key,
+static int64_t get_int64_from_map(FlValue* map,
+                                  const char* key,
                                   int64_t default_value) {
   if (map == nullptr || fl_value_get_type(map) != FL_VALUE_TYPE_MAP) {
     return default_value;
@@ -222,7 +221,8 @@ static int64_t get_int64_from_map(FlValue* map, const char* key,
   return default_value;
 }
 
-static std::string get_string_from_map(FlValue* map, const char* key,
+static std::string get_string_from_map(FlValue* map,
+                                       const char* key,
                                        const std::string& default_value) {
   if (map == nullptr || fl_value_get_type(map) != FL_VALUE_TYPE_MAP) {
     return default_value;
@@ -282,7 +282,7 @@ static void stop_client_renderers(SoraSdkPlugin* self, int64_t client_id) {
 // ---------------------------------------------------------------------------
 
 static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
-                                                FlMethodCall* method_call) {
+                                               FlMethodCall* method_call) {
   const gchar* method = fl_method_call_get_name(method_call);
   g_autoptr(GError) error = nullptr;
 
@@ -302,16 +302,14 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
     client->event_channel = event_channel;
     client->is_streaming = false;
 
-    g_hash_table_insert(self->clients,
-                        GSIZE_TO_POINTER(static_cast<gsize>(client_id)), client);
+    g_hash_table_insert(
+        self->clients, GSIZE_TO_POINTER(static_cast<gsize>(client_id)), client);
 
-    fl_event_channel_set_stream_handlers(
-        event_channel, sora_event_listen_cb, sora_event_cancel_cb, client,
-        nullptr);
+    fl_event_channel_set_stream_handlers(event_channel, sora_event_listen_cb,
+                                         sora_event_cancel_cb, client, nullptr);
 
     g_autoptr(FlValue) result = fl_value_new_map();
-    fl_value_set_string_take(result, "clientId",
-                             fl_value_new_int(client_id));
+    fl_value_set_string_take(result, "clientId", fl_value_new_int(client_id));
     fl_value_set_string_take(result, "eventChannelName",
                              fl_value_new_string(event_channel_name));
     fl_method_call_respond_success(method_call, result, &error);
@@ -341,7 +339,7 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
 
     if (g_hash_table_lookup(self->clients, key) == nullptr) {
       fl_method_call_respond_error(method_call, "client_not_found",
-                                    "Client not found.", nullptr, &error);
+                                   "Client not found.", nullptr, &error);
       return;
     }
     g_hash_table_remove(self->clients, key);
@@ -387,8 +385,7 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
   // --- getVideoInputFormats ---
   if (strcmp(method, "getVideoInputFormats") == 0) {
     FlValue* args = fl_method_call_get_args(method_call);
-    std::string device_id =
-        get_string_from_map(args, "deviceId", "");
+    std::string device_id = get_string_from_map(args, "deviceId", "");
     if (device_id.empty()) {
       fl_method_call_respond_error(method_call, "invalid_argument",
                                    "deviceId is required.", nullptr, &error);
@@ -408,25 +405,26 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
       return;
     }
 
-    int64_t video_source_ptr =
-        get_int64_from_map(args, "videoSourcePtr", 0);
+    int64_t video_source_ptr = get_int64_from_map(args, "videoSourcePtr", 0);
     if (video_source_ptr == 0) {
-      fl_method_call_respond_error(
-          method_call, "invalid_argument",
-          "videoSourcePtr must be a non-zero integer.", nullptr, &error);
+      fl_method_call_respond_error(method_call, "invalid_argument",
+                                   "videoSourcePtr must be a non-zero integer.",
+                                   nullptr, &error);
       return;
     }
 
     int64_t client_id = get_int64_from_map(args, "clientId", 0);
-    std::string device_id =
-        get_string_from_map(args, "videoDeviceId", "");
+    std::string device_id = get_string_from_map(args, "videoDeviceId", "");
     int width = static_cast<int>(get_int64_from_map(args, "videoWidth", 640));
     int height = static_cast<int>(get_int64_from_map(args, "videoHeight", 480));
     int fps = static_cast<int>(get_int64_from_map(args, "videoFrameRate", 30));
 
-    if (width <= 0) width = 640;
-    if (height <= 0) height = 480;
-    if (fps <= 0) fps = 30;
+    if (width <= 0)
+      width = 640;
+    if (height <= 0)
+      height = 480;
+    if (fps <= 0)
+      fps = 30;
 
     if (!self->context) {
       fl_method_call_respond_error(method_call, "internal_error",
@@ -443,20 +441,19 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
     // カメラキャプチャのエラーをクライアントに通知するコールバックを設定する
     if (client_id > 0) {
       gpointer key = GSIZE_TO_POINTER(static_cast<gsize>(client_id));
-      auto* client = static_cast<SoraClient*>(
-          g_hash_table_lookup(self->clients, key));
+      auto* client =
+          static_cast<SoraClient*>(g_hash_table_lookup(self->clients, key));
       if (client && client->event_channel) {
         capturer->SetOnCameraOpenErrorCallback(
             [channel = client->event_channel,
-             streaming_ptr = &client->is_streaming]
-            (CameraOpenError error_code) {
+             streaming_ptr =
+                 &client->is_streaming](CameraOpenError error_code) {
               if (!*streaming_ptr) {
                 return;
               }
               FlValue* event = fl_value_new_map();
               fl_value_set_string_take(
-                  event, "type",
-                  fl_value_new_string("camera_open_error"));
+                  event, "type", fl_value_new_string("camera_open_error"));
               fl_value_set_string_take(
                   event, "errorCode",
                   fl_value_new_int(static_cast<int>(error_code)));
@@ -501,12 +498,11 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
                                    "Arguments are required.", nullptr, &error);
       return;
     }
-    int64_t video_source_ptr =
-        get_int64_from_map(args, "videoSourcePtr", 0);
+    int64_t video_source_ptr = get_int64_from_map(args, "videoSourcePtr", 0);
     if (video_source_ptr == 0) {
-      fl_method_call_respond_error(
-          method_call, "invalid_argument",
-          "videoSourcePtr must be a non-zero integer.", nullptr, &error);
+      fl_method_call_respond_error(method_call, "invalid_argument",
+                                   "videoSourcePtr must be a non-zero integer.",
+                                   nullptr, &error);
       return;
     }
 
@@ -535,12 +531,11 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
                                    "Arguments are required.", nullptr, &error);
       return;
     }
-    int64_t video_source_ptr =
-        get_int64_from_map(args, "videoSourcePtr", 0);
+    int64_t video_source_ptr = get_int64_from_map(args, "videoSourcePtr", 0);
     if (video_source_ptr == 0) {
-      fl_method_call_respond_error(
-          method_call, "invalid_argument",
-          "videoSourcePtr must be a non-zero integer.", nullptr, &error);
+      fl_method_call_respond_error(method_call, "invalid_argument",
+                                   "videoSourcePtr must be a non-zero integer.",
+                                   nullptr, &error);
       return;
     }
 
@@ -566,28 +561,28 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
     FlValue* args = fl_method_call_get_args(method_call);
     if (args == nullptr || fl_value_get_type(args) != FL_VALUE_TYPE_MAP) {
       fl_method_call_respond_error(method_call, "invalid_argument",
-                                    "Arguments are required.", nullptr, &error);
+                                   "Arguments are required.", nullptr, &error);
       return;
     }
     int64_t client_id = get_int64_from_map(args, "clientId", 0);
     if (client_id == 0) {
       fl_method_call_respond_error(method_call, "invalid_argument",
-                                    "clientId is required.", nullptr, &error);
+                                   "clientId is required.", nullptr, &error);
       return;
     }
 
     gpointer key = GSIZE_TO_POINTER(static_cast<gsize>(client_id));
-    auto* client = static_cast<SoraClient*>(
-        g_hash_table_lookup(self->clients, key));
+    auto* client =
+        static_cast<SoraClient*>(g_hash_table_lookup(self->clients, key));
     if (client == nullptr) {
       fl_method_call_respond_error(method_call, "client_not_found",
-                                    "Client not found.", nullptr, &error);
+                                   "Client not found.", nullptr, &error);
       return;
     }
 
     if (!self->context || !self->texture_registrar) {
       fl_method_call_respond_error(method_call, "internal_error",
-                                    "Plugin not initialized.", nullptr, &error);
+                                   "Plugin not initialized.", nullptr, &error);
       return;
     }
 
@@ -595,8 +590,8 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
     LinuxRenderingSink* sink = linux_rendering_sink_create();
     if (sink == nullptr) {
       fl_method_call_respond_error(method_call, "renderer_create_failed",
-                                    "Failed to create rendering sink.", nullptr,
-                                    &error);
+                                   "Failed to create rendering sink.", nullptr,
+                                   &error);
       return;
     }
 
@@ -612,8 +607,8 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
       g_object_unref(tex);
       linux_rendering_sink_delete(sink);
       fl_method_call_respond_error(method_call, "texture_register_failed",
-                                    "Failed to register texture.", nullptr,
-                                    &error);
+                                   "Failed to register texture.", nullptr,
+                                   &error);
       return;
     }
     int64_t texture_id = fl_texture_get_id(FL_TEXTURE(tex));
@@ -633,8 +628,7 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
     linux_rendering_sink_set_frame_callback(
         sink,
         [](void* context) {
-          auto* e =
-              static_cast<RemoteVideoRendererEntry*>(context);
+          auto* e = static_cast<RemoteVideoRendererEntry*>(context);
           if (e && e->registrar && e->texture) {
             auto* fd = g_new0(RemoteFrameAvailableData, 1);
             fd->registrar = e->registrar;
@@ -653,16 +647,12 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
     fl_value_set_string_take(result, "rendererId",
                              fl_value_new_int(renderer_id));
     fl_value_set_string_take(result, "renderingSinkPtr",
-                             fl_value_new_int(
-                                 static_cast<int64_t>(
-                                     reinterpret_cast<intptr_t>(sink))));
+                             fl_value_new_int(static_cast<int64_t>(
+                                 reinterpret_cast<intptr_t>(sink))));
     fl_value_set_string_take(result, "videoSinkPtr",
-                             fl_value_new_int(
-                                 static_cast<int64_t>(
-                                     reinterpret_cast<intptr_t>(
-                                         video_sink_ptr))));
-    fl_value_set_string_take(result, "textureId",
-                             fl_value_new_int(texture_id));
+                             fl_value_new_int(static_cast<int64_t>(
+                                 reinterpret_cast<intptr_t>(video_sink_ptr))));
+    fl_value_set_string_take(result, "textureId", fl_value_new_int(texture_id));
     fl_method_call_respond_success(method_call, result, &error);
     return;
   }
@@ -672,37 +662,36 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
     FlValue* args = fl_method_call_get_args(method_call);
     if (args == nullptr || fl_value_get_type(args) != FL_VALUE_TYPE_MAP) {
       fl_method_call_respond_error(method_call, "invalid_argument",
-                                    "Arguments are required.", nullptr, &error);
+                                   "Arguments are required.", nullptr, &error);
       return;
     }
     int64_t client_id = get_int64_from_map(args, "clientId", 0);
     int64_t renderer_id = get_int64_from_map(args, "rendererId", 0);
     if (client_id == 0 || renderer_id == 0) {
-      fl_method_call_respond_error(
-          method_call, "invalid_argument",
-          "clientId and rendererId are required.", nullptr, &error);
+      fl_method_call_respond_error(method_call, "invalid_argument",
+                                   "clientId and rendererId are required.",
+                                   nullptr, &error);
       return;
     }
 
     if (!self->context) {
       fl_method_call_respond_error(method_call, "internal_error",
-                                    "Plugin context not initialized.", nullptr,
-                                    &error);
+                                   "Plugin context not initialized.", nullptr,
+                                   &error);
       return;
     }
 
-    auto client_it =
-        self->context->client_renderers.find(client_id);
+    auto client_it = self->context->client_renderers.find(client_id);
     if (client_it == self->context->client_renderers.end()) {
       fl_method_call_respond_error(method_call, "renderer_not_found",
-                                    "Renderer not found.", nullptr, &error);
+                                   "Renderer not found.", nullptr, &error);
       return;
     }
 
     auto renderer_it = client_it->second.find(renderer_id);
     if (renderer_it == client_it->second.end()) {
       fl_method_call_respond_error(method_call, "renderer_not_found",
-                                    "Renderer not found.", nullptr, &error);
+                                   "Renderer not found.", nullptr, &error);
       return;
     }
 
@@ -768,8 +757,8 @@ static void sora_sdk_plugin_class_init(SoraSdkPluginClass* klass) {
 static void sora_sdk_plugin_init(SoraSdkPlugin* self) {
   self->messenger = nullptr;
   self->texture_registrar = nullptr;
-  self->clients = g_hash_table_new_full(g_direct_hash, g_direct_equal,
-                                        nullptr, sora_client_free);
+  self->clients = g_hash_table_new_full(g_direct_hash, g_direct_equal, nullptr,
+                                        sora_client_free);
   self->next_client_id = 1;
   self->context = new SoraSdkPluginContext();
 }
@@ -791,10 +780,10 @@ static void method_call_cb(FlMethodChannel* channel,
 
 __attribute__((visibility("default"))) void
 sora_sdk_plugin_register_with_registrar(FlPluginRegistrar* registrar) {
-  auto* plugin = SORA_SDK_PLUGIN(
-      g_object_new(sora_sdk_plugin_get_type(), nullptr));
-  plugin->messenger =
-      FL_BINARY_MESSENGER(g_object_ref(fl_plugin_registrar_get_messenger(registrar)));
+  auto* plugin =
+      SORA_SDK_PLUGIN(g_object_new(sora_sdk_plugin_get_type(), nullptr));
+  plugin->messenger = FL_BINARY_MESSENGER(
+      g_object_ref(fl_plugin_registrar_get_messenger(registrar)));
   plugin->texture_registrar = FL_TEXTURE_REGISTRAR(
       g_object_ref(fl_plugin_registrar_get_texture_registrar(registrar)));
 

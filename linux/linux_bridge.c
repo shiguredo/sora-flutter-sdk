@@ -17,7 +17,8 @@
 
 // Linux では libwebrtc 組み込みの CreateAudioDeviceModule をそのまま呼び出す。
 // 内部で PulseAudio または ALSA が使われる (ビルド時の構成に依存)。
-__attribute__((visibility("default"))) struct webrtc_AudioDeviceModule_refcounted*
+__attribute__((
+    visibility("default"))) struct webrtc_AudioDeviceModule_refcounted*
 sora_create_audio_device_module(struct webrtc_Environment* env, int type) {
   return webrtc_CreateAudioDeviceModule(env, type);
 }
@@ -283,8 +284,8 @@ linux_rendering_sink_set_frame_callback(LinuxRenderingSink* sink,
   pthread_mutex_unlock(&sink->lock);
 }
 
-__attribute__((visibility("default"))) void*
-linux_rendering_sink_get_sink_ptr(LinuxRenderingSink* sink) {
+__attribute__((visibility("default"))) void* linux_rendering_sink_get_sink_ptr(
+    LinuxRenderingSink* sink) {
   if (sink == NULL)
     return NULL;
   return (void*)sink->sink;
@@ -344,14 +345,14 @@ linux_rendering_sink_copy_pixels(LinuxRenderingSink* sink,
   }
 
   /* I420 -> RGBA 変換 */
-  libyuv_ConvertFromI420(
-      webrtc_I420Buffer_MutableDataY(sink->i420_buffer),
-      webrtc_I420Buffer_StrideY(sink->i420_buffer),
-      webrtc_I420Buffer_MutableDataU(sink->i420_buffer),
-      webrtc_I420Buffer_StrideU(sink->i420_buffer),
-      webrtc_I420Buffer_MutableDataV(sink->i420_buffer),
-      webrtc_I420Buffer_StrideV(sink->i420_buffer),
-      sink->rgba_buffer, w * 4, w, h, SORA_LIBYUV_FOURCC_RGBA);
+  libyuv_ConvertFromI420(webrtc_I420Buffer_MutableDataY(sink->i420_buffer),
+                         webrtc_I420Buffer_StrideY(sink->i420_buffer),
+                         webrtc_I420Buffer_MutableDataU(sink->i420_buffer),
+                         webrtc_I420Buffer_StrideU(sink->i420_buffer),
+                         webrtc_I420Buffer_MutableDataV(sink->i420_buffer),
+                         webrtc_I420Buffer_StrideV(sink->i420_buffer),
+                         sink->rgba_buffer, w * 4, w, h,
+                         SORA_LIBYUV_FOURCC_RGBA);
 
   *out_width = (uint32_t)w;
   *out_height = (uint32_t)h;
@@ -409,20 +410,20 @@ __attribute__((visibility("default"))) void linux_rendering_sink_delete(
 // Dart 側のコールバック関数ポインタ型
 typedef void (*dart_on_state_fn)(int32_t state, void* user_data);
 typedef void (*dart_on_ice_candidate_fn)(char* sdp,
-                                          char* mid,
-                                          int32_t mline_index,
-                                          void* user_data);
-typedef void (*dart_on_track_fn)(void* track_ref,
-                                  char* kind,
-                                  char* track_id,
-                                  void* user_data);
-typedef void (*dart_on_remove_track_fn)(void* track_ref,
-                                         char* kind,
-                                         char* track_id,
+                                         char* mid,
+                                         int32_t mline_index,
                                          void* user_data);
-typedef void (*dart_on_datachannel_fn)(void* dc_ref,
-                                        char* label,
+typedef void (*dart_on_track_fn)(void* track_ref,
+                                 char* kind,
+                                 char* track_id,
+                                 void* user_data);
+typedef void (*dart_on_remove_track_fn)(void* track_ref,
+                                        char* kind,
+                                        char* track_id,
                                         void* user_data);
+typedef void (*dart_on_datachannel_fn)(void* dc_ref,
+                                       char* label,
+                                       void* user_data);
 typedef void (*dart_on_debug_fn)(char* message, void* user_data);
 
 typedef struct SoraObserverBridge {
@@ -516,7 +517,7 @@ static void bridge_on_ice_connection_change(
     return;
   if (bridge->on_ice_connection_change) {
     bridge->on_ice_connection_change((int32_t)new_state,
-                                      bridge->dart_user_data);
+                                     bridge->dart_user_data);
   }
   observer_bridge_end_use(bridge);
 }
@@ -528,14 +529,13 @@ static void bridge_on_ice_gathering_change(
   if (!observer_bridge_begin_use(bridge))
     return;
   if (bridge->on_ice_gathering_change) {
-    bridge->on_ice_gathering_change((int32_t)new_state,
-                                     bridge->dart_user_data);
+    bridge->on_ice_gathering_change((int32_t)new_state, bridge->dart_user_data);
   }
   observer_bridge_end_use(bridge);
 }
 
 static void bridge_on_ice_candidate(const struct webrtc_IceCandidate* candidate,
-                                     void* user_data) {
+                                    void* user_data) {
   SoraObserverBridge* bridge = (SoraObserverBridge*)user_data;
   if (!observer_bridge_begin_use(bridge))
     return;
@@ -568,19 +568,19 @@ static void bridge_on_ice_candidate(const struct webrtc_IceCandidate* candidate,
   }
 
   bridge->on_ice_candidate(sdp_copy, mid_copy, sdp_mline_index,
-                            bridge->dart_user_data);
+                           bridge->dart_user_data);
   observer_bridge_end_use(bridge);
 }
 
 static void bridge_on_ice_candidate_error(const char* address,
-                                           size_t address_len,
-                                           int port,
-                                           const char* url,
-                                           size_t url_len,
-                                           int error_code,
-                                           const char* error_text,
-                                           size_t error_text_len,
-                                           void* user_data) {
+                                          size_t address_len,
+                                          int port,
+                                          const char* url,
+                                          size_t url_len,
+                                          int error_code,
+                                          const char* error_text,
+                                          size_t error_text_len,
+                                          void* user_data) {
   SoraObserverBridge* bridge = (SoraObserverBridge*)user_data;
   if (!observer_bridge_begin_use(bridge))
     return;
@@ -650,7 +650,7 @@ static void bridge_on_track(
 
     if (bridge->on_track) {
       bridge->on_track((void*)video_track, kind_copy, track_id_copy,
-                        bridge->dart_user_data);
+                       bridge->dart_user_data);
       // 二重 free 防止のため NULL を入れる
       kind_copy = NULL;
       track_id_copy = NULL;
@@ -663,8 +663,7 @@ static void bridge_on_track(
     bridge_emit_debug(bridge, "native: ontrack kind=audio");
     if (bridge->on_track) {
       // 音声は Flutter で処理していないため kind のみ通知
-      bridge->on_track(NULL, kind_copy, track_id_copy,
-                        bridge->dart_user_data);
+      bridge->on_track(NULL, kind_copy, track_id_copy, bridge->dart_user_data);
       // 二重 free 防止のため NULL を入れる
       kind_copy = NULL;
       track_id_copy = NULL;
@@ -715,8 +714,7 @@ static void bridge_on_remove_track(
       webrtc_RtpReceiverInterface_track(
           webrtc_RtpReceiverInterface_refcounted_get(receiver_ref));
   if (track_ref == NULL) {
-    bridge_emit_debug(bridge,
-                      "native: onremovetrack skipped, track is null");
+    bridge_emit_debug(bridge, "native: onremovetrack skipped, track is null");
     webrtc_RtpReceiverInterface_Release(
         webrtc_RtpReceiverInterface_refcounted_get(receiver_ref));
     observer_bridge_end_use(bridge);
@@ -773,7 +771,7 @@ static void bridge_on_remove_track(
 
   if (bridge->on_remove_track) {
     bridge->on_remove_track(track_ptr, kind_copy, track_id_copy,
-                             bridge->dart_user_data);
+                            bridge->dart_user_data);
     // 二重 free 防止のため NULL を入れる
     kind_copy = NULL;
     track_id_copy = NULL;
@@ -811,9 +809,9 @@ static const char* datachannel_state_to_string(
 
 typedef void (*dart_on_dc_state_fn)(void* user_data);
 typedef void (*dart_on_dc_message_fn)(uint8_t* data_copy,
-                                       int32_t len,
-                                       int32_t is_binary,
-                                       void* user_data);
+                                      int32_t len,
+                                      int32_t is_binary,
+                                      void* user_data);
 
 typedef struct DcBridgeContext {
   SoraObserverBridge* bridge;
@@ -872,9 +870,9 @@ static void bridge_dc_on_state_change(void* user_data) {
 }
 
 static void bridge_dc_on_message(const uint8_t* data,
-                                  size_t len,
-                                  int is_binary,
-                                  void* user_data) {
+                                 size_t len,
+                                 int is_binary,
+                                 void* user_data) {
   DcBridgeContext* ctx = (DcBridgeContext*)user_data;
   if (!dc_bridge_begin_use(ctx))
     return;
@@ -951,16 +949,15 @@ static void bridge_on_datachannel(
 // ===========================================================================
 
 __attribute__((visibility("default"))) SoraObserverBridge*
-sora_observer_bridge_create(
-    void* on_connection_change,
-    void* on_ice_connection_change,
-    void* on_ice_gathering_change,
-    void* on_ice_candidate,
-    void* on_track,
-    void* on_remove_track,
-    void* on_datachannel,
-    void* on_debug,
-    void* dart_user_data) {
+sora_observer_bridge_create(void* on_connection_change,
+                            void* on_ice_connection_change,
+                            void* on_ice_gathering_change,
+                            void* on_ice_candidate,
+                            void* on_track,
+                            void* on_remove_track,
+                            void* on_datachannel,
+                            void* on_debug,
+                            void* dart_user_data) {
   SoraObserverBridge* bridge =
       (SoraObserverBridge*)calloc(1, sizeof(SoraObserverBridge));
   if (bridge == NULL)
@@ -970,10 +967,8 @@ sora_observer_bridge_create(
   pthread_cond_init(&bridge->inflight_cond, NULL);
 
   bridge->on_connection_change = (dart_on_state_fn)on_connection_change;
-  bridge->on_ice_connection_change =
-      (dart_on_state_fn)on_ice_connection_change;
-  bridge->on_ice_gathering_change =
-      (dart_on_state_fn)on_ice_gathering_change;
+  bridge->on_ice_connection_change = (dart_on_state_fn)on_ice_connection_change;
+  bridge->on_ice_gathering_change = (dart_on_state_fn)on_ice_gathering_change;
   bridge->on_ice_candidate = (dart_on_ice_candidate_fn)on_ice_candidate;
   bridge->on_track = (dart_on_track_fn)on_track;
   bridge->on_remove_track = (dart_on_remove_track_fn)on_remove_track;
@@ -1004,10 +999,10 @@ sora_observer_bridge_get_observer(SoraObserverBridge* bridge) {
 
 __attribute__((visibility("default"))) DcBridgeContext*
 sora_observer_bridge_setup_dc(SoraObserverBridge* bridge,
-                               struct webrtc_DataChannelInterface* dc,
-                               void* on_state_change,
-                               void* on_message,
-                               void* dc_user_data) {
+                              struct webrtc_DataChannelInterface* dc,
+                              void* on_state_change,
+                              void* on_message,
+                              void* dc_user_data) {
   DcBridgeContext* ctx = (DcBridgeContext*)calloc(1, sizeof(DcBridgeContext));
   if (ctx == NULL)
     return NULL;

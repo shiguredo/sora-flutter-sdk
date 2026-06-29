@@ -84,10 +84,10 @@ static void Rgb24ToI420(const uint8_t* rgb,
       dst_y[j * stride_y + i] =
           static_cast<uint8_t>(((66 * r + 129 * g + 25 * b + 128) >> 8) + 16);
       if ((j & 1) == 0 && (i & 1) == 0) {
-        dst_u[(j / 2) * stride_u + (i / 2)] =
-            static_cast<uint8_t>(((-38 * r + -74 * g + 112 * b + 128) >> 8) + 128);
-        dst_v[(j / 2) * stride_v + (i / 2)] =
-            static_cast<uint8_t>(((112 * r + -94 * g + -18 * b + 128) >> 8) + 128);
+        dst_u[(j / 2) * stride_u + (i / 2)] = static_cast<uint8_t>(
+            ((-38 * r + -74 * g + 112 * b + 128) >> 8) + 128);
+        dst_v[(j / 2) * stride_v + (i / 2)] = static_cast<uint8_t>(
+            ((112 * r + -94 * g + -18 * b + 128) >> 8) + 128);
       }
     }
   }
@@ -291,11 +291,9 @@ FlValue* SoraCameraCapturer::GetFormats(const std::string& device_id) {
       }
       unsigned int count = 0;
       for (unsigned int w = fsize.stepwise.min_width;
-           w <= fsize.stepwise.max_width && count < 32;
-           w += w_step) {
+           w <= fsize.stepwise.max_width && count < 32; w += w_step) {
         for (unsigned int h = fsize.stepwise.min_height;
-             h <= fsize.stepwise.max_height && count < 32;
-             h += h_step) {
+             h <= fsize.stepwise.max_height && count < 32; h += h_step) {
           FlValue* format_map = fl_value_new_map();
           fl_value_set_string_take(format_map, "width",
                                    fl_value_new_int(static_cast<int>(w)));
@@ -318,12 +316,11 @@ FlValue* SoraCameraCapturer::GetFormats(const std::string& device_id) {
 // コンストラクタ / デストラクタ
 // ============================================================================
 
-SoraCameraCapturer::SoraCameraCapturer(
-    const std::string& device_id,
-    int width,
-    int height,
-    int fps,
-    FlTextureRegistrar* texture_registrar)
+SoraCameraCapturer::SoraCameraCapturer(const std::string& device_id,
+                                       int width,
+                                       int height,
+                                       int fps,
+                                       FlTextureRegistrar* texture_registrar)
     : device_id_(device_id),
       requested_width_(width),
       requested_height_(height),
@@ -415,8 +412,8 @@ void SoraCameraCapturer::CaptureLoop() {
   fmt.fmt.pix.height = static_cast<uint32_t>(requested_height_);
 
   // 優先フォーマット順: YUYV > NV12 > MJPEG
-  uint32_t preferred_formats[] = {
-      V4L2_PIX_FMT_YUYV, V4L2_PIX_FMT_NV12, V4L2_PIX_FMT_MJPEG};
+  uint32_t preferred_formats[] = {V4L2_PIX_FMT_YUYV, V4L2_PIX_FMT_NV12,
+                                  V4L2_PIX_FMT_MJPEG};
   bool format_set = false;
   for (auto pf : preferred_formats) {
     fmt.fmt.pix.pixelformat = pf;
@@ -491,8 +488,8 @@ void SoraCameraCapturer::CaptureLoop() {
       running_ = false;
       return;
     }
-    void* start = mmap(nullptr, buf.length, PROT_READ | PROT_WRITE,
-                       MAP_SHARED, fd, buf.m.offset);
+    void* start = mmap(nullptr, buf.length, PROT_READ | PROT_WRITE, MAP_SHARED,
+                       fd, buf.m.offset);
     if (start == MAP_FAILED) {
       if (on_camera_open_error_)
         on_camera_open_error_(CameraOpenError::MmapFailed);
@@ -552,8 +549,8 @@ void SoraCameraCapturer::CaptureLoop() {
 
     if (buf.index < v4l2_buffers_.size()) {
       ProcessFrame(v4l2_buffers_[buf.index].start, buf.bytesused,
-                   v4l2_pixelformat_, requested_width_,
-                   requested_height_, v4l2_bytesperline_);
+                   v4l2_pixelformat_, requested_width_, requested_height_,
+                   v4l2_bytesperline_);
     }
 
     if (ioctl(fd, VIDIOC_QBUF, &buf) < 0) {
@@ -598,19 +595,18 @@ void SoraCameraCapturer::ProcessFrame(const void* data,
   if (!i420_buffer) {
     return;
   }
-  struct webrtc_I420Buffer* i420 = webrtc_I420Buffer_refcounted_get(i420_buffer);
+  struct webrtc_I420Buffer* i420 =
+      webrtc_I420Buffer_refcounted_get(i420_buffer);
 
   switch (pixelformat) {
     case V4L2_PIX_FMT_YUYV: {
       // YUYV の 1 行あたりのバイト数は bytesperline (≧ width * 2)
       libyuv_YUY2ToI420(
           static_cast<const uint8_t*>(data), bytesperline,
-          webrtc_I420Buffer_MutableDataY(i420),
-          webrtc_I420Buffer_StrideY(i420),
-          webrtc_I420Buffer_MutableDataU(i420),
-          webrtc_I420Buffer_StrideU(i420),
-          webrtc_I420Buffer_MutableDataV(i420),
-          webrtc_I420Buffer_StrideV(i420), width, height);
+          webrtc_I420Buffer_MutableDataY(i420), webrtc_I420Buffer_StrideY(i420),
+          webrtc_I420Buffer_MutableDataU(i420), webrtc_I420Buffer_StrideU(i420),
+          webrtc_I420Buffer_MutableDataV(i420), webrtc_I420Buffer_StrideV(i420),
+          width, height);
       break;
     }
     case V4L2_PIX_FMT_NV12: {
@@ -619,12 +615,10 @@ void SoraCameraCapturer::ProcessFrame(const void* data,
       const uint8_t* uv_plane = y_plane + bytesperline * height;
       libyuv_NV12ToI420(
           y_plane, bytesperline, uv_plane, bytesperline,
-          webrtc_I420Buffer_MutableDataY(i420),
-          webrtc_I420Buffer_StrideY(i420),
-          webrtc_I420Buffer_MutableDataU(i420),
-          webrtc_I420Buffer_StrideU(i420),
-          webrtc_I420Buffer_MutableDataV(i420),
-          webrtc_I420Buffer_StrideV(i420), width, height);
+          webrtc_I420Buffer_MutableDataY(i420), webrtc_I420Buffer_StrideY(i420),
+          webrtc_I420Buffer_MutableDataU(i420), webrtc_I420Buffer_StrideU(i420),
+          webrtc_I420Buffer_MutableDataV(i420), webrtc_I420Buffer_StrideV(i420),
+          width, height);
       break;
     }
     case V4L2_PIX_FMT_MJPEG: {
@@ -673,14 +667,13 @@ void SoraCameraCapturer::ProcessFrame(const void* data,
             width = decoded_w;
             height = decoded_h;
           }
-          Rgb24ToI420(
-              rgb_buffer.data(), width, height,
-              webrtc_I420Buffer_MutableDataY(i420),
-              webrtc_I420Buffer_StrideY(i420),
-              webrtc_I420Buffer_MutableDataU(i420),
-              webrtc_I420Buffer_StrideU(i420),
-              webrtc_I420Buffer_MutableDataV(i420),
-              webrtc_I420Buffer_StrideV(i420));
+          Rgb24ToI420(rgb_buffer.data(), width, height,
+                      webrtc_I420Buffer_MutableDataY(i420),
+                      webrtc_I420Buffer_StrideY(i420),
+                      webrtc_I420Buffer_MutableDataU(i420),
+                      webrtc_I420Buffer_StrideU(i420),
+                      webrtc_I420Buffer_MutableDataV(i420),
+                      webrtc_I420Buffer_StrideV(i420));
           decoded = true;
           jpeg_finish_decompress(&cinfo);
         }
@@ -705,14 +698,11 @@ void SoraCameraCapturer::ProcessFrame(const void* data,
     preview_height_ = height;
     preview_buffer_.resize(static_cast<size_t>(width) * height * 4);
     libyuv_ConvertFromI420(
-        webrtc_I420Buffer_MutableDataY(i420),
-        webrtc_I420Buffer_StrideY(i420),
-        webrtc_I420Buffer_MutableDataU(i420),
-        webrtc_I420Buffer_StrideU(i420),
-        webrtc_I420Buffer_MutableDataV(i420),
-        webrtc_I420Buffer_StrideV(i420),
-        preview_buffer_.data(), width * 4,
-        width, height, SORA_LIBYUV_FOURCC_RGBA);
+        webrtc_I420Buffer_MutableDataY(i420), webrtc_I420Buffer_StrideY(i420),
+        webrtc_I420Buffer_MutableDataU(i420), webrtc_I420Buffer_StrideU(i420),
+        webrtc_I420Buffer_MutableDataV(i420), webrtc_I420Buffer_StrideV(i420),
+        preview_buffer_.data(), width * 4, width, height,
+        SORA_LIBYUV_FOURCC_RGBA);
   }
 
   // AdaptedVideoTrackSource にフレームを投入する
@@ -803,8 +793,8 @@ void SoraCameraCapturer::Stop() {
   // GObject 解放の前に capturer ポインタをクリアし、
   // レンダースレッドからの copy_pixels コールバックを安全にする。
   if (preview_texture_ && texture_registrar_) {
-    fl_texture_registrar_unregister_texture(
-        texture_registrar_, FL_TEXTURE(preview_texture_));
+    fl_texture_registrar_unregister_texture(texture_registrar_,
+                                            FL_TEXTURE(preview_texture_));
     preview_texture_->capturer = nullptr;
     g_object_unref(preview_texture_);
     preview_texture_ = nullptr;

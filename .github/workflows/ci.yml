@@ -736,6 +736,11 @@ jobs:
           set -euo pipefail
           dart analyze --fatal-infos lib test
 
+      - name: Fetch native dependencies for Linux
+        run: |
+          set -euo pipefail
+          dart run scripts/fetch_native_deps.dart linux_ubuntu_24_04_x86_64
+
       - name: Build devtools Linux app
         working-directory: devtools
         run: |
@@ -759,7 +764,7 @@ jobs:
         working-directory: e2e_test_app
         run: |
           set -euo pipefail
-          flutter build linux --release --no-pub -v
+          flutter build linux --release --no-pub
 
   slack_notify:
     name: Slack Notify

@@ -1,6 +1,5 @@
 # recvonly / sendonly / sendrecv / 2 クライアント疎通の E2E（integration_test）。
-# Linux 向け MethodChannel が未実装のため、現状は macOS デスクトップで実行する。
-# 将来 Linux が揃ったら matrix で ubuntu + `flutter test ... -d linux` を追加する。
+# macOS および Linux デスクトップで実行する。
 name: E2E Test
 
 on:
@@ -11,6 +10,7 @@ on:
     paths:
       - ".github/workflows/e2e-test.yml"
       - "e2e_test_app/**"
+      - "linux/**"
       - "pubspec.yaml"
       - "pubspec.lock"
       - "scripts/**"
@@ -271,3 +271,129 @@ jobs:
           fi
           flutter precache --windows
           flutter test "${{ matrix.test.target }}" -d windows
+
+  integration-test-linux:
+    name: ${{ matrix.test.name }} (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+          - name: recvonly
+            target: integration_test/recvonly_e2e_test.dart
+          - name: sendonly dummy video
+            target: integration_test/sendonly_dummy_video_e2e_test.dart
+          - name: sendrecv smoke
+            target: integration_test/sendrecv_smoke_e2e_test.dart
+          - name: two-party media
+            target: integration_test/two_party_media_e2e_test.dart
+          - name: track event
+            target: integration_test/track_event_e2e_test.dart
+          - name: remote media stream
+            target: integration_test/remote_media_stream_e2e_test.dart
+          - name: local media toggle
+            target: integration_test/local_media_toggle_e2e_test.dart
+          - name: messaging only
+            target: integration_test/messaging_only_e2e_test.dart
+          - name: notify metadata
+            target: integration_test/notify_metadata_e2e_test.dart
+          - name: custom data channel
+            target: integration_test/custom_data_channel_e2e_test.dart
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install system dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build \
+            clang \
+            cmake \
+            pkg-config \
+            libgtk-3-dev \
+            liblzma-dev \
+            libpulse-dev \
+            libjpeg-dev
+
+      - name: Restore Flutter SDK cache
+        id: flutter-sdk-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/flutter
+          key: ${{ runner.os }}-flutter-sdk-${{ env.FLUTTER_CHANNEL }}-${{
+            env.FLUTTER_VERSION }}
+
+      - name: Install Flutter SDK
+        if: steps.flutter-sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          releases_json="${RUNNER_TEMP}/releases_linux.json"
+          curl -fsSL \
+            "https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json" \
+            -o "${releases_json}"
+          release_info="$(jq -r \
+            --arg version "${FLUTTER_VERSION}" \
+            --arg channel "${FLUTTER_CHANNEL}" \
+            '.releases[]
+            | select(.version == $version and .channel == $channel)
+            | [.archive, .sha256]
+            | @tsv' \
+            "${releases_json}" \
+            | head -n 1)"
+          if [[ -z "${release_info}" ]]; then
+            echo "Flutter release ${FLUTTER_VERSION} (${FLUTTER_CHANNEL}) was not found." >&2
+            exit 1
+          fi
+          IFS=$'\t' read -r archive_path archive_sha256 <<< "${release_info}"
+          archive_file="${RUNNER_TEMP}/$(basename "${archive_path}")"
+          curl -fsSL \
+            "https://storage.googleapis.com/flutter_infra_release/releases/${archive_path}" \
+            -o "${archive_file}"
+          echo "${archive_sha256}  ${archive_file}" | sha256sum -c -
+          rm -rf "${HOME}/flutter"
+          tar -xJf "${archive_file}" -C "${HOME}"
+
+      - name: Add Flutter to PATH
+        run: echo "${HOME}/flutter/bin" >> "${GITHUB_PATH}"
+
+      - name: Restore Pub cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-pub-e2e-${{ env.FLUTTER_VERSION }}-${{
+            hashFiles('pubspec.yaml', 'pubspec.lock',
+            'e2e_test_app/pubspec.yaml', 'e2e_test_app/pubspec.lock') }}
+
+      - name: Restore native dependency cache
+        uses: actions/cache@v5
+        with:
+          path: third_party/libwebrtc-c
+          key: ${{ runner.os }}-native-deps-${{ hashFiles('scripts/native_deps.json') }}
+
+      - name: Resolve e2e_test_app dependencies
+        working-directory: e2e_test_app
+        run: |
+          set -euo pipefail
+          flutter pub get
+
+      - name: Run integration test
+        working-directory: e2e_test_app
+        env:
+          TEST_SECRET_KEY: ${{ secrets.TEST_SECRET_KEY }}
+          TEST_SIGNALING_URLS: ${{ secrets.TEST_SIGNALING_URLS }}
+          TEST_CHANNEL_ID_PREFIX: ${{ secrets.TEST_CHANNEL_ID_PREFIX }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TEST_SECRET_KEY:-}" || -z "${TEST_SIGNALING_URLS:-}" || -z "${TEST_CHANNEL_ID_PREFIX:-}" ]]; then
+            echo "Missing secrets TEST_SECRET_KEY, TEST_SIGNALING_URLS, or TEST_CHANNEL_ID_PREFIX." >&2
+            exit 1
+          fi
+          flutter precache --linux
+          flutter test "${{ matrix.test.target }}" -d linux

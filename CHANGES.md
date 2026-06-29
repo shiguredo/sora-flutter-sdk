@@ -70,3 +70,8 @@
 
 - [ADD] 同一 bundleId 間の受信分離を確認する E2E テストを追加する
   - @zztkm
+
+- [ADD] CI に Linux ビルドジョブを追加する
+  - `ci.yml` に `build-linux` ジョブを追加し、PR で Linux ビルドを実行する
+  - `e2e-test.yml` に `integration-test-linux` ジョブを追加する
+  - @zztkm

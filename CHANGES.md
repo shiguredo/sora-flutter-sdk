@@ -26,6 +26,11 @@
 
 ### misc
 
+- [ADD] Android JNI に AddressSanitizer / UndefinedBehaviorSanitizer ビルドオプションを追加する
+  - CMake option (`SORA_SDK_ENABLE_ASAN` / `SORA_SDK_ENABLE_UBSAN`) と gradle property (`-Psora.asan=true` / `-Psora.ubsan=true`) を追加する
+  - UBSan はランタイム不要の trap モードを採用する
+  - @zztkm
+
 - [ADD] notify と push と signalingNotifyMetadata の E2E テストを追加する
   - @zztkm
 

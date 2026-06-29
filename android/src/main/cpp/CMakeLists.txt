@@ -6,6 +6,11 @@ set(WEBRTC_LDFLAGS_FILE "" CACHE FILEPATH "WebRTC の追加リンクオプショ
 
 project(sora_sdk C)
 
+# AddressSanitizer / UndefinedBehaviorSanitizer のビルドオプション
+# 既定 OFF 。gradle から -DSORA_SDK_ENABLE_ASAN=ON / -DSORA_SDK_ENABLE_UBSAN=ON で有効化する。
+option(SORA_SDK_ENABLE_ASAN "AddressSanitizer を有効化する (use-after-free, 境界外アクセス)" OFF)
+option(SORA_SDK_ENABLE_UBSAN "UndefinedBehaviorSanitizer を有効化する (signed integer overflow, trap モード)" OFF)
+
 add_library(sora_sdk SHARED
   jni_onload.c
 )
@@ -40,6 +45,16 @@ target_link_libraries(sora_sdk PRIVATE
   ${ANDROID_LIB_ANDROID}
   ${ANDROID_LIB_EGL}
 )
+
+if(SORA_SDK_ENABLE_ASAN)
+  target_compile_options(sora_sdk PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+  target_link_options(sora_sdk PRIVATE -fsanitize=address)
+endif()
+
+if(SORA_SDK_ENABLE_UBSAN)
+  target_compile_options(sora_sdk PRIVATE -fsanitize=signed-integer-overflow -fsanitize-trap=signed-integer-overflow)
+  target_link_options(sora_sdk PRIVATE -fsanitize=signed-integer-overflow -fsanitize-trap=signed-integer-overflow)
+endif()
 
 # 既定では SDK 管理下の webrtc.ldflags を利用する
 set(_DEFAULT_WEBRTC_LDFLAGS_FILE

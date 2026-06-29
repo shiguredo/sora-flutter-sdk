@@ -47,13 +47,22 @@ android {
 
         externalNativeBuild {
             cmake {
-                arguments(
+                def cmakeArgs = [
                     "-DANDROID_ABI=arm64-v8a",
                     "-DANDROID_PLATFORM=29",
                     "-DANDROID_NATIVE_API_LEVEL=29",
                     "-DLIBWEBRTC_C_DIR=${libwebrtcCDir}",
                     "-DLIBWEBRTC_C_BUILD_DIR=${libwebrtcCBuildDir}"
-                )
+                ]
+
+                if (project.findProperty('sora.asan') == 'true') {
+                    cmakeArgs.add("-DSORA_SDK_ENABLE_ASAN=ON")
+                }
+                if (project.findProperty('sora.ubsan') == 'true') {
+                    cmakeArgs.add("-DSORA_SDK_ENABLE_UBSAN=ON")
+                }
+
+                arguments(cmakeArgs.toArray(new String[0]))
             }
         }
 

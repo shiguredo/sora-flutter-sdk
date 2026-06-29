@@ -2,6 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-03
+- Completed: 2026-06-29
 - Model: Opus 4.8
 - Branch: feature/add-linux-ci-build-job
 - Polished: 2026-06-03

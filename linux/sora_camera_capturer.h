@@ -112,6 +112,11 @@ class SoraCameraCapturer {
   int preview_width_ = 0;
   int preview_height_ = 0;
   std::mutex preview_mutex_;
+
+  // copy_pixels から返す安定した出力バッファ
+  // キャプチャスレッドによる preview_buffer_ の再確保から保護するため
+  // CopyPreviewPixelBuffer 内でのみ書き換えられる
+  std::vector<uint8_t> output_buffer_;
 };
 
 #endif

@@ -31,36 +31,6 @@ void AppendDeviceToFlValueList(FlValue* list,
   fl_value_append(list, map);
 }
 
-// PulseAudio の列挙操作に共通する処理のテンプレート。
-// start_fn で PulseAudio の列挙操作を開始し、完了を同期的に待つ。
-// 接続失敗・操作発行失敗時は空リストを返し g_warning でログを残す。
-template <typename PaCallback>
-FlValue* EnumerateDevicesInternal(
-    pa_operation* (*start_fn)(pa_context*, PaCallback, void*),
-    PaCallback callback,
-    const char* log_label) {
-  PulseSyncContext<FlValue*> sync_ctx;
-  sync_ctx.data = fl_value_new_list();
-
-  PulseConnection conn;
-  if (!conn.IsReady()) {
-    g_warning("PulseAudio connection failed: unable to enumerate %s devices",
-              log_label);
-    return sync_ctx.data;
-  }
-
-  pa_operation* op = start_fn(conn.context(), callback, &sync_ctx);
-  if (!op) {
-    g_warning("PulseAudio operation failed: unable to enumerate %s devices",
-              log_label);
-    return sync_ctx.data;
-  }
-  pa_operation_unref(op);
-
-  conn.RunUntilDone(&sync_ctx);
-  return sync_ctx.data;
-}
-
 // コンテキストの状態が PA_CONTEXT_READY になるまでメインループを回す。
 // 接続失敗・接続拒否・タイムアウト (5 秒) の場合は false を返す。
 bool WaitForContextReady(pa_mainloop* mainloop, pa_context* ctx) {
@@ -82,51 +52,6 @@ bool WaitForContextReady(pa_mainloop* mainloop, pa_context* ctx) {
     }
     pa_mainloop_iterate(mainloop, 1, nullptr);
   }
-}
-
-// 入力デバイス (ソース) を列挙するコールバック。
-// モニタソース (スピーカー出力をループバックするもの) は除外する。
-void EnumerateSourcesCallback(pa_context* /*ctx*/,
-                              const pa_source_info* info,
-                              int eol,
-                              void* userdata) {
-  auto* sync_ctx = static_cast<PulseSyncContext<FlValue*>*>(userdata);
-  if (eol) {
-    sync_ctx->done = true;
-    return;
-  }
-  // monitor_of_sink が PA_INVALID_INDEX 以外のソースは
-  // スピーカー出力をループバックするモニタソースなので除外する。
-  if (info->monitor_of_sink != PA_INVALID_INDEX) {
-    return;
-  }
-  AppendDeviceToFlValueList(sync_ctx->data, SafeStr(info->name),
-                            SafeStr(info->description));
-}
-
-// 出力デバイス (シンク) を列挙するコールバック。
-void EnumerateSinksCallback(pa_context* /*ctx*/,
-                            const pa_sink_info* info,
-                            int eol,
-                            void* userdata) {
-  auto* sync_ctx = static_cast<PulseSyncContext<FlValue*>*>(userdata);
-  if (eol) {
-    sync_ctx->done = true;
-    return;
-  }
-  AppendDeviceToFlValueList(sync_ctx->data, SafeStr(info->name),
-                            SafeStr(info->description));
-}
-
-// サーバー情報を取得するコールバック。
-// 既定ソース名を文字列として取り出す。
-void ServerInfoCallback(pa_context* /*ctx*/,
-                        const pa_server_info* info,
-                        void* userdata) {
-  auto* sync_ctx = static_cast<PulseSyncContext<std::string>*>(userdata);
-  sync_ctx->data =
-      std::string(info->default_source_name ? info->default_source_name : "");
-  sync_ctx->done = true;
 }
 
 // PulseAudio の mainloop と context の RAII ラッパー。
@@ -204,6 +129,81 @@ class PulseConnection {
   pa_context* ctx_ = nullptr;
   bool ready_ = false;
 };
+
+// 入力デバイス (ソース) を列挙するコールバック。
+// モニタソース (スピーカー出力をループバックするもの) は除外する。
+void EnumerateSourcesCallback(pa_context* /*ctx*/,
+                              const pa_source_info* info,
+                              int eol,
+                              void* userdata) {
+  auto* sync_ctx = static_cast<PulseSyncContext<FlValue*>*>(userdata);
+  if (eol) {
+    sync_ctx->done = true;
+    return;
+  }
+  // monitor_of_sink が PA_INVALID_INDEX 以外のソースは
+  // スピーカー出力をループバックするモニタソースなので除外する。
+  if (info->monitor_of_sink != PA_INVALID_INDEX) {
+    return;
+  }
+  AppendDeviceToFlValueList(sync_ctx->data, SafeStr(info->name),
+                            SafeStr(info->description));
+}
+
+// 出力デバイス (シンク) を列挙するコールバック。
+void EnumerateSinksCallback(pa_context* /*ctx*/,
+                            const pa_sink_info* info,
+                            int eol,
+                            void* userdata) {
+  auto* sync_ctx = static_cast<PulseSyncContext<FlValue*>*>(userdata);
+  if (eol) {
+    sync_ctx->done = true;
+    return;
+  }
+  AppendDeviceToFlValueList(sync_ctx->data, SafeStr(info->name),
+                            SafeStr(info->description));
+}
+
+// サーバー情報を取得するコールバック。
+// 既定ソース名を文字列として取り出す。
+void ServerInfoCallback(pa_context* /*ctx*/,
+                        const pa_server_info* info,
+                        void* userdata) {
+  auto* sync_ctx = static_cast<PulseSyncContext<std::string>*>(userdata);
+  sync_ctx->data =
+      std::string(info->default_source_name ? info->default_source_name : "");
+  sync_ctx->done = true;
+}
+
+// PulseAudio の列挙操作に共通する処理のテンプレート。
+// start_fn で PulseAudio の列挙操作を開始し、完了を同期的に待つ。
+// 接続失敗・操作発行失敗時は空リストを返し g_warning でログを残す。
+template <typename PaCallback>
+FlValue* EnumerateDevicesInternal(
+    pa_operation* (*start_fn)(pa_context*, PaCallback, void*),
+    PaCallback callback,
+    const char* log_label) {
+  PulseSyncContext<FlValue*> sync_ctx;
+  sync_ctx.data = fl_value_new_list();
+
+  PulseConnection conn;
+  if (!conn.IsReady()) {
+    g_warning("PulseAudio connection failed: unable to enumerate %s devices",
+              log_label);
+    return sync_ctx.data;
+  }
+
+  pa_operation* op = start_fn(conn.context(), callback, &sync_ctx);
+  if (!op) {
+    g_warning("PulseAudio operation failed: unable to enumerate %s devices",
+              log_label);
+    return sync_ctx.data;
+  }
+  pa_operation_unref(op);
+
+  conn.RunUntilDone(&sync_ctx);
+  return sync_ctx.data;
+}
 
 }  // namespace
 

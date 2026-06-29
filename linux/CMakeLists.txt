@@ -28,7 +28,7 @@ set_target_properties(${PLUGIN_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
 # dart:ffi の DynamicLibrary.open('libsora_sdk.so') に合わせて出力名を設定する
 set_target_properties(${PLUGIN_NAME} PROPERTIES OUTPUT_NAME sora_sdk)
 target_compile_definitions(${PLUGIN_NAME} PRIVATE FLUTTER_PLUGIN_IMPL)
-target_include_directories(${PLUGIN_NAME} INTERFACE
+target_include_directories(${PLUGIN_NAME} PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_include_directories(${PLUGIN_NAME} PRIVATE
   "${LIBWEBRTC_C_DIR}/include"

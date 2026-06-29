@@ -165,6 +165,25 @@ static void sora_client_free(gpointer data) {
 }
 
 // ---------------------------------------------------------------------------
+// メインスレッドへの frame-available 通知ディスパッチ
+// fl_texture_registrar_mark_texture_frame_available はメインスレッドからの
+// 呼び出しが必要なため、g_idle_add でメインスレッドに転送する
+// ---------------------------------------------------------------------------
+
+struct RemoteFrameAvailableData {
+  FlTextureRegistrar* registrar;
+  FlTexture* texture;
+};
+
+static gboolean remote_frame_available_idle_cb(gpointer user_data) {
+  auto* fd = static_cast<RemoteFrameAvailableData*>(user_data);
+  fl_texture_registrar_mark_texture_frame_available(fd->registrar, fd->texture);
+  g_object_unref(fd->texture);
+  g_free(fd);
+  return G_SOURCE_REMOVE;
+}
+
+// ---------------------------------------------------------------------------
 // EventChannel StreamHandlers
 // ---------------------------------------------------------------------------
 
@@ -609,14 +628,20 @@ static void sora_sdk_plugin_handle_method_call(SoraSdkPlugin* self,
     self->context->client_renderers[client_id][renderer_id] = entry;
 
     // フレーム到着時にテクスチャ更新を通知するコールバックを設定する
+    // fl_texture_registrar_mark_texture_frame_available はメインスレッドから
+    // 呼ぶ必要があるため、g_idle_add_full でメインスレッドにディスパッチする
     linux_rendering_sink_set_frame_callback(
         sink,
         [](void* context) {
           auto* e =
               static_cast<RemoteVideoRendererEntry*>(context);
           if (e && e->registrar && e->texture) {
-            fl_texture_registrar_mark_texture_frame_available(
-                e->registrar, FL_TEXTURE(e->texture));
+            auto* fd = g_new0(RemoteFrameAvailableData, 1);
+            fd->registrar = e->registrar;
+            fd->texture = FL_TEXTURE(e->texture);
+            g_object_ref(fd->texture);
+            g_idle_add_full(G_PRIORITY_DEFAULT_IDLE,
+                            remote_frame_available_idle_cb, fd, nullptr);
           }
         },
         &self->context->client_renderers[client_id][renderer_id]);

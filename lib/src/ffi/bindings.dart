@@ -808,6 +808,13 @@ class LibWebrtcC {
         int Function(Pointer<WebrtcAudioDeviceModule>)
       >('webrtc_AudioDeviceModule_Init');
 
+  // 再生サブシステムを初期化する
+  late final audioDeviceModuleInitPlayout = _lib
+      .lookupFunction<
+        Int32 Function(Pointer<WebrtcAudioDeviceModule>),
+        int Function(Pointer<WebrtcAudioDeviceModule>)
+      >('webrtc_AudioDeviceModule_InitPlayout');
+
   // 録音サブシステムを初期化する
   late final audioDeviceModuleInitRecording = _lib
       .lookupFunction<
@@ -3184,6 +3191,12 @@ class WebrtcConstants {
   // AudioDeviceModule タイプ
   late final int kPlatformDefaultAudio = _lookup(
     'webrtc_AudioDeviceModule_kPlatformDefaultAudio',
+  );
+  late final int kLinuxPulseAudio = _lookup(
+    'webrtc_AudioDeviceModule_kLinuxPulseAudio',
+  );
+  late final int kLinuxAlsaAudio = _lookup(
+    'webrtc_AudioDeviceModule_kLinuxAlsaAudio',
   );
   late final int kDummyAudio = _lookup('webrtc_AudioDeviceModule_kDummyAudio');
 

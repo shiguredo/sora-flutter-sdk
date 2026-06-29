@@ -323,7 +323,6 @@ class WebrtcClient {
       sharedLib.environmentDelete(env);
       if (adm != nullptr) {
         sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
-        // Dart から SetRecordingDevice を呼ぶために参照を保持しておく
         if (_sharedAdmRef != null) {
           sharedLib.audioDeviceModuleRelease(
             sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),

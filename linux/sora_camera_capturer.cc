@@ -39,7 +39,12 @@ static gboolean sora_local_preview_texture_copy_pixels(
   if (!self->capturer) {
     return FALSE;
   }
-  *out_buffer = self->capturer->CopyPreviewPixelBuffer(width, height);
+  const uint8_t* pixels = self->capturer->CopyPreviewPixelBuffer(width, height);
+  // カメラがまだ 1 フレームもキャプチャしていない場合は失敗として扱う
+  if (!pixels || *width == 0 || *height == 0) {
+    return FALSE;
+  }
+  *out_buffer = pixels;
   return TRUE;
 }
 
@@ -564,6 +569,20 @@ void SoraCameraCapturer::CaptureLoop() {
 // フレーム処理: ピクセル変換 → AdaptedVideoTrackSource → プレビュー
 // ============================================================================
 
+// g_idle_add でメインスレッドに dispatch するためのデータ構造
+struct FrameAvailableData {
+  FlTextureRegistrar* registrar;
+  FlTexture* texture;
+};
+
+static gboolean frame_available_idle_cb(gpointer user_data) {
+  auto* fd = static_cast<FrameAvailableData*>(user_data);
+  fl_texture_registrar_mark_texture_frame_available(fd->registrar, fd->texture);
+  g_object_unref(fd->texture);
+  g_free(fd);
+  return G_SOURCE_REMOVE;
+}
+
 void SoraCameraCapturer::ProcessFrame(const void* data,
                                       size_t size,
                                       uint32_t pixelformat,
@@ -731,9 +750,15 @@ void SoraCameraCapturer::ProcessFrame(const void* data,
   webrtc_I420Buffer_Release(i420);
 
   // テクスチャフレーム更新を Flutter エンジンに通知する
+  // fl_texture_registrar_mark_texture_frame_available はメインスレッドから呼ぶ必要があるため
+  // g_idle_add_full でメインスレッドにディスパッチする
   if (preview_texture_ && texture_registrar_) {
-    fl_texture_registrar_mark_texture_frame_available(
-        texture_registrar_, FL_TEXTURE(preview_texture_));
+    auto* fd = g_new0(FrameAvailableData, 1);
+    fd->registrar = texture_registrar_;
+    fd->texture = FL_TEXTURE(preview_texture_);
+    g_object_ref(fd->texture);
+    g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, frame_available_idle_cb, fd,
+                    nullptr);
   }
 }
 
@@ -747,7 +772,13 @@ const uint8_t* SoraCameraCapturer::CopyPreviewPixelBuffer(
   std::lock_guard<std::mutex> lock(preview_mutex_);
   *out_width = static_cast<uint32_t>(preview_width_);
   *out_height = static_cast<uint32_t>(preview_height_);
-  return preview_buffer_.data();
+  if (preview_buffer_.empty()) {
+    return nullptr;
+  }
+  // キャプチャスレッドが preview_buffer_ を再確保しても安全なように
+  // 安定した出力バッファにコピーしてから返す
+  output_buffer_ = preview_buffer_;
+  return output_buffer_.data();
 }
 
 // ============================================================================

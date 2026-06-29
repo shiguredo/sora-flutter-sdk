@@ -740,7 +740,7 @@ jobs:
         working-directory: devtools
         run: |
           set -euo pipefail
-          flutter build linux --release --no-pub
+          flutter build linux --release --no-pub -v
 
       - name: Upload devtools Linux artifact
         uses: actions/upload-artifact@v7
@@ -759,7 +759,7 @@ jobs:
         working-directory: e2e_test_app
         run: |
           set -euo pipefail
-          flutter build linux --release --no-pub
+          flutter build linux --release --no-pub -v
 
   slack_notify:
     name: Slack Notify

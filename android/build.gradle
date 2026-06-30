@@ -62,7 +62,7 @@ android {
                     cmakeArgs.add("-DSORA_SDK_ENABLE_UBSAN=ON")
                 }
 
-                arguments(cmakeArgs.toArray(new String[0]))
+                arguments(cmakeArgs as String[])
             }
         }
 

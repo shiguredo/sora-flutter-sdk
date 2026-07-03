@@ -299,6 +299,7 @@ void main() {
         channelId: channelId,
         role: SoraRole.sendonly,
         audio: true,
+        useAudioDevice: false,
         video: false,
         metadata: env.metadata,
       );

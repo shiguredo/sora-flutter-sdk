@@ -15,6 +15,7 @@ export 'src/sora_media_devices.dart';
 export 'src/sora_media_stream.dart'
     hide copyI420Plane, validateExternalVideoFrame;
 export 'src/sora_media_stream_track_base.dart';
+export 'src/sora_push_audio.dart';
 export 'src/sora_remote_media_stream.dart' show RemoteMediaStream;
 export 'src/sora_remote_track.dart';
 export 'src/sora_role.dart';

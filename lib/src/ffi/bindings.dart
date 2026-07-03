@@ -2564,6 +2564,21 @@ class LibWebrtcC {
         void Function(Pointer<WebrtcAudioSourceInterface>)
       >('webrtc_AudioSourceInterface_Release');
 
+  // --- PushAudioDevice (Sora SDK 独自) ---
+  // Dart 側から PCM データを注入可能なカスタム AudioDeviceModule。
+
+  late final soraCreatePushAudioDevice = _lib
+      .lookupFunction<
+        Pointer<WebrtcAudioDeviceModuleRefcounted> Function(),
+        Pointer<WebrtcAudioDeviceModuleRefcounted> Function()
+      >('sora_create_push_audio_device');
+
+  late final soraPushAudioOnData = _lib
+      .lookupFunction<
+        Void Function(Pointer<Int16>, Int32, Int32, Int32),
+        void Function(Pointer<Int16>, int, int, int)
+      >('sora_push_audio_on_data');
+
   // --- AudioTrack ---
   // local audio track と local media stream を生成・操作する API。
 

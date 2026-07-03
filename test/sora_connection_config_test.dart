@@ -44,6 +44,7 @@ void main() {
         'videoAv1Params': null,
         'dataChannels': null,
         'forwardingFilters': null,
+        'useAudioDevice': true,
       });
     },
   );
@@ -82,6 +83,7 @@ void main() {
       'videoAv1Params': null,
       'dataChannels': null,
       'forwardingFilters': null,
+      'useAudioDevice': true,
     });
   });
 }

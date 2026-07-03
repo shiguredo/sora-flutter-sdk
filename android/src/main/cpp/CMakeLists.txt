@@ -12,6 +12,7 @@ option(SORA_SDK_ENABLE_ASAN "AddressSanitizer を有効化する (use-after-free
 option(SORA_SDK_ENABLE_UBSAN "UndefinedBehaviorSanitizer を有効化する (signed integer overflow, trap モード)" OFF)
 
 add_library(sora_sdk SHARED
+  push_audio_device.cpp
   jni_onload.c
 )
 

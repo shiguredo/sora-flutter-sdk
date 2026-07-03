@@ -110,6 +110,9 @@ class WebrtcClient {
   // Dart 側で SetRecordingDevice を呼ぶために PCF に渡した後も release せず持ち続ける。
   static Pointer<WebrtcAudioDeviceModuleRefcounted>? _sharedAdmRef;
   static SimulcastVideoEncoderFactory? _sharedSimulcastVideoEncoderFactory;
+  // 音声デバイスを利用するかどうか。最初の create() 呼び出し時に設定される。
+  // false の場合は kDummyAudio が選択される。
+  static bool _useAudioDevice = true;
 
   // `LibWebrtcC` の共有インスタンスを返す。
   //
@@ -269,71 +272,128 @@ class WebrtcClient {
         );
       }
     } else if (Platform.isMacOS) {
-      final env = sharedLib.createEnvironment();
-      final adm = sharedLib.createAudioDeviceModule(
-        env,
-        sharedConsts.kPlatformDefaultAudio,
-      );
-      sharedLib.environmentDelete(env);
-      if (adm != nullptr) {
-        sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
-        // Dart から SetRecordingDevice を呼ぶために参照を保持しておく
-        if (_sharedAdmRef != null) {
-          sharedLib.audioDeviceModuleRelease(
-            sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
-          );
-        }
-        _sharedAdmRef = adm;
-        final initRcMac = sharedLib.audioDeviceModuleInit(
-          sharedLib.audioDeviceModuleRefcountedGet(adm),
+      if (_useAudioDevice) {
+        final env = sharedLib.createEnvironment();
+        final adm = sharedLib.createAudioDeviceModule(
+          env,
+          sharedConsts.kPlatformDefaultAudio,
         );
-        if (initRcMac != 0) {
-          throw StateError('AudioDeviceModule init failed: rc=$initRcMac');
+        sharedLib.environmentDelete(env);
+        if (adm != nullptr) {
+          sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+          // Dart から SetRecordingDevice を呼ぶために参照を保持しておく
+          if (_sharedAdmRef != null) {
+            sharedLib.audioDeviceModuleRelease(
+              sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+            );
+          }
+          _sharedAdmRef = adm;
+          final initRcMac = sharedLib.audioDeviceModuleInit(
+            sharedLib.audioDeviceModuleRefcountedGet(adm),
+          );
+          if (initRcMac != 0) {
+            throw StateError('AudioDeviceModule init failed: rc=$initRcMac');
+          }
+        }
+      } else {
+        final adm = sharedLib.soraCreatePushAudioDevice();
+        if (adm != nullptr) {
+          sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+          if (_sharedAdmRef != null) {
+            sharedLib.audioDeviceModuleRelease(
+              sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+            );
+          }
+          _sharedAdmRef = adm;
+          final initRcMac = sharedLib.audioDeviceModuleInit(
+            sharedLib.audioDeviceModuleRefcountedGet(adm),
+          );
+          if (initRcMac != 0) {
+            throw StateError('AudioDeviceModule init failed: rc=$initRcMac');
+          }
         }
       }
     } else if (Platform.isWindows) {
-      // Windows: setjmp/longjmp で abort を捕捉して安全に ADM を作成する
-      final env = sharedLib.createEnvironment();
-      final adm = sharedLib.soraCreateAudioDeviceModule(
-        env,
-        sharedConsts.kPlatformDefaultAudio,
-      );
-      sharedLib.environmentDelete(env);
-      if (adm != nullptr) {
-        sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
-        if (_sharedAdmRef != null) {
-          sharedLib.audioDeviceModuleRelease(
-            sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
-          );
-        }
-        _sharedAdmRef = adm;
-        final initRcWin = sharedLib.audioDeviceModuleInit(
-          sharedLib.audioDeviceModuleRefcountedGet(adm),
+      if (_useAudioDevice) {
+        // Windows: setjmp/longjmp で abort を捕捉して安全に ADM を作成する
+        final env = sharedLib.createEnvironment();
+        final adm = sharedLib.soraCreateAudioDeviceModule(
+          env,
+          sharedConsts.kPlatformDefaultAudio,
         );
-        if (initRcWin != 0) {
-          throw StateError('AudioDeviceModule init failed: rc=$initRcWin');
+        sharedLib.environmentDelete(env);
+        if (adm != nullptr) {
+          sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+          if (_sharedAdmRef != null) {
+            sharedLib.audioDeviceModuleRelease(
+              sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+            );
+          }
+          _sharedAdmRef = adm;
+          final initRcWin = sharedLib.audioDeviceModuleInit(
+            sharedLib.audioDeviceModuleRefcountedGet(adm),
+          );
+          if (initRcWin != 0) {
+            throw StateError('AudioDeviceModule init failed: rc=$initRcWin');
+          }
+        }
+      } else {
+        final adm = sharedLib.soraCreatePushAudioDevice();
+        if (adm != nullptr) {
+          sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+          if (_sharedAdmRef != null) {
+            sharedLib.audioDeviceModuleRelease(
+              sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+            );
+          }
+          _sharedAdmRef = adm;
+          final initRcWin = sharedLib.audioDeviceModuleInit(
+            sharedLib.audioDeviceModuleRefcountedGet(adm),
+          );
+          if (initRcWin != 0) {
+            throw StateError('AudioDeviceModule init failed: rc=$initRcWin');
+          }
         }
       }
     } else if (Platform.isLinux) {
-      final env = sharedLib.createEnvironment();
-      final adm = sharedLib.createAudioDeviceModule(
-        env,
-        sharedConsts.kPlatformDefaultAudio,
-      );
-      sharedLib.environmentDelete(env);
-      if (adm != nullptr) {
-        sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
-        if (_sharedAdmRef != null) {
-          sharedLib.audioDeviceModuleRelease(
-            sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
-          );
-        }
-        _sharedAdmRef = adm;
-        final initRcLinux = sharedLib.audioDeviceModuleInit(
-          sharedLib.audioDeviceModuleRefcountedGet(adm),
+      if (_useAudioDevice) {
+        final env = sharedLib.createEnvironment();
+        final adm = sharedLib.createAudioDeviceModule(
+          env,
+          sharedConsts.kPlatformDefaultAudio,
         );
-        if (initRcLinux != 0) {
-          throw StateError('AudioDeviceModule init failed: rc=$initRcLinux');
+        sharedLib.environmentDelete(env);
+        if (adm != nullptr) {
+          sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+          if (_sharedAdmRef != null) {
+            sharedLib.audioDeviceModuleRelease(
+              sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+            );
+          }
+          _sharedAdmRef = adm;
+          final initRcLinux = sharedLib.audioDeviceModuleInit(
+            sharedLib.audioDeviceModuleRefcountedGet(adm),
+          );
+          if (initRcLinux != 0) {
+            throw StateError('AudioDeviceModule init failed: rc=$initRcLinux');
+          }
+        }
+      } else {
+        final adm = sharedLib.soraCreatePushAudioDevice();
+        if (adm != nullptr) {
+          sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+          if (_sharedAdmRef != null) {
+            sharedLib.audioDeviceModuleRelease(
+              sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+            );
+          }
+          _sharedAdmRef = adm;
+          final initRcLinux = sharedLib.audioDeviceModuleInit(
+            sharedLib.audioDeviceModuleRefcountedGet(adm),
+          );
+          if (initRcLinux != 0) {
+            throw StateError('AudioDeviceModule init failed: rc=$initRcLinux');
+          }
         }
       }
     }
@@ -384,6 +444,10 @@ class WebrtcClient {
     required Map<String, Object?> config,
     required WebrtcClientEventCallback onEvent,
   }) {
+    // 最初の create() 呼び出し時に useAudioDevice を共有設定として記録する。
+    // _ensureSharedFactory() は一度だけ実行されるため、後続の create() で
+    // 異なる値を渡しても反映されない。
+    _useAudioDevice = (config['useAudioDevice'] as bool?) ?? true;
     return WebrtcClient._(
       lib: sharedLib,
       consts: sharedConsts,

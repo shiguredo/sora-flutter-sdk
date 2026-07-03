@@ -20,6 +20,7 @@ set(WEBRTC_LIB "${LIBWEBRTC_C_BUILD_DIR}/_deps/webrtc/lib/webrtc.lib")
 # 単一の共有ライブラリに統合する。
 
 add_library(${PLUGIN_NAME} SHARED
+  "push_audio_device.cpp"
   "include/sora_sdk/sora_sdk_plugin_c_api.h"
   "sora_sdk_plugin_c_api.cpp"
   "sora_sdk_plugin.cpp"

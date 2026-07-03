@@ -147,6 +147,11 @@ class DevToolsPageNotifier extends ChangeNotifier {
   bool connectAudio = true;
   // connect 時に video を送るかどうかを保持する。
   bool connectVideo = true;
+  // beep 音声送信を有効にするかどうかを保持する。
+  //
+  // 有効時は useAudioDevice: false + BeepAudioTrack を使い、
+  // 実マイクの代わりにビープ音（正弦波）を送信する。
+  bool beepAudioEnabled = false;
   // 現在選択中の role を保持する。
   SoraRole selectedRole = SoraRole.sendrecv;
   // 列挙した映像入力デバイス一覧を保持する。

@@ -13,6 +13,7 @@ import 'package:sora_sdk/sora_sdk.dart';
 import 'devtools_connection_subscription_controller.dart';
 import 'devtools_media_devices_support.dart';
 import 'devtools_models.dart';
+import 'devtools_beep_audio_track.dart';
 
 class DevToolsConnectRequest {
   // 接続生成と local media 準備に必要な入力値をまとめる。
@@ -22,6 +23,7 @@ class DevToolsConnectRequest {
     required this.role,
     required this.configuredAudio,
     required this.configuredVideo,
+    required this.beepAudioEnabled,
     required this.selectedVideoCodecType,
     required this.selectedVideoBitRate,
     required this.simulcastEnabled,
@@ -46,6 +48,7 @@ class DevToolsConnectRequest {
   final SoraRole role;
   final bool configuredAudio;
   final bool configuredVideo;
+  final bool beepAudioEnabled;
   final String? selectedVideoCodecType;
   final int? selectedVideoBitRate;
   final bool simulcastEnabled;
@@ -228,6 +231,12 @@ class DevToolsConnectionController {
   final void Function(String line) _appendEventLog;
   // local stream 破棄 callback。
   final Future<void> Function(LocalMediaStream stream) _disposeLocalStream;
+  // beep 音声送信時に保持する BeepAudioTrack。
+  DevToolsBeepAudioTrack? _beepAudioTrack;
+
+  // beep 音声トラックを取得する。
+  // 接続中かつ beep 音声送信が有効な場合に non-null を返す。
+  DevToolsBeepAudioTrack? get beepAudioTrack => _beepAudioTrack;
 
   // 接続生成から local media 準備、購読開始、connect 送信までをまとめて行う。
   Future<DevToolsConnectResult> createAndConnect({
@@ -241,6 +250,7 @@ class DevToolsConnectionController {
         role: request.role,
         audio: request.configuredAudio,
         video: request.configuredVideo,
+        useAudioDevice: !request.beepAudioEnabled,
         videoCodecType: VideoCodecType.fromValue(
           request.selectedVideoCodecType,
         ),
@@ -603,22 +613,35 @@ class DevToolsConnectionController {
       return null;
     }
 
+    // 前回の BeepAudioTrack があれば破棄する
+    await _beepAudioTrack?.dispose();
+    _beepAudioTrack = null;
+
     LocalMediaStream? localStream = request.existingLocalStream;
     if (localStream == null) {
       if (request.useExternalVideoTrack) {
         localStream = MediaDevices.createMediaStream();
         localStream.addTrack(MediaDevices.createExternalVideoTrack());
         if (request.configuredAudio) {
-          localStream.addTrack(
-            await MediaDevices.createAudioTrack(
-              audioDeviceId: request.selectedAudioInputDeviceId,
-            ),
-          );
+          if (request.beepAudioEnabled) {
+            final audioTrack = await MediaDevices.createAudioTrack();
+            _beepAudioTrack = DevToolsBeepAudioTrack.fromTrack(audioTrack);
+            _beepAudioTrack!.start();
+            localStream.addTrack(audioTrack);
+          } else {
+            localStream.addTrack(
+              await MediaDevices.createAudioTrack(
+                audioDeviceId: request.selectedAudioInputDeviceId,
+              ),
+            );
+          }
         }
       } else {
+        final audioEnabled =
+            request.configuredAudio && !request.beepAudioEnabled;
         localStream = await MediaDevices.getUserMedia(
           GetUserMediaOptions(
-            audio: request.configuredAudio,
+            audio: audioEnabled,
             audioDeviceId: request.selectedAudioInputDeviceId,
             video: request.configuredVideo,
             videoDeviceId: request.selectedVideoInputDeviceId,
@@ -627,6 +650,13 @@ class DevToolsConnectionController {
             videoFrameRate: request.selectedFrameRate,
           ),
         );
+        // beep 音声が有効な場合は getUserMedia の後で DevToolsBeepAudioTrack を追加する
+        if (request.configuredAudio && request.beepAudioEnabled) {
+          final audioTrack = await MediaDevices.createAudioTrack();
+          _beepAudioTrack = DevToolsBeepAudioTrack.fromTrack(audioTrack);
+          _beepAudioTrack!.start();
+          localStream.addTrack(audioTrack);
+        }
       }
     } else {
       if (request.useExternalVideoTrack) {
@@ -639,11 +669,18 @@ class DevToolsConnectionController {
       }
       if (request.configuredAudio) {
         if (localStream.getAudioTracks().isEmpty) {
-          localStream.addTrack(
-            await MediaDevices.createAudioTrack(
-              audioDeviceId: request.selectedAudioInputDeviceId,
-            ),
-          );
+          if (request.beepAudioEnabled) {
+            final audioTrack = await MediaDevices.createAudioTrack();
+            _beepAudioTrack = DevToolsBeepAudioTrack.fromTrack(audioTrack);
+            _beepAudioTrack!.start();
+            localStream.addTrack(audioTrack);
+          } else {
+            localStream.addTrack(
+              await MediaDevices.createAudioTrack(
+                audioDeviceId: request.selectedAudioInputDeviceId,
+              ),
+            );
+          }
         }
       } else {
         for (final track in localStream.getAudioTracks()) {
@@ -676,5 +713,11 @@ class DevToolsConnectionController {
       return;
     }
     await _disposeLocalStream(stream);
+  }
+
+  // BeepAudioTrack を停止・破棄する。
+  Future<void> disposeBeepAudioTrack() async {
+    await _beepAudioTrack?.dispose();
+    _beepAudioTrack = null;
   }
 }

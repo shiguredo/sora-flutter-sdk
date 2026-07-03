@@ -194,6 +194,10 @@ class _DevToolsPageState extends State<DevToolsPage>
   // connect 時に video を送るかどうかを保持する。
   bool get _connectVideo => _pageNotifier.connectVideo;
 
+  // beep 音声送信が有効かどうかを保持する。
+  bool get _beepAudioEnabled => _pageNotifier.beepAudioEnabled;
+  set _beepAudioEnabled(bool value) => _pageNotifier.beepAudioEnabled = value;
+
   // 現在選択中の role を保持する。
   SoraRole get _selectedRole => _pageNotifier.selectedRole;
   set _selectedRole(SoraRole value) => _pageNotifier.selectedRole = value;
@@ -850,6 +854,7 @@ class _DevToolsPageState extends State<DevToolsPage>
       role: _selectedRole,
       configuredAudio: _configuredAudio,
       configuredVideo: _configuredVideo,
+      beepAudioEnabled: _beepAudioEnabled,
       selectedVideoCodecType: _selectedVideoCodecType,
       selectedVideoBitRate: _selectedVideoBitRate,
       simulcastEnabled: _simulcastEnabled,
@@ -944,6 +949,7 @@ class _DevToolsPageState extends State<DevToolsPage>
       if (conn != null) {
         await _connectionController.disconnect(conn);
       }
+      await _connectionController.disposeBeepAudioTrack();
       _pageNotifier.resetAfterDisconnect(
         audioEnabledValue: _configuredAudio,
         videoEnabledValue: _configuredVideo,
@@ -1131,6 +1137,17 @@ class _DevToolsPageState extends State<DevToolsPage>
       }
       _appendLog('video_enabled: enabled=${_videoEnabled ? 'true' : 'false'}');
     }
+  }
+
+  // beep 音声トラックにビープ音の再生を指示する。
+  void _handleTriggerBeep() {
+    final beepTrack = _connectionController.beepAudioTrack;
+    if (beepTrack == null) {
+      _appendLog('beep: no active BeepAudioTrack');
+      return;
+    }
+    beepTrack.triggerBeep();
+    _appendLog('beep: triggered');
   }
 
   // トラックの有効・無効を設定する
@@ -1578,6 +1595,14 @@ class _DevToolsPageState extends State<DevToolsPage>
             isConnected: _isConnected,
             onConnectionButtonPressed: _handleConnectionButtonPressed,
           ),
+          if (_isConnected && _beepAudioEnabled) ...[
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: _busy ? null : _handleTriggerBeep,
+              icon: const Icon(Icons.volume_up),
+              label: const Text('Trigger Beep'),
+            ),
+          ],
           const SizedBox(height: 12),
           DevToolsConnectionStatusSection(
             connectionStateLabel: _connectionStateLabel,
@@ -1735,6 +1760,7 @@ class _DevToolsPageState extends State<DevToolsPage>
       selectedSpotlightUnfocusRid: _selectedSpotlightUnfocusRid,
       connectAudio: _connectAudio,
       connectVideo: _connectVideo,
+      beepAudioEnabled: _beepAudioEnabled,
       needsCamera: _needsCamera,
       canEditSimulcastRequestRid: _canEditSimulcastRequestRid,
       canEditSpotlightRid: _canEditSpotlightRid,
@@ -1808,6 +1834,11 @@ class _DevToolsPageState extends State<DevToolsPage>
       },
       onConnectVideoChanged: (value) {
         _changeConnectVideo(value);
+      },
+      onBeepAudioEnabledChanged: (value) {
+        _mutateView(() {
+          _beepAudioEnabled = value;
+        });
       },
       onVideoCodecTypeChanged: (value) {
         _mutateView(() {

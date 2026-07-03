@@ -673,6 +673,7 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
     required this.selectedSpotlightUnfocusRid,
     required this.connectAudio,
     required this.connectVideo,
+    required this.beepAudioEnabled,
     required this.needsCamera,
     required this.canEditSimulcastRequestRid,
     required this.canEditSpotlightRid,
@@ -693,6 +694,7 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
     required this.onSpotlightUnfocusRidChanged,
     required this.onConnectAudioChanged,
     required this.onConnectVideoChanged,
+    required this.onBeepAudioEnabledChanged,
     required this.onVideoCodecTypeChanged,
     required this.onVideoBitRateChanged,
     required this.onResolutionChanged,
@@ -728,6 +730,9 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
 
   // 映像接続を有効にするかどうか
   final bool connectVideo;
+
+  // beep 音声送信が有効かどうか
+  final bool beepAudioEnabled;
 
   // 現在の設定でカメラが必要かどうか
   final bool needsCamera;
@@ -788,6 +793,9 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
 
   // 映像接続設定変更時の処理
   final ValueChanged<bool> onConnectVideoChanged;
+
+  // beep 音声送信設定変更時の処理
+  final ValueChanged<bool> onBeepAudioEnabledChanged;
 
   // Video Codec 変更時の処理
   final ValueChanged<String?> onVideoCodecTypeChanged;
@@ -1066,6 +1074,19 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
                         },
                       ),
                       const SizedBox(height: 8),
+                      SwitchListTile(
+                        title: const Text('Send Beep Audio'),
+                        subtitle: const Text(
+                          'Send a 440Hz sine wave beep instead of microphone',
+                        ),
+                        value: beepAudioEnabled,
+                        onChanged: (value) {
+                          onBeepAudioEnabledChanged(value);
+                        },
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                      const SizedBox(height: 8),
                       DropdownButtonFormField<bool>(
                         initialValue: connectVideo,
                         decoration: const InputDecoration(
@@ -1154,6 +1175,17 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
                   ],
                 );
               },
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              title: const Text('Send Beep Audio'),
+              subtitle: const Text(
+                'Send a 440Hz sine wave beep instead of microphone',
+              ),
+              value: beepAudioEnabled,
+              onChanged: onBeepAudioEnabledChanged,
+              dense: true,
+              contentPadding: EdgeInsets.zero,
             ),
             const SizedBox(height: 8),
             Row(

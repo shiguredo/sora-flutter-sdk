@@ -320,7 +320,8 @@ jobs:
             libgtk-3-dev \
             liblzma-dev \
             libpulse-dev \
-            libjpeg-dev
+            libjpeg-dev \
+            xvfb
 
       - name: Restore Flutter SDK cache
         id: flutter-sdk-cache
@@ -396,4 +397,4 @@ jobs:
             exit 1
           fi
           flutter precache --linux
-          flutter test "${{ matrix.test.target }}" -d linux
+          xvfb-run -a flutter test "${{ matrix.test.target }}" -d linux

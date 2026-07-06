@@ -106,7 +106,7 @@ __declspec(dllexport) struct webrtc_AudioDeviceModule_refcounted* sora_create_pu
   // 必要なコールバックだけ設定し、残りは NULL → AudioDeviceModuleImpl が
   // デフォルト値で補完する。
   struct webrtc_AudioDeviceModule_cbs cbs;
-  __builtin_memset(&cbs, 0, sizeof(cbs));
+  memset(&cbs, 0, sizeof(cbs));
   cbs.ActiveAudioLayer = adm_active_audio_layer;
   cbs.RegisterAudioCallback = adm_register_audio_callback;
   cbs.Init = adm_init;

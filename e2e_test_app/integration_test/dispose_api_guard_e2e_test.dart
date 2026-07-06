@@ -40,18 +40,19 @@ void main() {
         await connection.dispose();
 
         // dispose 後の API 呼び出しがすべて StateError になることを確認する
+        final conn = connection;
         expect(
-          connection.getStats(),
+          conn.getStats(),
           throwsA(isA<StateError>()),
           reason: 'dispose 後に getStats が StateError になること。',
         );
         expect(
-          () => connection.setAudioEnabled(false),
+          () => conn.setAudioEnabled(false),
           throwsA(isA<StateError>()),
           reason: 'dispose 後に setAudioEnabled が StateError になること。',
         );
         expect(
-          () => connection.setVideoEnabled(false),
+          () => conn.setVideoEnabled(false),
           throwsA(isA<StateError>()),
           reason: 'dispose 後に setVideoEnabled が StateError になること。',
         );
@@ -113,13 +114,14 @@ void main() {
         await connection.dispose();
 
         // dispose 後の API 呼び出しがすべて StateError になることを確認する
+        final conn = connection;
         expect(
-          connection.connection.rpc('test.method'),
+          conn.connection.rpc('test.method'),
           throwsA(isA<StateError>()),
           reason: 'dispose 後に rpc が StateError になること。',
         );
         expect(
-          () => connection.connection.sendDataChannelMessage(
+          () => conn.connection.sendDataChannelMessage(
             '#messaging',
             Uint8List(0),
           ),
@@ -234,7 +236,7 @@ void main() {
           'connectionId=${connection.connectionId}',
         );
 
-        await sub?.cancel();
+        await sub.cancel();
         sub = null;
 
         // 接続後に dispose する
@@ -242,7 +244,7 @@ void main() {
 
         // dispose 後の API 呼び出しが StateError になることを確認する
         expect(
-          connection.replaceVideoTrack(stream!, videoTrack2!),
+          connection.replaceVideoTrack(stream, videoTrack2),
           throwsA(isA<StateError>()),
           reason: 'dispose 後に replaceVideoTrack が StateError になること。',
         );
@@ -255,7 +257,7 @@ void main() {
         final cleanupErrors = <String>[];
 
         await runCleanupStep(cleanupErrors, 'sub.cancel', () async {
-          await sub?.cancel();
+        await sub?.cancel();
         });
         await runCleanupStep(cleanupErrors, 'connection.dispose', () async {
           await connection?.dispose();

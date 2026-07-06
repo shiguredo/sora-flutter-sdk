@@ -14,7 +14,7 @@ void main() {
 
   // ネットワーク遅延や SDK 内部 buffer を考慮し、イベント不在確認前に
   // 3 秒の settle 時間を確保する。
-  const _settleDuration = Duration(seconds: 3);
+  const settleDuration = Duration(seconds: 3);
 
   testWidgets(
     'messaging_only: メディアなし接続と DataChannel open を検証する',
@@ -98,7 +98,7 @@ void main() {
         );
 
         // settle 時間を確保し、track イベントが来ないことを確認する。
-        await tester.pump(_settleDuration);
+        await tester.pump(settleDuration);
 
         expect(
           connection.trackEvents,

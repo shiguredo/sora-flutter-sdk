@@ -176,7 +176,7 @@ void main() {
         // sender -> receiver へのメッセージ送信。
         logE2eMessage(
           'stage=sender_send_message channelId=$channelId '
-          'label=$testLabel payload=${senderPayload}',
+          'label=$testLabel payload=$senderPayload',
         );
         sender.connection.sendDataChannelMessage(testLabel, senderPayload);
 
@@ -211,7 +211,7 @@ void main() {
         );
         logE2eMessage(
           'stage=receiver_send_message channelId=$channelId '
-          'label=$testLabel payload=${receiverPayload}',
+          'label=$testLabel payload=$receiverPayload',
         );
         receiver.connection.sendDataChannelMessage(testLabel, receiverPayload);
 

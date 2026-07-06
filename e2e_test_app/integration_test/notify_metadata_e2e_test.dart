@@ -17,9 +17,9 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   // signalingNotifyMetadata に設定するテスト用の値。
-  const _testNotifyMetadataKey = 'e2e_test_key';
-  const _testNotifyMetadataValue = 'e2e_test_value';
-  const _pushWaitTimeout = Duration(seconds: 30);
+  const testNotifyMetadataKey = 'e2e_test_key';
+  const testNotifyMetadataValue = 'e2e_test_value';
+  const pushWaitTimeout = Duration(seconds: 30);
 
   testWidgets(
     'notify_metadata: signalingNotifyMetadata が connection.created notify '
@@ -43,7 +43,7 @@ void main() {
         audio: false,
         metadata: env.metadata,
         signalingNotifyMetadata: <String, Object?>{
-          _testNotifyMetadataKey: _testNotifyMetadataValue,
+          testNotifyMetadataKey: testNotifyMetadataValue,
         },
       );
 
@@ -129,11 +129,9 @@ void main() {
         // notify  payload 上での key 名が異なるため両方を試す。
         var metadataMap =
             notifyPayload['authn_metadata'] as Map<String, Object?>?;
-        if (metadataMap == null) {
-          metadataMap =
-              notifyPayload['signaling_notify_metadata']
-                  as Map<String, Object?>?;
-        }
+        metadataMap ??=
+            notifyPayload['signaling_notify_metadata']
+                as Map<String, Object?>?;
         expect(
           metadataMap,
           isNotNull,
@@ -143,16 +141,16 @@ void main() {
               '含まれていること。',
         );
         expect(
-          metadataMap![_testNotifyMetadataKey],
-          _testNotifyMetadataValue,
+          metadataMap![testNotifyMetadataKey],
+          testNotifyMetadataValue,
           reason:
               'signalingNotifyMetadata に設定した key/value が '
               'notify payload に含まれていること。',
         );
         logE2eMessage(
           'stage=notify_metadata_verified '
-          'key=$_testNotifyMetadataKey '
-          'value=$_testNotifyMetadataValue',
+          'key=$testNotifyMetadataKey '
+          'value=$testNotifyMetadataValue',
         );
 
         // push 検証（環境変数 TEST_PUSH_EXPECTED_TYPE が設定されている場合のみ）
@@ -165,7 +163,7 @@ void main() {
           // event_type フィールドで種類を区別する。
           final pushPayload = await sender.waitForPushEvent(
             tester,
-            timeout: _pushWaitTimeout,
+            timeout: pushWaitTimeout,
             predicate: (message) =>
                 message['event_type'] == pushExpectedType,
           );

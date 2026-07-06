@@ -14,7 +14,7 @@ void main() {
 
   // ネットワーク遅延や SDK 内部 buffer を考慮し、イベントの重複/漏れ確認前に
   // 3 秒の settle 時間を確保する。
-  const _settleDuration = Duration(seconds: 3);
+  const settleDuration = Duration(seconds: 3);
 
   testWidgets(
     'track_event: sender 接続前後の remote track 追加/削除を検証する',
@@ -116,7 +116,7 @@ void main() {
 
         // 同一 track に対する SoraTrackEvent の重複発火がないことを確認するため、
         // 少し待機して receiver.trackEvents の最終状態を確定させる。
-        await tester.pump(_settleDuration);
+        await tester.pump(settleDuration);
 
         expect(
           trackAddedObs.connectionId,
@@ -168,7 +168,7 @@ void main() {
 
         // 同一 track に対する SoraRemoveTrackEvent の漏れがないことを確認するため、
         // 少し待機して receiver.removeTrackEvents の最終状態を確定させる。
-        await tester.pump(_settleDuration);
+        await tester.pump(settleDuration);
 
         expect(
           trackRemovedObs.connectionId,

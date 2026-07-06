@@ -7,19 +7,13 @@ import 'dart:typed_data';
 import 'package:sora_sdk/sora_sdk.dart';
 
 class _BeepAudioGenerator {
-  _BeepAudioGenerator({
-    this.sampleRate = 48000,
-    this.channels = 1,
-    this.frequency = 440,
-    this.durationMs = 100,
-    this.volume = 0.5,
-  });
+  _BeepAudioGenerator();
 
-  final int sampleRate;
-  final int channels;
-  final int frequency;
-  final int durationMs;
-  final double volume;
+  final int sampleRate = 48000;
+  final int channels = 1;
+  final int frequency = 440;
+  final int durationMs = 100;
+  final double volume = 0.5;
 
   int get _samplesPer10ms => sampleRate ~/ 100;
   int get _blockSize => _samplesPer10ms * channels;

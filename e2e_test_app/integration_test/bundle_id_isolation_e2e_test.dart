@@ -70,7 +70,7 @@ void main() {
 
       // bundleId フィルタがサーバーで反映されるのを待つ時間。
       // ネットワーク遅延があっても track の不在を確認できるよう 5 秒を確保する。
-      const _isolationWaitDuration = Duration(seconds: 5);
+      const isolationWaitDuration = Duration(seconds: 5);
 
       ObservedConnection? senderSame;
       LocalMediaStream? streamB;
@@ -166,7 +166,7 @@ void main() {
 
         // B のフレーム投入を開始し、A に届かないことを待機時間で確認する
         videoSourceB.start(videoTrackB);
-        await tester.pump(_isolationWaitDuration);
+        await tester.pump(isolationWaitDuration);
 
         // A の remoteMediaStreams に B の connectionId が存在しないことを確認する
         expect(

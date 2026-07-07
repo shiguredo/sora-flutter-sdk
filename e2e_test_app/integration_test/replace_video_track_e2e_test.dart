@@ -25,6 +25,7 @@ void main() {
       signalingUrls: env.signalingUrls,
       channelId: channelId,
       role: SoraRole.recvonly,
+      useAudioDevice: false,
       metadata: env.metadata,
     );
     final senderConfig = SoraConnectionConfig(
@@ -33,6 +34,7 @@ void main() {
       role: SoraRole.sendonly,
       video: true,
       audio: false,
+      useAudioDevice: false,
       metadata: env.metadata,
     );
 
@@ -61,8 +63,10 @@ void main() {
       videoTrack1 = MediaDevices.createExternalVideoTrack();
       stream.addTrack(videoTrack1);
       videoTrack2 = MediaDevices.createExternalVideoTrack();
-      videoSource1 = ColorBarVideoSource(width: 320, height: 180, frameRate: 30);
-      videoSource2 = ColorBarVideoSource(width: 320, height: 180, frameRate: 30);
+      videoSource1 =
+          ColorBarVideoSource(width: 320, height: 180, frameRate: 30);
+      videoSource2 =
+          ColorBarVideoSource(width: 320, height: 180, frameRate: 30);
 
       receiver = await ObservedConnection.create(
         name: 'receiver',
@@ -128,8 +132,7 @@ void main() {
           await waitForVideoOutboundStats(tester, sender.connection);
       inboundBeforeReplace =
           await waitForVideoInboundStats(tester, receiver.connection);
-      removeTrackEventCountBeforeReplace =
-          receiver.removeTrackEvents.length;
+      removeTrackEventCountBeforeReplace = receiver.removeTrackEvents.length;
       sender.throwIfHasErrors();
       receiver.throwIfHasErrors();
       logE2eMessage(
@@ -223,8 +226,7 @@ void main() {
           (e) => e.connectionId == senderConnectionId,
         ),
         isTrue,
-        reason:
-            'removeTrackEvents が全て senderConnectionId 由来であること。',
+        reason: 'removeTrackEvents が全て senderConnectionId 由来であること。',
       );
 
       // receiver 側の trackEvents 件数が replace 前後で変わらず、

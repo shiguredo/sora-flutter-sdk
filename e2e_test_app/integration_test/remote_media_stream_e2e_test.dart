@@ -26,6 +26,7 @@ void main() {
         signalingUrls: env.signalingUrls,
         channelId: channelId,
         role: SoraRole.recvonly,
+        useAudioDevice: false,
         metadata: env.metadata,
       );
       final senderConfig = SoraConnectionConfig(
@@ -132,7 +133,8 @@ void main() {
         //          同一オブジェクトに束ねられ、到着前後でインスタンス
         //          同一性が維持されていることを確認する。
         // ---------------------------------------------------------------
-        final streamAfterBoth = await receiver.waitForRemoteMediaStreamBothTracks(
+        final streamAfterBoth =
+            await receiver.waitForRemoteMediaStreamBothTracks(
           tester,
           connectionId: senderConnectionId,
           timeout: receiverTrackTimeout,
@@ -140,22 +142,19 @@ void main() {
         expect(
           identical(streamBeforeBoth, streamAfterBoth),
           isTrue,
-          reason:
-              'audio/video 到着前後で RemoteMediaStream の Dart オブジェクト'
+          reason: 'audio/video 到着前後で RemoteMediaStream の Dart オブジェクト'
               '同一性が維持されていること。',
         );
 
         expect(
           streamAfterBoth.audioTrack,
           isNotNull,
-          reason:
-              'RemoteMediaStream に audioTrack が設定されていること。',
+          reason: 'RemoteMediaStream に audioTrack が設定されていること。',
         );
         expect(
           streamAfterBoth.videoTrack,
           isNotNull,
-          reason:
-              'RemoteMediaStream に videoTrack が設定されていること。',
+          reason: 'RemoteMediaStream に videoTrack が設定されていること。',
         );
         expect(
           streamAfterBoth.audioTrack!.kind,
@@ -203,10 +202,10 @@ void main() {
           timeout: receiverRemoveTimeout,
         );
         expect(
-          receiver.connection.remoteMediaStreams.containsKey(senderConnectionId),
+          receiver.connection.remoteMediaStreams
+              .containsKey(senderConnectionId),
           isFalse,
-          reason:
-              'sender 切断後に remoteMediaStreams から当該エントリが'
+          reason: 'sender 切断後に remoteMediaStreams から当該エントリが'
               '削除されていること。',
         );
         logE2eMessage(

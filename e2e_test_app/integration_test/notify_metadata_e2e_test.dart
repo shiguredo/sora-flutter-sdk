@@ -33,6 +33,7 @@ void main() {
         signalingUrls: env.signalingUrls,
         channelId: channelId,
         role: SoraRole.recvonly,
+        useAudioDevice: false,
         metadata: env.metadata,
       );
       final senderConfig = SoraConnectionConfig(
@@ -41,6 +42,7 @@ void main() {
         role: SoraRole.sendonly,
         video: true,
         audio: false,
+        useAudioDevice: false,
         metadata: env.metadata,
         signalingNotifyMetadata: <String, Object?>{
           testNotifyMetadataKey: testNotifyMetadataValue,
@@ -130,21 +132,18 @@ void main() {
         var metadataMap =
             notifyPayload['authn_metadata'] as Map<String, Object?>?;
         metadataMap ??=
-            notifyPayload['signaling_notify_metadata']
-                as Map<String, Object?>?;
+            notifyPayload['signaling_notify_metadata'] as Map<String, Object?>?;
         expect(
           metadataMap,
           isNotNull,
-          reason:
-              'connection.created notify の payload に '
+          reason: 'connection.created notify の payload に '
               'authn_metadata または signaling_notify_metadata が '
               '含まれていること。',
         );
         expect(
           metadataMap![testNotifyMetadataKey],
           testNotifyMetadataValue,
-          reason:
-              'signalingNotifyMetadata に設定した key/value が '
+          reason: 'signalingNotifyMetadata に設定した key/value が '
               'notify payload に含まれていること。',
         );
         logE2eMessage(
@@ -164,8 +163,7 @@ void main() {
           final pushPayload = await sender.waitForPushEvent(
             tester,
             timeout: pushWaitTimeout,
-            predicate: (message) =>
-                message['event_type'] == pushExpectedType,
+            predicate: (message) => message['event_type'] == pushExpectedType,
           );
           logE2eMessage(
             'stage=push_received channelId=$channelId '
@@ -174,8 +172,7 @@ void main() {
           expect(
             pushPayload['event_type'],
             pushExpectedType,
-            reason:
-                'SoraPushEvent の event_type が TEST_PUSH_EXPECTED_TYPE '
+            reason: 'SoraPushEvent の event_type が TEST_PUSH_EXPECTED_TYPE '
                 'と一致すること。',
           );
         } else {

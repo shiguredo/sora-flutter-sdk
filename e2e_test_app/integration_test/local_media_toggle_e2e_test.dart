@@ -28,6 +28,7 @@ void main() {
         signalingUrls: env.signalingUrls,
         channelId: channelId,
         role: SoraRole.recvonly,
+        useAudioDevice: false,
         metadata: env.metadata,
       );
       final senderConfig = SoraConnectionConfig(
@@ -36,6 +37,7 @@ void main() {
         role: SoraRole.sendonly,
         audio: false,
         video: true,
+        useAudioDevice: false,
         metadata: env.metadata,
       );
 
@@ -96,14 +98,12 @@ void main() {
         expect(
           sender.connection.isVideoEnabled,
           isTrue,
-          reason:
-              'setVideoEnabled 呼び出し前は isVideoEnabled が true であること。',
+          reason: 'setVideoEnabled 呼び出し前は isVideoEnabled が true であること。',
         );
         expect(
           stream.currentVideoTrackOrNull?.enabled,
           isTrue,
-          reason:
-              'setVideoEnabled 呼び出し前は local video track の enabled が '
+          reason: 'setVideoEnabled 呼び出し前は local video track の enabled が '
               'true であること。',
         );
 
@@ -113,8 +113,7 @@ void main() {
         expect(
           statsJsonSuggestsMediaPathUp(statsBefore!),
           isTrue,
-          reason:
-              'toggle 前の getStats に DTLS connected または ICE candidate-pair '
+          reason: 'toggle 前の getStats に DTLS connected または ICE candidate-pair '
               'succeeded が含まれること。',
         );
 
@@ -130,14 +129,12 @@ void main() {
         expect(
           sender.connection.isVideoEnabled,
           isFalse,
-          reason:
-              'setVideoEnabled(false) 後に isVideoEnabled が false であること。',
+          reason: 'setVideoEnabled(false) 後に isVideoEnabled が false であること。',
         );
         expect(
           stream.currentVideoTrackOrNull?.enabled,
           isFalse,
-          reason:
-              'setVideoEnabled(false) 後に local video track の enabled が '
+          reason: 'setVideoEnabled(false) 後に local video track の enabled が '
               'false であること。',
         );
 
@@ -147,8 +144,7 @@ void main() {
         expect(
           statsJsonSuggestsMediaPathUp(statsAfterOff!),
           isTrue,
-          reason:
-              'toggle off 後の getStats にも DTLS connected または ICE '
+          reason: 'toggle off 後の getStats にも DTLS connected または ICE '
               'candidate-pair succeeded が含まれること。',
         );
 
@@ -163,14 +159,12 @@ void main() {
         expect(
           sender.connection.isVideoEnabled,
           isTrue,
-          reason:
-              'setVideoEnabled(true) 後に isVideoEnabled が true であること。',
+          reason: 'setVideoEnabled(true) 後に isVideoEnabled が true であること。',
         );
         expect(
           stream.currentVideoTrackOrNull?.enabled,
           isTrue,
-          reason:
-              'setVideoEnabled(true) 後に local video track の enabled が '
+          reason: 'setVideoEnabled(true) 後に local video track の enabled が '
               'true であること。',
         );
 
@@ -180,8 +174,7 @@ void main() {
         expect(
           statsJsonSuggestsMediaPathUp(statsAfterOn!),
           isTrue,
-          reason:
-              'toggle on 後の getStats にも DTLS connected または ICE '
+          reason: 'toggle on 後の getStats にも DTLS connected または ICE '
               'candidate-pair succeeded が含まれること。',
         );
 
@@ -292,6 +285,7 @@ void main() {
         signalingUrls: env.signalingUrls,
         channelId: channelId,
         role: SoraRole.recvonly,
+        useAudioDevice: false,
         metadata: env.metadata,
       );
       final senderConfig = SoraConnectionConfig(
@@ -354,14 +348,12 @@ void main() {
         expect(
           sender.connection.isAudioEnabled,
           isTrue,
-          reason:
-              'setAudioEnabled 呼び出し前は isAudioEnabled が true であること。',
+          reason: 'setAudioEnabled 呼び出し前は isAudioEnabled が true であること。',
         );
         expect(
           stream.currentAudioTrackOrNull?.enabled,
           isTrue,
-          reason:
-              'setAudioEnabled 呼び出し前は local audio track の enabled が '
+          reason: 'setAudioEnabled 呼び出し前は local audio track の enabled が '
               'true であること。',
         );
 
@@ -371,8 +363,7 @@ void main() {
         expect(
           statsJsonSuggestsMediaPathUp(statsBefore!),
           isTrue,
-          reason:
-              'toggle 前の getStats に DTLS connected または ICE candidate-pair '
+          reason: 'toggle 前の getStats に DTLS connected または ICE candidate-pair '
               'succeeded が含まれること。',
         );
 
@@ -387,14 +378,12 @@ void main() {
         expect(
           sender.connection.isAudioEnabled,
           isFalse,
-          reason:
-              'setAudioEnabled(false) 後に isAudioEnabled が false であること。',
+          reason: 'setAudioEnabled(false) 後に isAudioEnabled が false であること。',
         );
         expect(
           stream.currentAudioTrackOrNull?.enabled,
           isFalse,
-          reason:
-              'setAudioEnabled(false) 後に local audio track の enabled が '
+          reason: 'setAudioEnabled(false) 後に local audio track の enabled が '
               'false であること。',
         );
 
@@ -404,8 +393,7 @@ void main() {
         expect(
           statsJsonSuggestsMediaPathUp(statsAfterOff!),
           isTrue,
-          reason:
-              'toggle off 後の getStats にも DTLS connected または ICE '
+          reason: 'toggle off 後の getStats にも DTLS connected または ICE '
               'candidate-pair succeeded が含まれること。',
         );
 
@@ -420,14 +408,12 @@ void main() {
         expect(
           sender.connection.isAudioEnabled,
           isTrue,
-          reason:
-              'setAudioEnabled(true) 後に isAudioEnabled が true であること。',
+          reason: 'setAudioEnabled(true) 後に isAudioEnabled が true であること。',
         );
         expect(
           stream.currentAudioTrackOrNull?.enabled,
           isTrue,
-          reason:
-              'setAudioEnabled(true) 後に local audio track の enabled が '
+          reason: 'setAudioEnabled(true) 後に local audio track の enabled が '
               'true であること。',
         );
 
@@ -437,8 +423,7 @@ void main() {
         expect(
           statsJsonSuggestsMediaPathUp(statsAfterOn!),
           isTrue,
-          reason:
-              'toggle on 後の getStats にも DTLS connected または ICE '
+          reason: 'toggle on 後の getStats にも DTLS connected または ICE '
               'candidate-pair succeeded が含まれること。',
         );
 

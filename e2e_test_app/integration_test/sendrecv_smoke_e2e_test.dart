@@ -55,6 +55,7 @@ void main() {
       role: SoraRole.sendrecv,
       video: true,
       audio: false,
+      useAudioDevice: false,
       metadata: metadata,
     );
 

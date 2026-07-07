@@ -46,6 +46,7 @@ void main() {
       signalingUrls: signalingUrls,
       channelId: channelId,
       role: SoraRole.recvonly,
+      useAudioDevice: false,
       metadata: metadata,
     );
 

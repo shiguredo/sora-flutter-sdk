@@ -29,6 +29,7 @@ void main() {
         signalingUrls: env.signalingUrls,
         channelId: channelId,
         role: SoraRole.recvonly,
+        useAudioDevice: false,
         bundleId: 'bundle-a',
         metadata: env.metadata,
       );
@@ -41,6 +42,7 @@ void main() {
         bundleId: 'bundle-a',
         video: true,
         audio: false,
+        useAudioDevice: false,
         metadata: env.metadata,
       );
 
@@ -52,16 +54,15 @@ void main() {
         bundleId: 'bundle-b',
         video: true,
         audio: false,
+        useAudioDevice: false,
         metadata: env.metadata,
       );
 
       final observerConnectTimeout = connectionStageTimeout(observerConfig);
-      final senderSameConnectTimeout =
-          connectionStageTimeout(senderSameConfig);
+      final senderSameConnectTimeout = connectionStageTimeout(senderSameConfig);
       final senderOtherConnectTimeout =
           connectionStageTimeout(senderOtherConfig);
-      final observerDisconnectTimeout =
-          connectionStageTimeout(observerConfig);
+      final observerDisconnectTimeout = connectionStageTimeout(observerConfig);
       final senderSameDisconnectTimeout =
           connectionStageTimeout(senderSameConfig);
       final senderOtherDisconnectTimeout =
@@ -173,8 +174,7 @@ void main() {
           observer.connection.remoteMediaStreams
               .containsKey(senderSameConnectionId),
           isFalse,
-          reason:
-              '同一 bundleId の sender-same からの remoteMediaStreams を'
+          reason: '同一 bundleId の sender-same からの remoteMediaStreams を'
               '受信しないこと。',
         );
 
@@ -185,8 +185,7 @@ void main() {
                 o.connectionId == senderSameConnectionId,
           ),
           isEmpty,
-          reason:
-              '同一 bundleId の sender-same からの SoraTrackEvent を'
+          reason: '同一 bundleId の sender-same からの SoraTrackEvent を'
               '受信しないこと。',
         );
 
@@ -263,15 +262,13 @@ void main() {
         expect(
           secondInbound.bytesReceived,
           greaterThan(firstInbound.bytesReceived),
-          reason:
-              'observer 2 回目取得時に video inbound-rtp の bytesReceived が'
+          reason: 'observer 2 回目取得時に video inbound-rtp の bytesReceived が'
               '増えていること。',
         );
         expect(
           secondInbound.packetsReceived,
           greaterThan(firstInbound.packetsReceived),
-          reason:
-              'observer 2 回目取得時に video inbound-rtp の packetsReceived が'
+          reason: 'observer 2 回目取得時に video inbound-rtp の packetsReceived が'
               '増えていること。',
         );
 
@@ -281,8 +278,7 @@ void main() {
           observer.connection.remoteMediaStreams
               .containsKey(senderSameConnectionId),
           isFalse,
-          reason:
-              'C 検証後も同一 bundleId の sender-same'
+          reason: 'C 検証後も同一 bundleId の sender-same'
               'からの remoteMediaStreams を受信しないこと。',
         );
         expect(
@@ -291,17 +287,14 @@ void main() {
                 o.connectionId == senderSameConnectionId,
           ),
           isEmpty,
-          reason:
-              'C 検証後も同一 bundleId の sender-same'
+          reason: 'C 検証後も同一 bundleId の sender-same'
               'からの SoraTrackEvent を受信しないこと。',
         );
       } catch (e) {
         bodyError = e;
         rethrow;
       } finally {
-        if (observer != null ||
-            senderSame != null ||
-            senderOther != null) {
+        if (observer != null || senderSame != null || senderOther != null) {
           logE2eMessage(
             'stage=cleanup_start '
             'observer=${observer?.debugSummary()} '

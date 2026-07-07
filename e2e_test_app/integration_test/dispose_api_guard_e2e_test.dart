@@ -28,6 +28,7 @@ void main() {
         signalingUrls: env.signalingUrls,
         channelId: channelId,
         role: SoraRole.sendonly,
+        useAudioDevice: false,
         metadata: env.metadata,
       );
 
@@ -78,6 +79,7 @@ void main() {
         role: SoraRole.sendonly,
         audio: false,
         video: false,
+        useAudioDevice: false,
         dataChannelSignaling: true,
         dataChannels: const [
           {'label': '#messaging', 'direction': 'sendrecv', 'compress': true},
@@ -126,8 +128,7 @@ void main() {
             Uint8List(0),
           ),
           throwsA(isA<StateError>()),
-          reason:
-              'dispose 後に sendDataChannelMessage が StateError になること。',
+          reason: 'dispose 後に sendDataChannelMessage が StateError になること。',
         );
       } catch (e) {
         bodyError = e;
@@ -184,6 +185,7 @@ void main() {
         role: SoraRole.sendrecv,
         video: true,
         audio: false,
+        useAudioDevice: false,
         metadata: env.metadata,
       );
 
@@ -257,7 +259,7 @@ void main() {
         final cleanupErrors = <String>[];
 
         await runCleanupStep(cleanupErrors, 'sub.cancel', () async {
-        await sub?.cancel();
+          await sub?.cancel();
         });
         await runCleanupStep(cleanupErrors, 'connection.dispose', () async {
           await connection?.dispose();

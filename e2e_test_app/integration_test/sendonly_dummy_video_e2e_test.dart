@@ -51,6 +51,7 @@ void main() {
       role: SoraRole.sendonly,
       video: true,
       audio: false,
+      useAudioDevice: false,
       metadata: metadata,
     );
 

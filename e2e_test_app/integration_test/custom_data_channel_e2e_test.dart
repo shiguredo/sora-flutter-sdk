@@ -18,7 +18,7 @@ void main() {
 
   testWidgets(
     'custom_data_channel: #test-channel の open とメッセージ送受信、'
-        'SoraSwitchedEvent の発火を検証する',
+    'SoraSwitchedEvent の発火を検証する',
     (WidgetTester tester) async {
       final env = loadE2eEnvironment();
       final channelId = buildChannelId(env.channelPrefix, suffix: '-custom-dc');
@@ -35,6 +35,7 @@ void main() {
         role: SoraRole.sendonly,
         audio: false,
         video: false,
+        useAudioDevice: false,
         dataChannelSignaling: true,
         dataChannels: const [
           {'label': testLabel, 'direction': 'sendrecv', 'compress': true},
@@ -47,6 +48,7 @@ void main() {
         role: SoraRole.sendonly,
         audio: false,
         video: false,
+        useAudioDevice: false,
         dataChannelSignaling: true,
         dataChannels: const [
           {'label': testLabel, 'direction': 'sendrecv', 'compress': true},

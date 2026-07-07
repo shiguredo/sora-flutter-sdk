@@ -28,6 +28,7 @@ void main() {
         role: SoraRole.sendonly,
         audio: false,
         video: false,
+        useAudioDevice: false,
         // DataChannel signaling を有効にしないと #messaging が成立しない。
         dataChannelSignaling: true,
         dataChannels: const [

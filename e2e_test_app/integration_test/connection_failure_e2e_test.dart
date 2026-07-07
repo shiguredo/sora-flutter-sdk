@@ -25,13 +25,13 @@ void main() {
     'connection_failure: 認証失敗で接続が成功しないことを確認する',
     (WidgetTester tester) async {
       final env = loadE2eEnvironment();
-      final channelId =
-          buildChannelId(env.channelPrefix, suffix: '-authfail');
+      final channelId = buildChannelId(env.channelPrefix, suffix: '-authfail');
 
       final config = SoraConnectionConfig(
         signalingUrls: env.signalingUrls,
         channelId: channelId,
         role: SoraRole.recvonly,
+        useAudioDevice: false,
         metadata: <String, Object?>{
           'access_token': 'invalid_token_for_e2e_test',
         },
@@ -87,6 +87,7 @@ void main() {
         ],
         channelId: buildChannelId(env.channelPrefix, suffix: '-timeout'),
         role: SoraRole.recvonly,
+        useAudioDevice: false,
         metadata: env.metadata,
         timeoutOptions: const SoraTimeoutOptions(
           connectionTimeout: Duration(seconds: 10),
@@ -123,8 +124,7 @@ void main() {
         expect(
           actualCodes,
           contains(SoraErrorCode.signalingCandidateTimeout),
-          reason:
-              'エラーコード一覧 $actualCodes に signaling_candidate_timeout が含まれること',
+          reason: 'エラーコード一覧 $actualCodes に signaling_candidate_timeout が含まれること',
         );
 
         _assertErrorMessagesAreNonEmpty(conn.errors);

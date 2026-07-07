@@ -27,6 +27,7 @@ void main() {
         signalingUrls: env.signalingUrls,
         channelId: channelId,
         role: SoraRole.recvonly,
+        useAudioDevice: false,
         metadata: env.metadata,
       );
       final senderConfig = SoraConnectionConfig(
@@ -35,6 +36,7 @@ void main() {
         role: SoraRole.sendonly,
         video: true,
         audio: false,
+        useAudioDevice: false,
         metadata: env.metadata,
       );
 

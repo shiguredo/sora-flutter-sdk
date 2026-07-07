@@ -10,6 +10,7 @@ Sora Flutter SDK の recvonly / sendonly / sendrecv 接続と、2 クライア�
 - **audio track**: `MediaDevices.createAudioTrack()` を使用するテスト（`remote_media_stream_e2e_test.dart`、`local_media_toggle_e2e_test.dart`）は macOS のマイク入力が必要。entitlements に `com.apple.security.device.microphone` が設定されていること。CI ランナーに物理マイクが無い場合、音声デバイスが存在しない環境ではテストが失敗する可能性がある。
 - **Windows**: プラグインの MethodChannel は実装済み。カメラキャプチャ (0035) と音声デバイス (0036) に対応する。Windows の接続テストは以下の前提で実行する:
   - 音声デバイステスト（`windows_audio_device_test.dart`）は Sora 接続不要のプラットフォーム結合テストで、WASAPI によるデバイス列挙と切り替えのみを検証する
+  - `windows_audio_device_test.dart` は GitHub Actions の Windows Hosted Runner では実行しない。ローカル実機または self-hosted runner で実行する
   - 音声テストには物理マイクが必要。仮想オーディオデバイス（CABLE Input 等）でも動作する
   - `flutter build windows` でビルドが通る状態であること（不足システムライブラリがある場合は `windows/CMakeLists.txt` に追加する）
 

@@ -4,6 +4,7 @@
 // vtable 問題を回避しながらカスタム ADM を実装する。
 
 #include <cstdint>
+#include <cstring>
 
 #include <webrtc_c.h>
 #include <webrtc_c/api/audio/audio_device.h>

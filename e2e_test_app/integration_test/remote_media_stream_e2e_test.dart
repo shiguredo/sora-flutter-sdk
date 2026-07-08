@@ -7,6 +7,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:sora_sdk/sora_sdk.dart';
 
 import 'helpers/connection_helpers.dart';
+import 'helpers/push_audio_track.dart';
 import 'helpers/test_helpers.dart';
 import 'helpers/video_source.dart';
 
@@ -49,6 +50,7 @@ void main() {
       ObservedConnection? sender;
       ObservedConnection? receiver;
       LocalMediaStream? stream;
+      E2ePushAudioTrack? pushAudioTrack;
       LocalAudioTrack? audioTrack;
       LocalVideoTrack? videoTrack;
       ColorBarVideoSource? videoSource;
@@ -57,7 +59,9 @@ void main() {
       try {
         stream = MediaDevices.createMediaStream();
 
-        audioTrack = await MediaDevices.createAudioTrack();
+        pushAudioTrack = await E2ePushAudioTrack.create();
+        audioTrack = pushAudioTrack.audioTrack;
+        pushAudioTrack.start();
         stream.addTrack(audioTrack);
 
         videoTrack = MediaDevices.createExternalVideoTrack();
@@ -242,6 +246,14 @@ void main() {
         } catch (e) {
           cleanupErrors.add('videoSource.stop: $e');
           logE2eMessage('stage=cleanup_error step=videoSource.stop error=$e');
+        }
+        try {
+          pushAudioTrack?.dispose();
+        } catch (e) {
+          cleanupErrors.add('pushAudioTrack.dispose: $e');
+          logE2eMessage(
+            'stage=cleanup_error step=pushAudioTrack.dispose error=$e',
+          );
         }
         await runCleanupStep('sender.disconnect', () async {
           if (sender != null) {

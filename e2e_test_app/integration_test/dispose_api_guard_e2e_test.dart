@@ -201,11 +201,6 @@ void main() {
       Object? bodyError;
 
       try {
-        stream = MediaDevices.createMediaStream();
-        videoTrack1 = MediaDevices.createExternalVideoTrack();
-        stream.addTrack(videoTrack1);
-        videoTrack2 = MediaDevices.createExternalVideoTrack();
-
         connection = await Sora.createConnection(config);
         sub = connection.events.listen((SoraConnectionEvent event) {
           if (event is SoraConnectionStateChangedEvent) {
@@ -224,6 +219,11 @@ void main() {
             }
           }
         });
+
+        stream = MediaDevices.createMediaStream();
+        videoTrack1 = MediaDevices.createExternalVideoTrack();
+        stream.addTrack(videoTrack1);
+        videoTrack2 = MediaDevices.createExternalVideoTrack();
 
         logE2eMessage(
           'stage=connect_start channelId=$channelId '

@@ -69,11 +69,6 @@ void main() {
     final disconnected = Completer<void>();
 
     try {
-      stream = MediaDevices.createMediaStream();
-      videoTrack = MediaDevices.createExternalVideoTrack();
-      stream.addTrack(videoTrack);
-      videoSource = ColorBarVideoSource(width: 320, height: 180, frameRate: 30);
-
       connection = await Sora.createConnection(config);
       sub = connection.events.listen((SoraConnectionEvent event) {
         if (event is SoraConnectionStateChangedEvent) {
@@ -102,6 +97,11 @@ void main() {
           }
         }
       });
+
+      stream = MediaDevices.createMediaStream();
+      videoTrack = MediaDevices.createExternalVideoTrack();
+      stream.addTrack(videoTrack);
+      videoSource = ColorBarVideoSource(width: 320, height: 180, frameRate: 30);
 
       await connection.connect(stream);
       await connected.future.timeout(

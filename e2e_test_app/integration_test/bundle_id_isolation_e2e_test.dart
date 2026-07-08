@@ -90,6 +90,20 @@ void main() {
       Object? bodyError;
 
       try {
+        // 接続設定を先に WebrtcClient へ反映し、dummy ADM で factory を初期化する。
+        observer = await ObservedConnection.create(
+          name: 'observer',
+          config: observerConfig,
+        );
+        senderSame = await ObservedConnection.create(
+          name: 'sender-same',
+          config: senderSameConfig,
+        );
+        senderOther = await ObservedConnection.create(
+          name: 'sender-other',
+          config: senderOtherConfig,
+        );
+
         // ------------------------------------------------------------------
         // B の送信用リソースを準備する
         // ------------------------------------------------------------------
@@ -117,19 +131,6 @@ void main() {
         // ------------------------------------------------------------------
         // Step 1: A (observer) を接続する (recvonly, bundleId: bundle-a)
         // ------------------------------------------------------------------
-        observer = await ObservedConnection.create(
-          name: 'observer',
-          config: observerConfig,
-        );
-        senderSame = await ObservedConnection.create(
-          name: 'sender-same',
-          config: senderSameConfig,
-        );
-        senderOther = await ObservedConnection.create(
-          name: 'sender-other',
-          config: senderOtherConfig,
-        );
-
         logE2eMessage(
           'stage=observer_connect_start channelId=$channelId '
           'bundleId=${observer.connection.bundleId}',

@@ -57,6 +57,15 @@ void main() {
       Object? bodyError;
 
       try {
+        receiver = await ObservedConnection.create(
+          name: 'receiver',
+          config: receiverConfig,
+        );
+        sender = await ObservedConnection.create(
+          name: 'sender',
+          config: senderConfig,
+        );
+
         stream = MediaDevices.createMediaStream();
 
         pushAudioTrack = await E2ePushAudioTrack.create();
@@ -70,15 +79,6 @@ void main() {
           width: 320,
           height: 180,
           frameRate: 30,
-        );
-
-        receiver = await ObservedConnection.create(
-          name: 'receiver',
-          config: receiverConfig,
-        );
-        sender = await ObservedConnection.create(
-          name: 'sender',
-          config: senderConfig,
         );
 
         logE2eMessage(

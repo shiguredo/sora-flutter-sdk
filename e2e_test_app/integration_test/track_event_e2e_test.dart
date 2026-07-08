@@ -55,12 +55,6 @@ void main() {
       Object? bodyError;
 
       try {
-        stream = MediaDevices.createMediaStream();
-        videoTrack = MediaDevices.createExternalVideoTrack();
-        stream.addTrack(videoTrack);
-        videoSource =
-            ColorBarVideoSource(width: 320, height: 180, frameRate: 30);
-
         receiver = await ObservedConnection.create(
           name: 'receiver',
           config: receiverConfig,
@@ -69,6 +63,12 @@ void main() {
           name: 'sender',
           config: senderConfig,
         );
+
+        stream = MediaDevices.createMediaStream();
+        videoTrack = MediaDevices.createExternalVideoTrack();
+        stream.addTrack(videoTrack);
+        videoSource =
+            ColorBarVideoSource(width: 320, height: 180, frameRate: 30);
 
         logE2eMessage(
           'stage=receiver_connect_start channelId=$channelId '

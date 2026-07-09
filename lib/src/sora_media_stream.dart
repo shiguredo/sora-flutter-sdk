@@ -324,6 +324,7 @@ abstract class LocalMediaStreamTrack implements MediaStreamTrack {
   final Pointer<WebrtcMediaStreamTrackInterfaceRefcounted> _mediaTrackRef;
 
   bool _disposed = false;
+  bool _nativeTrackReleased = false;
 
   Pointer<WebrtcMediaStreamTrackInterface> get _nativeTrack =>
       WebrtcClient.sharedLib.mediaStreamTrackRefcountedGet(_mediaTrackRef);
@@ -375,7 +376,7 @@ abstract class LocalMediaStreamTrack implements MediaStreamTrack {
       return;
     }
     _disposed = true;
-    WebrtcClient.sharedLib.mediaStreamTrackRelease(_nativeTrack);
+    _releaseNativeTrack();
   }
 
   /// dispose 済みかどうかを返します。
@@ -386,6 +387,19 @@ abstract class LocalMediaStreamTrack implements MediaStreamTrack {
     if (_disposed) {
       throw StateError('Disposed LocalMediaStreamTrack cannot be used.');
     }
+  }
+
+  /// native track の参照を一度だけ解放する。
+  ///
+  /// `LocalVideoTrack.dispose()` は非同期後始末中の利用を防ぐために
+  /// 先に `_disposed` を立てるので、基底の `dispose()` とは独立して呼び出せる
+  /// release 処理として分離している。
+  void _releaseNativeTrack() {
+    if (_nativeTrackReleased) {
+      return;
+    }
+    _nativeTrackReleased = true;
+    WebrtcClient.sharedLib.mediaStreamTrackRelease(_nativeTrack);
   }
 }
 
@@ -744,7 +758,7 @@ class LocalVideoTrack extends LocalMediaStreamTrack {
         // preview 解放はベストエフォート
       }
     }
-    await super.dispose();
+    _releaseNativeTrack();
     if (_videoSourceRef != null) {
       WebrtcClient.sharedLib.adaptedVideoTrackSourceRelease(
         WebrtcClient.sharedLib.adaptedVideoTrackSourceRefcountedGet(

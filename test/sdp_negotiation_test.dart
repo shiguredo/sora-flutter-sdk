@@ -4,7 +4,7 @@ import 'package:ffi/ffi.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sora_sdk/src/ffi/bindings.dart';
 import 'package:sora_sdk/src/ffi/callback_handlers.dart'
-    show SdpNegotiationCallbacks;
+    show SdpNegotiationCallbacks, SdpNegotiationTestHooks;
 import 'package:sora_sdk/src/ffi/library_loader.dart';
 
 DynamicLibrary? _tryLoadDynLib() {
@@ -54,27 +54,103 @@ class _Spy {
   }
 }
 
-SdpNegotiationCallbacks _createCallback(
+class _CallbackHarness {
+  _CallbackHarness(
+    this.lib,
+    this.dylib, {
+    _Spy? spy,
+    void Function()? applyEncodings,
+    bool isReOffer = false,
+  }) : spy = spy ?? _Spy() {
+    callbacks = SdpNegotiationCallbacks(
+      lib: lib,
+      consts: WebrtcConstants(dylib),
+      emitState: this.spy.emitState,
+      emitDebug: this.spy.emitDebug,
+      emitSignalingMessage: this.spy.emitSignalingMessage,
+      addLocalTracks: this.spy.addLocalTracks,
+      applyEncodings: applyEncodings ?? this.spy.applyEncodings,
+      testHooks: SdpNegotiationTestHooks(
+        // native へ渡さず、_createAnswer hook で止めるため dereference されない。
+        initialPeerConnectionRef:
+            Pointer<WebrtcPeerConnectionInterfaceRefcounted>.fromAddress(1),
+        initialAnswerType: isReOffer ? 're-answer' : 'answer',
+        initialIsReOffer: isReOffer,
+        createAnswer: _createAnswer,
+        setLocalDescription: _setLocalDescription,
+      ),
+    );
+  }
+
+  final LibWebrtcC lib;
+  final DynamicLibrary dylib;
+  final _Spy spy;
+  late final SdpNegotiationCallbacks callbacks;
+  String? _answerSdp;
+
+  void completeSetRemoteDescriptionWithAnswer(String sdp) {
+    _answerSdp = sdp;
+    try {
+      callbacks.onSetRemoteDescriptionComplete(nullptr);
+    } finally {
+      _answerSdp = null;
+    }
+  }
+
+  void completeSetRemoteDescriptionWithoutAnswer() {
+    callbacks.onSetRemoteDescriptionComplete(nullptr);
+  }
+
+  void _createAnswer() {
+    final sdp = _answerSdp;
+    if (sdp == null) {
+      return;
+    }
+    callbacks.onCreateAnswerSuccess(_createAnswerDescription(lib, dylib, sdp));
+  }
+
+  void _setLocalDescription(
+    Pointer<WebrtcSessionDescriptionInterfaceUnique> desc,
+  ) {
+    lib.sessionDescriptionUniqueDelete(desc);
+    callbacks.onSetLocalDescriptionComplete(nullptr);
+  }
+}
+
+SdpNegotiationCallbacks _createBareCallback(
   LibWebrtcC lib,
   DynamicLibrary dylib, {
   _Spy? spy,
-  void Function()? applyEncodings,
-  bool isReOffer = false,
 }) {
   final s = spy ?? _Spy();
-  final cbs = SdpNegotiationCallbacks(
+  return SdpNegotiationCallbacks(
     lib: lib,
     consts: WebrtcConstants(dylib),
     emitState: s.emitState,
     emitDebug: s.emitDebug,
     emitSignalingMessage: s.emitSignalingMessage,
     addLocalTracks: s.addLocalTracks,
-    applyEncodings: applyEncodings ?? s.applyEncodings,
+    applyEncodings: s.applyEncodings,
   );
-  if (isReOffer) {
-    cbs.simulateReOfferStateForTest();
+}
+
+Pointer<WebrtcSessionDescriptionInterfaceUnique> _createAnswerDescription(
+  LibWebrtcC lib,
+  DynamicLibrary dylib,
+  String sdp,
+) {
+  final sdpUtf8 = sdp.toNativeUtf8();
+  try {
+    final desc = lib.createSessionDescription(
+      WebrtcConstants(dylib).sdpTypeAnswer,
+      sdpUtf8.cast<Char>(),
+      sdpUtf8.length,
+    );
+    expect(desc, isNot(nullptr));
+    return desc;
+  } finally {
+    calloc.free(sdpUtf8);
   }
-  return cbs;
 }
 
 void main() {
@@ -99,24 +175,20 @@ void main() {
       final spyA = _Spy();
       final spyB = _Spy();
 
-      final a = _createCallback(lib, dylib, spy: spyA);
-      a.cancel();
-      final b = _createCallback(lib, dylib, spy: spyB);
+      final a = _CallbackHarness(lib, dylib, spy: spyA);
+      a.callbacks.cancel();
+      final b = _CallbackHarness(lib, dylib, spy: spyB);
 
-      a.simulateSetRemoteDescriptionSuccessForTest();
-      a.simulateCreateAnswerSuccessForTest('sdp-a');
-      a.simulateSetLocalDescriptionSuccessForTest();
+      a.completeSetRemoteDescriptionWithAnswer('sdp-a');
 
       expect(spyA.states, isEmpty);
       expect(spyA.signalings, isEmpty);
       expect(spyA.addLocalTracksCount, 0);
       expect(spyA.applyEncodingsCount, 0);
 
-      b.simulateSetRemoteDescriptionSuccessForTest();
-      b.simulateCreateAnswerSuccessForTest('sdp-b');
-      b.simulateSetLocalDescriptionSuccessForTest();
+      b.completeSetRemoteDescriptionWithAnswer('sdp-b');
 
-      expect(b.isCancelled, false);
+      expect(b.callbacks.isCancelled, false);
       expect(spyB.signalings.single['type'], 'answer');
       expect(spyB.signalings.single['sdp'], 'sdp-b');
       expect(spyB.addLocalTracksCount, 1);
@@ -129,23 +201,19 @@ void main() {
         final spyA = _Spy();
         final spyB = _Spy();
 
-        final a = _createCallback(lib, dylib, spy: spyA, isReOffer: true);
-        a.cancel();
-        final b = _createCallback(lib, dylib, spy: spyB, isReOffer: true);
+        final a = _CallbackHarness(lib, dylib, spy: spyA, isReOffer: true);
+        a.callbacks.cancel();
+        final b = _CallbackHarness(lib, dylib, spy: spyB, isReOffer: true);
 
-        a.simulateSetRemoteDescriptionSuccessForTest();
-        a.simulateCreateAnswerSuccessForTest('sdp-a');
-        a.simulateSetLocalDescriptionSuccessForTest();
+        a.completeSetRemoteDescriptionWithAnswer('sdp-a');
 
         expect(spyA.states, isEmpty);
         expect(spyA.signalings, isEmpty);
         expect(spyA.addLocalTracksCount, 0);
 
-        b.simulateSetRemoteDescriptionSuccessForTest();
-        b.simulateCreateAnswerSuccessForTest('sdp-b');
-        b.simulateSetLocalDescriptionSuccessForTest();
+        b.completeSetRemoteDescriptionWithAnswer('sdp-b');
 
-        expect(b.isCancelled, false);
+        expect(b.callbacks.isCancelled, false);
         expect(spyB.signalings.single['type'], 're-answer');
         expect(spyB.signalings.single['sdp'], 'sdp-b');
         expect(
@@ -160,22 +228,18 @@ void main() {
       final spyA = _Spy();
       final spyB = _Spy();
 
-      final a = _createCallback(lib, dylib, spy: spyA);
-      a.cancel();
-      final b = _createCallback(lib, dylib, spy: spyB, isReOffer: true);
+      final a = _CallbackHarness(lib, dylib, spy: spyA);
+      a.callbacks.cancel();
+      final b = _CallbackHarness(lib, dylib, spy: spyB, isReOffer: true);
 
-      a.simulateSetRemoteDescriptionSuccessForTest();
-      a.simulateCreateAnswerSuccessForTest('sdp-offer');
-      a.simulateSetLocalDescriptionSuccessForTest();
+      a.completeSetRemoteDescriptionWithAnswer('sdp-offer');
 
       expect(spyA.signalings, isEmpty);
       expect(spyA.addLocalTracksCount, 0);
 
-      b.simulateSetRemoteDescriptionSuccessForTest();
-      b.simulateCreateAnswerSuccessForTest('sdp-reoffer');
-      b.simulateSetLocalDescriptionSuccessForTest();
+      b.completeSetRemoteDescriptionWithAnswer('sdp-reoffer');
 
-      expect(b.isCancelled, false);
+      expect(b.callbacks.isCancelled, false);
       // B は re-offer なので re-answer を emit する
       expect(spyB.signalings.single['type'], 're-answer');
       expect(spyB.signalings.single['sdp'], 'sdp-reoffer');
@@ -187,22 +251,18 @@ void main() {
       final spyA = _Spy();
       final spyB = _Spy();
 
-      final a = _createCallback(lib, dylib, spy: spyA, isReOffer: true);
-      a.cancel();
-      final b = _createCallback(lib, dylib, spy: spyB);
+      final a = _CallbackHarness(lib, dylib, spy: spyA, isReOffer: true);
+      a.callbacks.cancel();
+      final b = _CallbackHarness(lib, dylib, spy: spyB);
 
-      a.simulateSetRemoteDescriptionSuccessForTest();
-      a.simulateCreateAnswerSuccessForTest('sdp-reoffer');
-      a.simulateSetLocalDescriptionSuccessForTest();
+      a.completeSetRemoteDescriptionWithAnswer('sdp-reoffer');
 
       expect(spyA.signalings, isEmpty);
       expect(spyA.addLocalTracksCount, 0);
 
-      b.simulateSetRemoteDescriptionSuccessForTest();
-      b.simulateCreateAnswerSuccessForTest('sdp-offer');
-      b.simulateSetLocalDescriptionSuccessForTest();
+      b.completeSetRemoteDescriptionWithAnswer('sdp-offer');
 
-      expect(b.isCancelled, false);
+      expect(b.callbacks.isCancelled, false);
       // B は offer なので answer を emit する
       expect(spyB.signalings.single['type'], 'answer');
       expect(spyB.signalings.single['sdp'], 'sdp-offer');
@@ -214,17 +274,17 @@ void main() {
       final spyA = _Spy();
       final spyB = _Spy();
 
-      final a = _createCallback(lib, dylib, spy: spyA);
-      a.cancel();
-      final b = _createCallback(lib, dylib, spy: spyB);
+      final a = _CallbackHarness(lib, dylib, spy: spyA);
+      a.callbacks.cancel();
+      final b = _CallbackHarness(lib, dylib, spy: spyB);
 
-      a.simulateSetRemoteDescriptionSuccessForTest();
-      a.simulateCreateAnswerFailureForTest('something went wrong');
+      a.completeSetRemoteDescriptionWithoutAnswer();
+      a.callbacks.onCreateAnswerFailure(nullptr);
 
       expect(spyA.states, isEmpty);
       expect(spyA.signalings, isEmpty);
 
-      b.simulateCreateAnswerFailureForTest('real error');
+      b.callbacks.onCreateAnswerFailure(nullptr);
       expect(spyB.states, ['error']);
     });
 
@@ -236,15 +296,15 @@ void main() {
         var encCalledB = false;
         final capturedByB = <String?>[];
 
-        final a = _createCallback(
+        final a = _CallbackHarness(
           lib,
           dylib,
           applyEncodings: () {
             encCalledA = true;
           },
         );
-        a.cancel();
-        final b = _createCallback(
+        a.callbacks.cancel();
+        final b = _CallbackHarness(
           lib,
           dylib,
           applyEncodings: () {
@@ -253,10 +313,10 @@ void main() {
           },
         );
 
-        a.simulateSetRemoteDescriptionSuccessForTest();
+        a.completeSetRemoteDescriptionWithoutAnswer();
         expect(encCalledA, false);
 
-        b.simulateSetRemoteDescriptionSuccessForTest();
+        b.completeSetRemoteDescriptionWithoutAnswer();
         expect(encCalledB, true);
         expect(capturedByB, ['r2']);
       },
@@ -265,18 +325,14 @@ void main() {
     test('cancel 後の onCreateAnswerSuccess は signaling を送出しない', () {
       if (!ffiAvailable) return;
       final spy = _Spy();
-      final cbs = _createCallback(lib, dylib, spy: spy);
+      final cbs = _createBareCallback(lib, dylib, spy: spy);
       cbs.cancel();
 
-      final sdp = 'v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n';
-      final sdpUtf8 = sdp.toNativeUtf8();
-      final desc = lib.createSessionDescription(
-        WebrtcConstants(dylib).sdpTypeAnswer,
-        sdpUtf8.cast<Char>(),
-        sdpUtf8.length,
+      final desc = _createAnswerDescription(
+        lib,
+        dylib,
+        'v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n',
       );
-      calloc.free(sdpUtf8);
-      expect(desc, isNot(nullptr));
 
       cbs.onCreateAnswerSuccess(desc);
 
@@ -287,17 +343,13 @@ void main() {
     test('_pcRef が null の onCreateAnswerSuccess は安全に終了する', () {
       if (!ffiAvailable) return;
       final spy = _Spy();
-      final cbs = _createCallback(lib, dylib, spy: spy);
+      final cbs = _createBareCallback(lib, dylib, spy: spy);
 
-      final sdp = 'v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n';
-      final sdpUtf8 = sdp.toNativeUtf8();
-      final desc = lib.createSessionDescription(
-        WebrtcConstants(dylib).sdpTypeAnswer,
-        sdpUtf8.cast<Char>(),
-        sdpUtf8.length,
+      final desc = _createAnswerDescription(
+        lib,
+        dylib,
+        'v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n',
       );
-      calloc.free(sdpUtf8);
-      expect(desc, isNot(nullptr));
 
       cbs.onCreateAnswerSuccess(desc);
 

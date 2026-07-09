@@ -29,12 +29,13 @@ class SdpNegotiationCallbacks {
   final void Function(Map<String, Object?> message) emitSignalingMessage;
   final void Function() addLocalTracks;
   final void Function()? applyEncodings;
+  final SdpNegotiationTestHooks? _testHooks;
 
   Pointer<WebrtcPeerConnectionInterfaceRefcounted>? _pcRef;
   String? _pendingAnswerSdp;
   // re-offer の場合は re-answer を返し、ローカルトラック追加をスキップする
-  String _answerType = 'answer';
-  bool _isReOffer = false;
+  String _answerType;
+  bool _isReOffer;
   // 後続の offer / re-offer により旧インスタンスが無効化されたかどうか
   bool _cancelled = false;
 
@@ -50,8 +51,13 @@ class SdpNegotiationCallbacks {
     required this.emitSignalingMessage,
     required this.addLocalTracks,
     this.applyEncodings,
+    @visibleForTesting SdpNegotiationTestHooks? testHooks,
   }) : _lib = lib,
-       _consts = consts;
+       _consts = consts,
+       _testHooks = testHooks,
+       _pcRef = testHooks?.initialPeerConnectionRef,
+       _answerType = testHooks?.initialAnswerType ?? 'answer',
+       _isReOffer = testHooks?.initialIsReOffer ?? false;
 
   // このインスタンスを無効化する。
   //
@@ -65,57 +71,6 @@ class SdpNegotiationCallbacks {
   /// テスト用に cancel 状態を公開する。
   @visibleForTesting
   bool get isCancelled => _cancelled;
-
-  /// [SetRemoteDescription 成功時の処理を模擬する。
-  ///
-  /// cancel ガード、addLocalTracks、applyEncodings の抑制を
-  /// FFI なしで検証するために使う。
-  @visibleForTesting
-  void simulateSetRemoteDescriptionSuccessForTest() {
-    if (_cancelled) return;
-    if (!_isReOffer) {
-      addLocalTracks();
-    }
-    applyEncodings?.call();
-  }
-
-  /// CreateAnswer 成功時の SDP 退避を模擬する。
-  ///
-  /// `_pendingAnswerSdp` への代入と cancel ガードを検証する。
-  @visibleForTesting
-  void simulateCreateAnswerSuccessForTest(String sdp) {
-    if (_cancelled) return;
-    _pendingAnswerSdp = sdp;
-  }
-
-  /// CreateAnswer 失敗時の error emit を模擬する。
-  @visibleForTesting
-  void simulateCreateAnswerFailureForTest(String message) {
-    if (_cancelled) return;
-    emitState('error', 'create_answer_failed', message);
-  }
-
-  /// SetLocalDescription 成功時の signaling emit を模擬する。
-  ///
-  /// cancel ガード、`_answerType` / `_pendingAnswerSdp` の送出を検証する。
-  @visibleForTesting
-  void simulateSetLocalDescriptionSuccessForTest() {
-    if (_cancelled) return;
-    if (_pendingAnswerSdp != null) {
-      emitSignalingMessage({'type': _answerType, 'sdp': _pendingAnswerSdp});
-      _pendingAnswerSdp = null;
-    }
-  }
-
-  /// re-offer 用の状態を模擬する。
-  ///
-  /// `_answerType = 're-answer'`、`_isReOffer = true` に設定し、
-  /// cancel 後の re-answer 取り違え防止を検証できるようにする。
-  @visibleForTesting
-  void simulateReOfferStateForTest() {
-    _answerType = 're-answer';
-    _isReOffer = true;
-  }
 
   // `SetRemoteDescription` を開始し、answer 生成チェーンの起点を作る。
   //
@@ -221,6 +176,11 @@ class SdpNegotiationCallbacks {
   // observer の `onDestroy` で `NativeCallable` と構造体を解放し、
   // WebRTC 側が完了通知を終えたタイミングで寿命を閉じる。
   void _createAnswer() {
+    final createAnswerForTesting = _testHooks?.createAnswer;
+    if (createAnswerForTesting != null) {
+      createAnswerForTesting();
+      return;
+    }
     if (_pcRef == null) return;
 
     final cbsPtr = calloc<CreateSessionDescriptionObserverCbs>();
@@ -241,9 +201,7 @@ class SdpNegotiationCallbacks {
         NativeCallable<
           Void Function(Pointer<WebrtcRTCErrorUnique>, Pointer<Void>)
         >.listener((Pointer<WebrtcRTCErrorUnique> error, Pointer<Void> _) {
-          if (_cancelled) return;
-          final errMsg = rtcErrorMessage(_lib, error);
-          emitState('error', 'create_answer_failed', errMsg ?? '');
+          onCreateAnswerFailure(error);
         });
     onDestroy = NativeCallable<Void Function(Pointer<Void>)>.listener((
       Pointer<Void> _,
@@ -285,6 +243,14 @@ class SdpNegotiationCallbacks {
     }
   }
 
+  // `CreateAnswer` 失敗時に error を通知する。
+  @visibleForTesting
+  void onCreateAnswerFailure(Pointer<WebrtcRTCErrorUnique> error) {
+    if (_cancelled) return;
+    final errMsg = rtcErrorMessage(_lib, error);
+    emitState('error', 'create_answer_failed', errMsg ?? '');
+  }
+
   // `CreateAnswer` 成功時に SDP 文字列を退避し、`SetLocalDescription` を開始する。
   @visibleForTesting
   void onCreateAnswerSuccess(
@@ -321,6 +287,11 @@ class SdpNegotiationCallbacks {
   void _setLocalDescription(
     Pointer<WebrtcSessionDescriptionInterfaceUnique> desc,
   ) {
+    final setLocalDescriptionForTesting = _testHooks?.setLocalDescription;
+    if (setLocalDescriptionForTesting != null) {
+      setLocalDescriptionForTesting(desc);
+      return;
+    }
     if (_pcRef == null) {
       _lib.sessionDescriptionUniqueDelete(desc);
       return;
@@ -384,4 +355,29 @@ class SdpNegotiationCallbacks {
       _pendingAnswerSdp = null;
     }
   }
+}
+
+// SDP ネゴシエーションの本物ハンドラをテストから直接駆動するための hook。
+//
+// 本番ロジック自体は書き換えず、native の非同期呼び出し境界だけを
+// テスト側で完了させる。これにより `onSetRemoteDescriptionComplete` から
+// `onCreateAnswerSuccess`、`onSetLocalDescriptionComplete` へ進む実経路を
+// ユニットテストで検証できる。
+@visibleForTesting
+final class SdpNegotiationTestHooks {
+  const SdpNegotiationTestHooks({
+    this.initialPeerConnectionRef,
+    this.initialAnswerType = 'answer',
+    this.initialIsReOffer = false,
+    this.createAnswer,
+    this.setLocalDescription,
+  });
+
+  final Pointer<WebrtcPeerConnectionInterfaceRefcounted>?
+  initialPeerConnectionRef;
+  final String initialAnswerType;
+  final bool initialIsReOffer;
+  final void Function()? createAnswer;
+  final void Function(Pointer<WebrtcSessionDescriptionInterfaceUnique> desc)?
+  setLocalDescription;
 }

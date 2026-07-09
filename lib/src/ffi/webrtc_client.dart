@@ -34,6 +34,38 @@ class _DataChannelResources {
   final List<NativeCallable<dynamic>> callables = [];
 }
 
+/// `getStats()` 1 回分の Dart / native リソースを束ねる。
+class _StatsRequest {
+  _StatsRequest({
+    required this.id,
+    this.completer,
+    this.cbsPtr,
+    this.nativeCallable,
+    this.timer,
+  });
+
+  /// request を一意に識別するための世代番号。
+  final int id;
+
+  /// public API 側へ結果を返すための completer。
+  Completer<String?>? completer;
+
+  /// libwebrtc-c へ渡す callback 構造体。
+  Pointer<RTCStatsCollectorCallbackCbs>? cbsPtr;
+
+  /// Dart callback を native function pointer として保持する。
+  NativeCallable<Function>? nativeCallable;
+
+  /// `getStats()` の応答待ちを打ち切る timer。
+  Timer? timer;
+
+  @override
+  int get hashCode => id;
+
+  @override
+  bool operator ==(Object other) => identical(this, other);
+}
+
 /// WebRTC クライアント (dart:ffi 実装)
 class WebrtcClient {
   final LibWebrtcC _lib;
@@ -48,10 +80,9 @@ class WebrtcClient {
   Pointer<WebrtcPeerConnectionInterfaceRefcounted>? _pcRef;
 
   // 進行中の getStats() を後始末するための追跡フィールド
-  Completer<String?>? _pendingStatsCompleter;
-  Pointer<RTCStatsCollectorCallbackCbs>? _pendingStatsCbsPtr;
-  NativeCallable<Function>? _pendingStatsNativeCallable;
-  Timer? _pendingStatsTimer;
+  _StatsRequest? _pendingStatsRequest;
+  final Set<_StatsRequest> _orphanedStatsRequests = <_StatsRequest>{};
+  int _statsRequestGeneration = 0;
 
   // C コールバックブリッジ (PeerConnectionObserver + リモートビデオ管理)
   Pointer<SoraObserverBridge>? _observerBridge;
@@ -537,16 +568,16 @@ class WebrtcClient {
 
     // 進行中の getStats があればエラー完了させる。
     // native callback リソース (cbsPtr, NativeCallable) は
-    // onStatsDelivered コールバックが到着時に自身で解放するため、
-    // ここでは Dart 側の追跡 (Completer, Timer) だけを解除する。
+    // callback 未到達の可能性があるため、アクティブな request から切り離して
+    // callback 到着時に自身の request だけを解放させる。
     //
     // libwebrtc-c m148 系では、`pcRelease()` 後に pending callback が
     // 必ず到達する契約は確認できない。
     // `pcGetStats` は callback 登録付きの非同期要求だが、`pcRelease` は
     // `Close` の callback 完了待ち契約を持たないため、破棄タイミング次第で
     // stats callback が drop されうる。
-    // そのため callback 未到達時は 1 PC あたり最大 1 件の bounded leak が
-    // 残りうるが、UAF 回避を優先して意図的に許容する。
+    // そのため callback 未到達時は孤立 request が残りうるが、
+    // 解放済みメモリ参照の回避を優先して意図的に許容する。
     cleanupPendingStatsRequest()?.completeError(
       StateError('PeerConnection closed during getStats.'),
     );
@@ -788,26 +819,25 @@ class WebrtcClient {
   /// 進行中の getStats の Dart 側追跡 (Completer / Timer) を解除し、
   /// 未完了の Completer を返す。
   ///
-  /// NativeCallable と cbsPtr は遅延 callback の到着に備えて保持し続ける。
+  /// NativeCallable と cbsPtr はアクティブな request から切り離し、
+  /// 遅延 callback の到着に備えて孤立 request として保持し続ける。
   /// これらは onStatsDelivered コールバック自身が到着時に解放する。
-  /// callback が未到達の場合、同一 PC では最大 1 件の bounded leak となる。
   ///
   /// disconnect() / dispose() 時は Dart 側追跡だけを解除し、
   /// native リソースの解放は onStatsDelivered コールバックへ委譲する。
   ///
   /// タイムアウト後にネイティブリソースを解放すると、
-  /// 遅延コールバック到着時に native crash を起こすため解放しない。
+  /// 遅延コールバック到着時に native 側のクラッシュを起こすため解放しない。
   ///
-  /// 二重呼び出しへの対策として、2回目以降は null を返すようにしている。
+  /// 二重呼び出しへの対策として、2 回目以降は null を返すようにしている。
   @visibleForTesting
   Completer<String?>? cleanupPendingStatsRequest() {
-    final completer = _pendingStatsCompleter;
-    final timer = _pendingStatsTimer;
-    _pendingStatsCompleter = null;
-    _pendingStatsTimer = null;
-
-    timer?.cancel();
-    return completer;
+    final request = _pendingStatsRequest;
+    if (request == null) {
+      return null;
+    }
+    _pendingStatsRequest = null;
+    return _detachStatsRequestDartSide(request);
   }
 
   @visibleForTesting
@@ -817,10 +847,130 @@ class WebrtcClient {
     Pointer<RTCStatsCollectorCallbackCbs>? cbsPtr,
     NativeCallable<Function>? nativeCallable,
   }) {
-    _pendingStatsCompleter = completer;
-    _pendingStatsTimer = timer;
-    _pendingStatsCbsPtr = cbsPtr;
-    _pendingStatsNativeCallable = nativeCallable;
+    if (completer == null &&
+        timer == null &&
+        cbsPtr == null &&
+        nativeCallable == null) {
+      _pendingStatsRequest = null;
+      return;
+    }
+
+    final request = _StatsRequest(
+      id: ++_statsRequestGeneration,
+      completer: completer,
+      timer: timer,
+      cbsPtr: cbsPtr,
+      nativeCallable: nativeCallable,
+    );
+
+    if (completer == null && timer == null) {
+      _orphanedStatsRequests.add(request);
+    } else {
+      _pendingStatsRequest = request;
+    }
+  }
+
+  @visibleForTesting
+  bool get hasPendingStatsRequestForTest => _pendingStatsRequest != null;
+
+  @visibleForTesting
+  int get orphanedStatsRequestCountForTest => _orphanedStatsRequests.length;
+
+  // アクティブな request から Dart 側の待ち合わせだけを外す。
+  //
+  // native callback リソースは libwebrtc-c が後から参照する可能性があるため、
+  // callback 到着時まで孤立 request として保持する。
+  Completer<String?>? _detachStatsRequestDartSide(_StatsRequest request) {
+    final completer = request.completer;
+    final timer = request.timer;
+    request.completer = null;
+    request.timer = null;
+    timer?.cancel();
+
+    if (request.cbsPtr != null || request.nativeCallable != null) {
+      _orphanedStatsRequests.add(request);
+    }
+    return completer;
+  }
+
+  // callback 到着時に request をアクティブ / 孤立の管理対象から外す。
+  //
+  // callback は自身が捕捉した request だけを掃除する。これにより、
+  // 古い callback が新しい `getStats()` の request を閉じることを防ぐ。
+  Completer<String?>? _takeStatsRequestForCallback(_StatsRequest request) {
+    if (identical(_pendingStatsRequest, request)) {
+      _pendingStatsRequest = null;
+    } else {
+      _orphanedStatsRequests.remove(request);
+    }
+
+    final completer = request.completer;
+    final timer = request.timer;
+    request.completer = null;
+    request.timer = null;
+    timer?.cancel();
+    return completer;
+  }
+
+  // callback 到着後に native callback リソースを解放する。
+  //
+  // timeout / closePeerConnection の時点では libwebrtc-c がまだ callback
+  // ポインタを保持している可能性があるため、ここでのみ解放する。
+  void _releaseStatsRequestNativeResources(_StatsRequest request) {
+    request.nativeCallable?.close();
+    request.nativeCallable = null;
+
+    final cbsPtr = request.cbsPtr;
+    if (cbsPtr != null) {
+      calloc.free(cbsPtr);
+      request.cbsPtr = null;
+    }
+  }
+
+  // `RTCStatsReport` の参照だけを解放する。
+  void _releaseStatsReport(Pointer<WebrtcRTCStatsReportRefcounted> reportRef) {
+    if (reportRef == nullptr) {
+      return;
+    }
+    final report = _lib.rtcStatsReportRefcountedGet(reportRef);
+    _lib.rtcStatsReportRelease(report);
+  }
+
+  // `RTCStatsReport` を JSON へ変換し、最後に参照を必ず解放する。
+  String? _statsReportToJson(
+    Pointer<WebrtcRTCStatsReportRefcounted> reportRef,
+  ) {
+    if (reportRef == nullptr) {
+      return null;
+    }
+    final report = _lib.rtcStatsReportRefcountedGet(reportRef);
+    try {
+      final stats = _lib.rtcStatsReportToJson(report);
+      return stdStringToDart(_lib, stats);
+    } finally {
+      _lib.rtcStatsReportRelease(report);
+    }
+  }
+
+  // `getStats()` の native callback を処理する。
+  void _handleStatsDelivered(
+    _StatsRequest request,
+    Pointer<WebrtcRTCStatsReportRefcounted> reportRef,
+  ) {
+    final completer = _takeStatsRequestForCallback(request);
+    _releaseStatsRequestNativeResources(request);
+
+    if (_pcRef == null || completer == null || completer.isCompleted) {
+      _releaseStatsReport(reportRef);
+      return;
+    }
+
+    try {
+      final json = _statsReportToJson(reportRef);
+      completer.complete(json);
+    } catch (error, stackTrace) {
+      completer.completeError(error, stackTrace);
+    }
   }
 
   /// WebRTC 統計情報を取得する。
@@ -832,13 +982,13 @@ class WebrtcClient {
       return Future<String?>.value(null);
     }
     // Future 共有: 進行中の getStats() がある場合、その future を返す
-    final pendingCompleter = _pendingStatsCompleter;
+    final pendingCompleter = _pendingStatsRequest?.completer;
     if (pendingCompleter != null) {
       return pendingCompleter.future;
     }
-    // null フォールバック: timeout 後など completer が解放済みだが
-    // native callback が残っている期間は null を返す
-    if (_pendingStatsCbsPtr != null || _pendingStatsNativeCallable != null) {
+    // 通常は発生しないが、アクティブな request に Dart 側の待ち合わせがない場合は
+    // 多重に native request を発行せず null を返す。
+    if (_pendingStatsRequest != null) {
       return Future<String?>.value(null);
     }
     if (_pcRef == null) {
@@ -846,10 +996,14 @@ class WebrtcClient {
     }
 
     final completer = Completer<String?>();
-    _pendingStatsCompleter = completer;
-
     final cbsPtr = calloc<RTCStatsCollectorCallbackCbs>();
-    _pendingStatsCbsPtr = cbsPtr;
+    final request = _StatsRequest(
+      id: ++_statsRequestGeneration,
+      completer: completer,
+      cbsPtr: cbsPtr,
+    );
+    _pendingStatsRequest = request;
+
     final onStatsDelivered =
         NativeCallable<
           Void Function(Pointer<WebrtcRTCStatsReportRefcounted>, Pointer<Void>)
@@ -857,45 +1011,12 @@ class WebrtcClient {
           Pointer<WebrtcRTCStatsReportRefcounted> reportRef,
           Pointer<Void> _,
         ) {
-          final compt = cleanupPendingStatsRequest();
-          // NativeCallable と cbsPtr の解放は callback 自身が行う。
-          // PeerConnection 生存中の timeout による先行完了に備え、ここで確実に解放する。
-          _pendingStatsNativeCallable?.close();
-          _pendingStatsNativeCallable = null;
-          if (_pendingStatsCbsPtr != null) {
-            calloc.free(_pendingStatsCbsPtr!);
-            _pendingStatsCbsPtr = null;
-          }
-
-          // PeerConnection 破棄後に callback が到達した場合、
-          // 結果を破棄するが、callback が到達している以上 reportRef は有効である。
-          // webrtc-rs 側で callback 呼び出し時に scoped_refptr で 1 ref が移譲されており、
-          // reportRef は _pcRef とは独立したライフタイムを持つため Release してよい。
-          final pcDisposed = _pcRef == null;
-          if (pcDisposed && reportRef != nullptr) {
-            final report = _lib.rtcStatsReportRefcountedGet(reportRef);
-            _lib.rtcStatsReportRelease(report);
-          }
-          if (pcDisposed) return;
-
-          if (compt != null && !compt.isCompleted) {
-            String? json;
-            if (reportRef != nullptr) {
-              final report = _lib.rtcStatsReportRefcountedGet(reportRef);
-              final stats = _lib.rtcStatsReportToJson(report);
-              json = stdStringToDart(_lib, stats);
-              _lib.rtcStatsReportRelease(report);
-            }
-            compt.complete(json);
-          } else if (reportRef != nullptr) {
-            final report = _lib.rtcStatsReportRefcountedGet(reportRef);
-            _lib.rtcStatsReportRelease(report);
-          }
+          _handleStatsDelivered(request, reportRef);
         });
-    _pendingStatsNativeCallable = onStatsDelivered;
+    request.nativeCallable = onStatsDelivered;
 
-    // タイムアウトは 5　秒とする
-    _pendingStatsTimer = Timer(const Duration(seconds: 5), () {
+    // タイムアウトは 5 秒とする
+    request.timer = Timer(const Duration(seconds: 5), () {
       cleanupPendingStatsRequest()?.completeError(
         TimeoutException('getStats() timed out.', const Duration(seconds: 5)),
       );

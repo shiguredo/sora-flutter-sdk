@@ -366,7 +366,9 @@ Future<void> installLibwebrtcC(String platform, Directory extractedDir) async {
   // ソースの拡張子が .lib の場合はコピー先も .lib にする
   final libPath = staticLibraryPath!;
   final sourceExtension = p.extension(libPath.path);
-  final destFileName = sourceExtension == '.lib' ? 'libwebrtc-c.lib' : 'libwebrtc-c.a';
+  final destFileName = sourceExtension == '.lib'
+      ? 'libwebrtc-c.lib'
+      : 'libwebrtc-c.a';
   final destinationPath = childFile(buildDir, destFileName);
   libPath.copySync(destinationPath.path);
   final includeCandidates = [

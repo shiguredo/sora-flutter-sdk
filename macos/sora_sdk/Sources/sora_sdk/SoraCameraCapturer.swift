@@ -12,8 +12,7 @@ import FlutterMacOS
 class SoraCameraCapturer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
   private static let sessionQueueKey =
     DispatchSpecificKey<Void>()
-  // captureSession / videoSourcePtr への書き込みを直列化し、
-  // delegate コールバック (captureQueue) とのデータレースを防ぐ。
+  // captureSession への書き込みを直列化する。
   // deinit 経路では getSpecific でキュー判定し直接実行する。
   private let sessionQueue = DispatchQueue(label: "jp.shiguredo.sora_sdk.camera.session")
   private var selectedDeviceId: String?
@@ -29,8 +28,28 @@ class SoraCameraCapturer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
   private var captureOutput: AVCaptureVideoDataOutput?
   private var captureQueue: DispatchQueue?
 
-  // dart:ffi 側の AdaptedVideoTrackSource ポインタ
-  private var videoSourcePtr: OpaquePointer?
+  // dart:ffi 側の AdaptedVideoTrackSource ポインタ。
+  // captureQueue (delegate) / sessionQueue (stop) / 呼出スレッド (setter) の
+  // 3 方向からアクセスされるため cross-queue データレースを防ぐ必要がある。
+  private var _videoSourcePtr: OpaquePointer?
+  // os_unfair_lock を利用する。
+  // - 毎フレーム read と stop 時 write があり、頻度が高い
+  // - delegate から sessionQueue.sync すると stopRunning() と循環待ちしうる
+  // - NSLock より軽量、DispatchSemaphore は排他制御に過剰設計
+  private var _videoSourceLock = os_unfair_lock()
+
+  private var videoSourcePtr: OpaquePointer? {
+    get {
+      os_unfair_lock_lock(&_videoSourceLock)
+      defer { os_unfair_lock_unlock(&_videoSourceLock) }
+      return _videoSourcePtr
+    }
+    set {
+      os_unfair_lock_lock(&_videoSourceLock)
+      _videoSourcePtr = newValue
+      os_unfair_lock_unlock(&_videoSourceLock)
+    }
+  }
 
   // ローカルプレビュー用
   private var previewTexture: SoraLocalPreviewTexture!
@@ -142,14 +161,10 @@ class SoraCameraCapturer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
   // MARK: - ビデオソースポインタ
 
   /// dart:ffi 側の AdaptedVideoTrackSource ポインタを設定する。
-  /// 書き込みは sessionQueue.async で直列化するため、setter から戻った時点で
-  /// videoSourcePtr の更新完了は保証しない。
   /// start() 直後に delegate が動くと初回フレームで videoSourcePtr が nil に
   /// なる場合があるが、その場合は OnFrame 呼び出しをスキップするため安全である。
   func setVideoSourcePtr(_ ptr: Int64) {
-    sessionQueue.async { [weak self] in
-      self?.videoSourcePtr = OpaquePointer(bitPattern: Int(ptr))
-    }
+    videoSourcePtr = OpaquePointer(bitPattern: Int(ptr))
   }
 
   // MARK: - キャプチャ制御
@@ -248,8 +263,8 @@ class SoraCameraCapturer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
 
   /// カメラキャプチャを停止する。
   /// sessionQueue 経由で delegate コールバックと直列化し、
-  /// delegate が captureSession / videoSourcePtr を読んでいる途中で
-  /// stop が書き換えるデータレースを防ぐ。
+  /// delegate が captureSession を読んでいる途中で stop が書き換える
+  /// データレースを防ぐ。
   func stop() {
     guard running else { return }
     running = false
@@ -422,11 +437,8 @@ class SoraCameraCapturer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
     previewLock.unlock()
 
     // VideoFrame を作成して AdaptedVideoTrackSource に投入する。
-    // videoSourcePtr の読み出しは sessionQueue 経由で直列化し、
-    // stop() / restart() の書き込みとのデータレースを防ぐ。
-    let sourcePtr = sessionQueue.sync { [weak self] in
-      self?.videoSourcePtr
-    }
+    // videoSourcePtr は軽量ロックで保護し、delegate から sessionQueue を待たない。
+    let sourcePtr = videoSourcePtr
     sourceBlock: if let sourcePtr = sourcePtr {
       let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
       let timestampUs = Int64(CMTimeGetSeconds(pts) * 1_000_000.0)

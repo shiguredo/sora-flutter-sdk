@@ -22,6 +22,7 @@ Sora Flutter SDK の recvonly / sendonly / sendrecv 接続と、2 クライア�
 | `TEST_SIGNALING_URLS` | シグナリング URL をカンマまたは空白区切り（例: `wss://a/signaling,wss://b/signaling`） |
 | `TEST_CHANNEL_ID_PREFIX` | チャンネル ID のプレフィックス。CI では `GITHUB_RUN_ID` を連結し、ローカルでは時刻でユニーク化する |
 | `TEST_SEND_DURATION` | （任意）sendonly / sendrecv テストの送信継続秒数（例: `60`） |
+| `TEST_MACOS_CAMERA_STRESS_ROUNDS` | （任意）macOS 実カメラストレス E2E の反復回数。未指定時は `10` |
 | `TEST_PUSH_EXPECTED_TYPE` | （任意）notify metadata テストで push 受信を確認する場合、期待する `event_type` 値を設定する |
 
 接続失敗系 E2E の前提:
@@ -58,6 +59,14 @@ bundleId 分離 E2E（`bundle_id_isolation_e2e_test.dart`）の前提:
 - 異なる `bundleId` を持つ sender-other のメディアは observer が受信する
 - `bundleId` 未対応の Sora サーバーでは bundleId フィルタが機能せず、observer が sender-same の media も受信するためテストが失敗する
 
+macOS 実カメラストレス E2E（`macos_camera_runtime_stress_e2e_test.dart`）の前提:
+
+- このテストはローカル実機専用。CI では実行しない
+- macOS のカメラ入力デバイスが必要
+- 初回実行時に macOS のカメラ権限ダイアログが表示される場合がある
+- `removeVideoTrack` 後に camera track を dispose し、`replaceVideoTrack` で camera track を再追加し、最後に disconnect / dispose する操作を反復する
+- デッドロック検出用に各 camera 操作へ timeout を設定している。強めに確認する場合は `TEST_MACOS_CAMERA_STRESS_ROUNDS=50` 以上を指定する
+
 `TEST_SECRET_KEY` の扱い:
 
 - `{` で始まる場合は JSON として `metadata` にそのまま使う
@@ -84,6 +93,13 @@ flutter test integration_test/remote_media_stream_e2e_test.dart -d macos
 flutter test integration_test/local_media_toggle_e2e_test.dart -d macos
 flutter test integration_test/bundle_id_isolation_e2e_test.dart -d macos
 flutter test integration_test/connection_failure_e2e_test.dart -d macos
+```
+
+実カメラを使う macOS ローカル専用ストレス E2E:
+
+```bash
+export TEST_MACOS_CAMERA_STRESS_ROUNDS=50
+flutter test integration_test/macos_camera_runtime_stress_e2e_test.dart -d macos
 ```
 
 ## ローカル実行例（Windows）

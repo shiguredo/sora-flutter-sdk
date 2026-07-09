@@ -1723,15 +1723,17 @@ class WebrtcClient {
     }
   }
 
-  // DataChannel の observer 登録と初期 state 確認。
-  // DcBridgeContext ポインタを返す。解放は _cleanupSingleDataChannel で行う。
+  // DataChannel の observer 登録を行う。
+  //
+  // 成功時は DcBridgeContext ポインタを返す。
+  // 失敗時は dc を release して消費し、追加済み NativeCallable を閉じる。
   Pointer<Void>? _configureDataChannelObserver(
     Pointer<WebrtcDataChannelInterface> dc,
     String label,
     List<NativeCallable<dynamic>> callables,
   ) {
     if (_observerBridge == null) {
-      _lib.dataChannelRelease(dc);
+      _releaseDataChannelOnSetupFailure(dc);
       return null;
     }
     final ncStateChange = NativeCallable<Void Function(Pointer<Void>)>.listener(
@@ -1766,7 +1768,11 @@ class WebrtcClient {
             'data': bytes,
           });
         });
-    callables.addAll([ncStateChange, ncMessage]);
+    final registeredCallables = <NativeCallable<dynamic>>[
+      ncStateChange,
+      ncMessage,
+    ];
+    callables.addAll(registeredCallables);
 
     final ctx = _lib.soraObserverBridgeSetupDc(
       _observerBridge!,
@@ -1776,11 +1782,10 @@ class WebrtcClient {
       nullptr,
     );
     if (ctx == nullptr) {
-      _cleanupNativeCallablesFromRegistries([ncStateChange, ncMessage]);
-      _lib.dataChannelRelease(dc);
+      _cleanupDataChannelSetupCallables(callables, registeredCallables);
+      _releaseDataChannelOnSetupFailure(dc);
       return null;
     }
-    _handleDataChannelState(dc, label);
     return ctx;
   }
 
@@ -1802,112 +1807,18 @@ class WebrtcClient {
     res.ctx = null;
   }
 
-  /// notify DataChannel を observer 登録込みで初期化する。
-  void _setupNotifyDataChannel(Pointer<WebrtcDataChannelInterface> dc) {
-    _cleanupNotifyDataChannel();
-    _notifyDc.dc = dc;
-    _notifyDc.ctx = _configureDataChannelObserver(
-      dc,
-      'notify',
-      _notifyDc.callables,
-    );
-  }
-
-  /// push DataChannel を observer 登録込みで初期化する。
-  void _setupPushDataChannel(Pointer<WebrtcDataChannelInterface> dc) {
-    _cleanupPushDataChannel();
-    _pushDc.dc = dc;
-    _pushDc.ctx = _configureDataChannelObserver(dc, 'push', _pushDc.callables);
-  }
-
-  /// rpc DataChannel を observer 登録込みで初期化する。
-  void _setupRpcDataChannel(Pointer<WebrtcDataChannelInterface> dc) {
-    _cleanupRpcDataChannel();
-    _rpcDc.dc = dc;
-    _rpcDc.ctx = _configureDataChannelObserver(dc, 'rpc', _rpcDc.callables);
-  }
-
-  /// stats DataChannel を observer 登録込みで初期化する。
-  void _setupStatsDataChannel(Pointer<WebrtcDataChannelInterface> dc) {
-    _cleanupStatsDataChannel();
-    _statsDc.dc = dc;
-    _statsDc.ctx = _configureDataChannelObserver(
-      dc,
-      'stats',
-      _statsDc.callables,
-    );
-  }
-
-  // カスタム label の DataChannel を map へ登録し observer を設定する。
-  void _setupCustomDataChannel(
-    Pointer<WebrtcDataChannelInterface> dc,
-    String label,
+  /// setup 失敗時に追加済み NativeCallable だけを閉じる。
+  void _cleanupDataChannelSetupCallables(
+    List<NativeCallable<dynamic>> owner,
+    List<NativeCallable<dynamic>> registeredCallables,
   ) {
-    // 既存エントリがあれば先に解放する (固定 label 系と防御方針を揃える)
-    final old = _customDataChannels[label];
-    if (old != null) {
-      _cleanupSingleDataChannel(old);
+    for (final nc in registeredCallables) {
+      owner.remove(nc);
+      nc.close();
     }
-
-    if (_observerBridge == null) {
-      _lib.dataChannelRelease(dc);
-      return;
-    }
-
-    final res = _DataChannelResources();
-    res.dc = dc;
-    _customDataChannels[label] = res;
-
-    final ncStateChange = NativeCallable<Void Function(Pointer<Void>)>.listener(
-      (Pointer<Void> _) => _handleDataChannelState(dc, label),
-    );
-    final ncMessage =
-        NativeCallable<
-          Void Function(Pointer<Uint8>, Int32, Int32, Pointer<Void>)
-        >.listener((
-          Pointer<Uint8> dataPtr,
-          int len,
-          int isBinary,
-          Pointer<Void> _,
-        ) {
-          if (dataPtr == nullptr) {
-            _onEvent('data_channel_message', {
-              'label': label,
-              'isBinary': isBinary != 0,
-              'data': Uint8List(0),
-            });
-            return;
-          }
-          final bytes = len > 0
-              ? Uint8List.fromList(dataPtr.asTypedList(len))
-              : Uint8List(0);
-          if (len > 0) {
-            malloc.free(dataPtr);
-          }
-          _onEvent('data_channel_message', {
-            'label': label,
-            'isBinary': isBinary != 0,
-            'data': bytes,
-          });
-        });
-    res.callables.addAll([ncStateChange, ncMessage]);
-
-    res.ctx = _lib.soraObserverBridgeSetupDc(
-      _observerBridge!,
-      dc,
-      ncStateChange.nativeFunction,
-      ncMessage.nativeFunction,
-      nullptr,
-    );
-    if (res.ctx == nullptr) {
-      _customDataChannels.remove(label);
-      _cleanupNativeCallablesFromRegistries([ncStateChange, ncMessage]);
-      _releaseDataChannelOnSetupFailure(dc);
-      return;
-    }
-    _handleDataChannelState(dc, label);
   }
 
+  /// 登録済み NativeCallable を閉じ、保持リストから取り除く。
   void _cleanupNativeCallablesFromRegistries(
     List<NativeCallable<dynamic>> callables,
   ) {
@@ -1925,6 +1836,73 @@ class WebrtcClient {
     }
   }
 
+  /// 管理スロットへ DataChannel を登録し、setup 失敗時は空に戻す。
+  void _setupManagedDataChannel(
+    _DataChannelResources res,
+    Pointer<WebrtcDataChannelInterface> dc,
+    String label,
+  ) {
+    _cleanupSingleDataChannel(res);
+    res.dc = dc;
+
+    final ctx = _configureDataChannelObserver(dc, label, res.callables);
+    if (ctx == null) {
+      res.dc = null;
+      res.ctx = null;
+      return;
+    }
+
+    res.ctx = ctx;
+    _handleDataChannelState(dc, label);
+  }
+
+  /// notify DataChannel を observer 登録込みで初期化する。
+  void _setupNotifyDataChannel(Pointer<WebrtcDataChannelInterface> dc) {
+    _setupManagedDataChannel(_notifyDc, dc, 'notify');
+  }
+
+  /// push DataChannel を observer 登録込みで初期化する。
+  void _setupPushDataChannel(Pointer<WebrtcDataChannelInterface> dc) {
+    _setupManagedDataChannel(_pushDc, dc, 'push');
+  }
+
+  /// rpc DataChannel を observer 登録込みで初期化する。
+  void _setupRpcDataChannel(Pointer<WebrtcDataChannelInterface> dc) {
+    _setupManagedDataChannel(_rpcDc, dc, 'rpc');
+  }
+
+  /// stats DataChannel を observer 登録込みで初期化する。
+  void _setupStatsDataChannel(Pointer<WebrtcDataChannelInterface> dc) {
+    _setupManagedDataChannel(_statsDc, dc, 'stats');
+  }
+
+  // カスタム label の DataChannel を map へ登録し observer を設定する。
+  void _setupCustomDataChannel(
+    Pointer<WebrtcDataChannelInterface> dc,
+    String label,
+  ) {
+    // 既存エントリがあれば先に解放する (固定 label 系と防御方針を揃える)
+    final old = _customDataChannels[label];
+    if (old != null) {
+      _cleanupSingleDataChannel(old);
+    }
+
+    final res = _DataChannelResources();
+    res.dc = dc;
+    _customDataChannels[label] = res;
+
+    final ctx = _configureDataChannelObserver(dc, label, res.callables);
+    if (ctx == null) {
+      _customDataChannels.remove(label);
+      res.dc = null;
+      res.ctx = null;
+      return;
+    }
+
+    res.ctx = ctx;
+    _handleDataChannelState(dc, label);
+  }
+
   void _releaseDataChannelOnSetupFailure(
     Pointer<WebrtcDataChannelInterface> dc,
   ) {
@@ -1933,13 +1911,7 @@ class WebrtcClient {
 
   /// signaling DataChannel を observer 登録込みで初期化する。
   void _setupSignalingDataChannel(Pointer<WebrtcDataChannelInterface> dc) {
-    _cleanupSignalingDataChannel();
-    _signalingDc.dc = dc;
-    _signalingDc.ctx = _configureDataChannelObserver(
-      dc,
-      'signaling',
-      _signalingDc.callables,
-    );
+    _setupManagedDataChannel(_signalingDc, dc, 'signaling');
   }
 
   // 現在の DataChannel state を読み、open 到達時だけ Dart 側へ通知する。

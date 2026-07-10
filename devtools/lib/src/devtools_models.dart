@@ -132,6 +132,8 @@ class DevToolsPageNotifier extends ChangeNotifier {
   String dtlsStateLabel = 'unknown';
   // ログ画面で選択中のタブを保持する。
   DevToolsLogTab selectedLogTab = DevToolsLogTab.app;
+  // ログ画面の検索語句を保持する。
+  String logSearchQuery = '';
   // RPC 実行中フラグを保持する。
   bool rpcBusy = false;
 
@@ -313,6 +315,17 @@ class DevToolsPageNotifier extends ChangeNotifier {
     DevToolsLogTab.timeline => timelineLogs,
     DevToolsLogTab.stats => statsLogs,
   };
+
+  // 検索条件を適用した、ログ画面に表示する一覧を返す。
+  List<String> get filteredSelectedLogs {
+    final query = logSearchQuery.toLowerCase();
+    if (query.isEmpty) {
+      return selectedLogs;
+    }
+    return selectedLogs
+        .where((line) => line.toLowerCase().contains(query))
+        .toList(growable: false);
+  }
 
   // 接続状態イベントを画面状態へ反映する。
   void applyConnectionState(SoraConnectionState nextState) {

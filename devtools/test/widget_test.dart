@@ -284,6 +284,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(_findTabText('Diagnostics'), findsOneWidget);
     expect(find.text('Log Type'), findsOneWidget);
+    expect(find.text('Search Logs'), findsOneWidget);
     expect(find.text('No logs yet'), findsOneWidget);
 
     // Stats タブに切り替えて Get Stats ボタンを確認する

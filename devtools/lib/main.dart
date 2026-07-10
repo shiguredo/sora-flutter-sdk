@@ -77,6 +77,8 @@ class _DevToolsPageState extends State<DevToolsPage>
   late final TextEditingController _rpcParamsController;
   // RPC timeout 入力欄の TextEditingController。
   late final TextEditingController _rpcTimeoutController;
+  // ログ検索欄の TextEditingController。
+  late final TextEditingController _logSearchController;
   // 画面状態の SSOT (ChangeNotifier)。
   late final DevToolsPageNotifier _pageNotifier;
   // 接続イベント購読の bind / unbind を管理する。
@@ -412,6 +414,7 @@ class _DevToolsPageState extends State<DevToolsPage>
     _rpcParamsController = TextEditingController(text: '{}');
     // RPC リクエスト時のタイムアウト入力欄の TextEditingController。
     _rpcTimeoutController = TextEditingController(text: '5000');
+    _logSearchController = TextEditingController();
     // DataChannel リアルタイムメッセージングのラベル入力欄の TextEditingController。
     _dataChannelLabelController = TextEditingController(text: '#chat');
     // DataChannel リアルタイムメッセージングの max_packet_life_time 入力欄の TextEditingController。
@@ -428,6 +431,7 @@ class _DevToolsPageState extends State<DevToolsPage>
     _channelIdController.dispose();
     _rpcParamsController.dispose();
     _rpcTimeoutController.dispose();
+    _logSearchController.dispose();
     _dataChannelLabelController.dispose();
     _dataChannelMaxPacketLifeTimeController.dispose();
     _tabController.dispose();
@@ -1348,7 +1352,10 @@ class _DevToolsPageState extends State<DevToolsPage>
   }
 
   // 表示選択中のログ種類
-  List<String> get _selectedLogs => _pageNotifier.selectedLogs;
+  List<String> get _selectedLogs => _pageNotifier.filteredSelectedLogs;
+
+  // ログ画面の検索語句。
+  set _logSearchQuery(String value) => _pageNotifier.logSearchQuery = value;
 
   String get _selectedLogDescription => switch (_selectedLogTab) {
     DevToolsLogTab.app => '操作ログ / デバッグログ',
@@ -1363,9 +1370,15 @@ class _DevToolsPageState extends State<DevToolsPage>
       selectedLogTab: _selectedLogTab,
       selectedLogDescription: _selectedLogDescription,
       selectedLogs: _selectedLogs,
+      logSearchController: _logSearchController,
       onLogTabChanged: (value) {
         _mutateView(() {
           _selectedLogTab = value;
+        });
+      },
+      onLogSearchQueryChanged: (value) {
+        _mutateView(() {
+          _logSearchQuery = value;
         });
       },
       onClose: onClose,

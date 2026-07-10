@@ -16,7 +16,9 @@ class DevToolsLogPanel extends StatelessWidget {
     required this.selectedLogTab,
     required this.selectedLogDescription,
     required this.selectedLogs,
+    required this.logSearchController,
     required this.onLogTabChanged,
+    required this.onLogSearchQueryChanged,
     required this.onCopyLogs,
     this.onClose,
     this.canFetchStats = false,
@@ -27,7 +29,9 @@ class DevToolsLogPanel extends StatelessWidget {
   final DevToolsLogTab selectedLogTab;
   final String selectedLogDescription;
   final List<String> selectedLogs;
+  final TextEditingController logSearchController;
   final ValueChanged<DevToolsLogTab> onLogTabChanged;
+  final ValueChanged<String> onLogSearchQueryChanged;
   final VoidCallback onCopyLogs;
   final VoidCallback? onClose;
   final bool canFetchStats;
@@ -37,6 +41,7 @@ class DevToolsLogPanel extends StatelessWidget {
   /// 現在のログ種別とログ本文を表示するログパネルを描画する。
   @override
   Widget build(BuildContext context) {
+    final logText = _buildLogText();
     final content = Padding(
       padding: const EdgeInsets.all(12),
       child: Column(
@@ -89,6 +94,28 @@ class DevToolsLogPanel extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
+          TextField(
+            controller: logSearchController,
+            decoration: InputDecoration(
+              labelText: 'Search Logs',
+              hintText: 'Filter log lines',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: logSearchController.text.isEmpty
+                  ? null
+                  : IconButton(
+                      onPressed: () {
+                        logSearchController.clear();
+                        onLogSearchQueryChanged('');
+                      },
+                      icon: const Icon(Icons.clear),
+                      tooltip: 'Clear Search',
+                    ),
+              border: const OutlineInputBorder(),
+              isDense: true,
+            ),
+            onChanged: onLogSearchQueryChanged,
+          ),
+          const SizedBox(height: 8),
           Row(
             children: [
               Expanded(
@@ -112,16 +139,7 @@ class DevToolsLogPanel extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Expanded(
-            child: SingleChildScrollView(
-              child: SelectableText(
-                selectedLogs.isEmpty ? 'No logs yet' : selectedLogs.join('\n'),
-                style: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 12,
-                  height: 1.4,
-                ),
-              ),
-            ),
+            child: SingleChildScrollView(child: SelectableText.rich(logText)),
           ),
         ],
       ),
@@ -143,6 +161,80 @@ class DevToolsLogPanel extends StatelessWidget {
       ),
       child: content,
     );
+  }
+
+  /// 検索語句に一致する部分をハイライトしたログ本文を構築する。
+  TextSpan _buildLogText() {
+    const baseStyle = TextStyle(
+      fontFamily: 'monospace',
+      fontSize: 12,
+      height: 1.4,
+    );
+    final query = logSearchController.text;
+    if (selectedLogs.isEmpty) {
+      return TextSpan(
+        text: query.isEmpty ? 'No logs yet' : 'No matching logs',
+        style: baseStyle,
+      );
+    }
+    if (query.isEmpty) {
+      return TextSpan(text: selectedLogs.join('\n'), style: baseStyle);
+    }
+
+    final normalizedQuery = query.toLowerCase();
+    final highlightStyle = baseStyle.copyWith(
+      color: Colors.black,
+      backgroundColor: Colors.amberAccent,
+      fontWeight: FontWeight.bold,
+    );
+    final children = <InlineSpan>[];
+    for (var index = 0; index < selectedLogs.length; index++) {
+      if (index > 0) {
+        children.add(const TextSpan(text: '\n'));
+      }
+      children.addAll(
+        _highlightLine(
+          selectedLogs[index],
+          normalizedQuery: normalizedQuery,
+          baseStyle: baseStyle,
+          highlightStyle: highlightStyle,
+        ),
+      );
+    }
+    return TextSpan(style: baseStyle, children: children);
+  }
+
+  /// 1 行のログを検索語句との一致部分で分割する。
+  static List<InlineSpan> _highlightLine(
+    String line, {
+    required String normalizedQuery,
+    required TextStyle baseStyle,
+    required TextStyle highlightStyle,
+  }) {
+    final normalizedLine = line.toLowerCase();
+    final spans = <InlineSpan>[];
+    var cursor = 0;
+    while (cursor < line.length) {
+      final matchStart = normalizedLine.indexOf(normalizedQuery, cursor);
+      if (matchStart == -1) {
+        spans.add(TextSpan(text: line.substring(cursor), style: baseStyle));
+        break;
+      }
+      if (matchStart > cursor) {
+        spans.add(
+          TextSpan(text: line.substring(cursor, matchStart), style: baseStyle),
+        );
+      }
+      final matchEnd = matchStart + normalizedQuery.length;
+      spans.add(
+        TextSpan(
+          text: line.substring(matchStart, matchEnd),
+          style: highlightStyle,
+        ),
+      );
+      cursor = matchEnd;
+    }
+    return spans;
   }
 
   /// 表示中ログをクリップボードへコピーする。

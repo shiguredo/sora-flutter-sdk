@@ -50,6 +50,12 @@ Notify metadata E2E（`notify_metadata_e2e_test.dart`）の前提:
 - sender 側は external video track を使うため、カメラ権限には依存しない
 - audio track を含むテスト（`remote_media_stream_e2e_test.dart`、`local_media_toggle_e2e_test.dart`）は `MediaDevices.createAudioTrack()` を使用するため、macOS のマイク権限と入力デバイスが必要
 
+Video Codec E2E（`video_codec_e2e_test.dart`）の前提:
+
+- macOS 専用。macOS の VideoToolbox を使う Video Encoder / Decoder Factory を含む送受信経路を検証する
+- VP8 / VP9 / AV1 / H.264 / H.265 をそれぞれ sender / receiver の両方に指定し、送受信統計の増加と Codec 名の一致を確認する
+- 検証環境の Sora サーバーと macOS 向け libwebrtc は、全 5 Codec のネゴシエーションと送受信に対応している必要がある。非対応 Codec はスキップせず失敗とする
+
 bundleId 分離 E2E（`bundle_id_isolation_e2e_test.dart`）の前提:
 
 - 3 接続（observer / sender-same / sender-other）が同じ `channelId` を共有する
@@ -88,6 +94,7 @@ flutter test integration_test/sendonly_dummy_video_e2e_test.dart -d macos
 flutter test integration_test/sendrecv_smoke_e2e_test.dart -d macos
 flutter test integration_test/track_event_e2e_test.dart -d macos
 flutter test integration_test/two_party_media_e2e_test.dart -d macos
+flutter test integration_test/video_codec_e2e_test.dart -d macos
 flutter test integration_test/notify_metadata_e2e_test.dart -d macos
 flutter test integration_test/remote_media_stream_e2e_test.dart -d macos
 flutter test integration_test/local_media_toggle_e2e_test.dart -d macos

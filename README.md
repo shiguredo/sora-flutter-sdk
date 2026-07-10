@@ -390,7 +390,8 @@ sora-flutter-sdk/
 
 `integration_test` で recvonly / sendonly / sendrecv 接続と、2 クライアント間の
 基本メディア疎通を検証する最小アプリです。2 クライアント E2E では sender / receiver が同じ
-`channelId` を共有し、`bundleId` は設定しません。詳細は [e2e_test_app/README.md](e2e_test_app/README.md) を参照してください。
+`channelId` を共有し、`bundleId` は設定しません。macOS 専用の Video Codec E2E では、VP8 / VP9 /
+AV1 / H.264 / H.265 を指定した送受信を個別に検証します。詳細は [e2e_test_app/README.md](e2e_test_app/README.md) を参照してください。
 
 ```bash
 cd e2e_test_app
@@ -399,6 +400,7 @@ flutter test integration_test/recvonly_e2e_test.dart -d macos
 flutter test integration_test/sendonly_dummy_video_e2e_test.dart -d macos
 flutter test integration_test/sendrecv_smoke_e2e_test.dart -d macos
 flutter test integration_test/two_party_media_e2e_test.dart -d macos
+flutter test integration_test/video_codec_e2e_test.dart -d macos
 ```
 
 ### devtools

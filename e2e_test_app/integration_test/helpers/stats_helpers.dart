@@ -65,6 +65,64 @@ List<Map<Object?, Object?>> statsReports(String raw) {
   return reports;
 }
 
+/// [getStats] の JSON 全体から report ID と report の対応を集める。
+///
+/// WebRTC の RTP report は `mimeType` を直接持たず、`codecId` で codec
+/// report を参照する場合がある。JSON の map key と report 内の `id` のどちらの
+/// 形式でも参照できるようにする。
+Map<String, Map<Object?, Object?>> statsReportsById(String raw) {
+  final decoded = jsonDecode(raw) as Object?;
+  final reports = <String, Map<Object?, Object?>>{};
+
+  void collect(Object? node) {
+    if (node is Map) {
+      if (node['type'] != null) {
+        final reportId = node['id'];
+        if (reportId is String && reportId.isNotEmpty) {
+          reports[reportId] = node;
+        }
+      }
+      for (final MapEntry<Object?, Object?> entry in node.entries) {
+        final value = entry.value;
+        if (value is Map && value['type'] != null && entry.key is String) {
+          reports[entry.key as String] = value;
+        }
+        collect(value);
+      }
+    } else if (node is List) {
+      for (final Object? item in node) {
+        collect(item);
+      }
+    }
+  }
+
+  collect(decoded);
+  return reports;
+}
+
+/// RTP report 自身または `codecId` が参照する codec report から MIME type を返す。
+String? videoMimeTypeForRtpReport(
+  Map<Object?, Object?> report,
+  Map<String, Map<Object?, Object?>> reportsById,
+) {
+  final directMimeType = report['mimeType'];
+  if (directMimeType is String && directMimeType.isNotEmpty) {
+    return directMimeType;
+  }
+
+  final codecId = report['codecId'];
+  if (codecId is! String || codecId.isEmpty) {
+    return null;
+  }
+
+  final codecReport = reportsById[codecId];
+  final codecMimeType = codecReport?['mimeType'];
+  if (codecMimeType is String && codecMimeType.isNotEmpty) {
+    return codecMimeType;
+  }
+  return null;
+}
+
 /// stats report の数値を [int] として取り出す。
 ///
 /// native stats の型は platform によって int / double / String に揺れる。
@@ -154,6 +212,7 @@ final class VideoInboundStats {
 /// 最初の report から codec と解像度情報も取得する。
 VideoOutboundStats? extractVideoOutboundStats(String raw) {
   final reports = statsReports(raw);
+  final reportsById = statsReportsById(raw);
   var bytesSent = 0;
   var packetsSent = 0;
   int? framesEncoded;
@@ -184,7 +243,7 @@ VideoOutboundStats? extractVideoOutboundStats(String raw) {
       framesSent = (framesSent ?? 0) + reportFramesSent;
     }
 
-    mimeType ??= report['mimeType'] as String?;
+    mimeType ??= videoMimeTypeForRtpReport(report, reportsById);
     width ??= intValue(report['frameWidth']);
     height ??= intValue(report['frameHeight']);
   }
@@ -208,6 +267,7 @@ VideoOutboundStats? extractVideoOutboundStats(String raw) {
 /// 複数の video inbound-rtp report がある場合は、受信量とフレーム数を合算する。
 VideoInboundStats? extractVideoInboundStats(String raw) {
   final reports = statsReports(raw);
+  final reportsById = statsReportsById(raw);
   var bytesReceived = 0;
   var packetsReceived = 0;
   int? framesDecoded;
@@ -238,7 +298,7 @@ VideoInboundStats? extractVideoInboundStats(String raw) {
       framesReceived = (framesReceived ?? 0) + reportFramesReceived;
     }
 
-    mimeType ??= report['mimeType'] as String?;
+    mimeType ??= videoMimeTypeForRtpReport(report, reportsById);
     width ??= intValue(report['frameWidth']);
     height ??= intValue(report['frameHeight']);
   }

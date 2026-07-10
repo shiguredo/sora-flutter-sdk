@@ -144,13 +144,12 @@ class WebrtcClient {
   // 音声デバイスを利用するかどうか。共有 factory の生成前に設定する。
   // false の場合は push audio device が選択される。
   static bool _useAudioDevice = true;
-  static bool? _initialUseAudioDevice;
 
   /// 共有 factory の音声デバイス使用設定を変更する。
   ///
   /// 共有 factory の生成後に異なる値へ変更することはできない。
   static set useAudioDevice(bool value) {
-    if (_initialUseAudioDevice case final initial? when initial != value) {
+    if (_sharedFactoryRef != null && _useAudioDevice != value) {
       throw StateError(
         'Shared PeerConnectionFactory audio device setting cannot be changed.',
       );
@@ -279,18 +278,12 @@ class WebrtcClient {
   /// network / worker / signaling thread、ADM、encoder/decoder factory、
   /// audio processing をまとめて依存オブジェクトへ積み、最後に modular
   /// factory を構築する。
-  static void _ensureSharedFactory({bool? useAudioDevice}) {
+  static void _ensureSharedFactory() {
     if (_sharedFactoryRef != null) {
-      if (useAudioDevice != null && _initialUseAudioDevice != useAudioDevice) {
-        throw StateError(
-          'Shared PeerConnectionFactory audio device setting cannot be changed.',
-        );
-      }
       return;
     }
 
-    final requestedUseAudioDevice = useAudioDevice ?? _useAudioDevice;
-    _initialUseAudioDevice = requestedUseAudioDevice;
+    final requestedUseAudioDevice = _useAudioDevice;
 
     _sharedNetworkThread = sharedLib.threadCreateWithSocketServer();
     _sharedWorkerThread = sharedLib.threadCreate();

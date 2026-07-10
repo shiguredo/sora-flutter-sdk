@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-23
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-07-10
 - Model: DeepSeek V4 Pro
 - Branch: feature/add-dummy-audio-support
 - Polished: 2026-06-23
@@ -144,3 +144,37 @@ webrtc_AdaptedAudioTrackSource_refcounted_get / Release
 - 既存の E2E テスト全件が回帰していない
 - `dart analyze --fatal-infos lib test` がパスする
 - `CHANGES.md` の `## develop` にエントリが追加されている
+
+## 解決方法
+
+本 issue で提案した `AdaptedAudioTrackSource` アプローチは採用せず、別アプローチで解決した。
+
+### 採用された代替アプローチ: PushAudioDevice + PushAudio.pushPcm()
+
+映像の `AdaptedVideoTrackSource` パターンを音声に移植する代わりに、カスタム `AudioDeviceModule` (PushAudioDevice) を libwebrtc-c 側に実装し、Dart から `PushAudio.pushPcm()` で PCM データを注入する方式を採用した。
+
+| レイヤー | 実装 |
+|----------|------|
+| C API | `webrtc_AudioTransport_RecordedDataIsAvailable()` (PushAudioDevice 経由) |
+| FFI Binding | `sora_push_audio_on_data()` |
+| Dart API | `PushAudio.pushPcm(Int16List, int sampleRate, int channels)` (`lib/src/push_audio.dart`) |
+| Config | `MediaDevices.createAudioTrack(useAudioDevice: false)` で PushAudioDevice を選択 |
+| E2E ヘルパー | `E2ePushAudioTrack` (`e2e_test_app/integration_test/helpers/push_audio_track.dart`) — 10ms ごとに無音 PCM を注入 |
+| DevTools | `DevToolsBeepAudioTrack` (`devtools/lib/src/devtools_beep_audio_track.dart`) — 440Hz サイン波 beep 音を生成 |
+
+### 本 issue の完了条件との対応
+
+- `AdaptedAudioTrackSource` → 未実装 (不要になった)
+- `MediaDevices.createExternalAudioTrack()` → 未実装 (`useAudioDevice: false` で代替)
+- `LocalAudioTrack.writeAudioSamples()` → 未実装 (`PushAudio.pushPcm()` で代替)
+- `SineWaveAudioSource` → 未実装 (E2E は無音、DevTools は `DevToolsBeepAudioTrack`)
+- `AudioOutboundStats` / `AudioInboundStats` → 未実装
+- E2E テストでのダミー音声送信 → **解決済み** (`PushAudio.pushPcm()` + `E2ePushAudioTrack`)
+
+### 関連コミット (主要)
+
+- `ad1623e` — `useAudioDevice` 設定を追加、Dummy ADM を選択可能に
+- `12bb12d` — PushAudioSource + BeepAudioTrack を追加
+- `b961c27` — Windows & Android の PushAudioSource ネイティブ実装
+- `3a25d08` — PushAudioSource を PushAudioDevice (カスタム ADM) に置き換え
+- `57be541` — Dummy ADM + PushAudioDevice + DevTools Beep 音機能

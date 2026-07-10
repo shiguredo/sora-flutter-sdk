@@ -2,6 +2,7 @@
 
 - Priority: High
 - Created: 2026-07-08
+- Completed: 2026-07-10
 - Model: GPT-5 Codex
 - Polished: 2026-07-08
 - Branch: feature/fix-shared-factory-audio-device-init-order
@@ -198,4 +199,11 @@ E2E 側では `ObservedConnection.create()` / `Sora.createConnection()` を先�
 - [FIX] sharedFactory の音声デバイス初期化が静的副作用に依存する問題を修正する
   - `MediaDevices` 各 API で `useAudioDevice` を明示できるようにし、`Sora.createConnection()` より先に呼んでも正しく動作するよう修正する
   - @{実装者のユーザー名}
+
+## 解決方法
+
+- 共有 factory の音声デバイス設定を、`WebrtcClient.create()` の副作用ではなく明示的な設定値で初期化するよう変更した
+- `MediaDevices.setUseAudioDevice()`、`createAudioTrack(useAudioDevice: ...)`、`GetUserMediaOptions.useAudioDevice` を追加した
+- 接続生成より前にメディア API を呼ぶ E2E テストを追加し、macOS で関連 E2E 13 件中 11 件が成功した
+- 誤った設定変更を暗黙に無視せず、共有 factory 生成後の値の衝突を `StateError` で通知するよう変更した
 ```

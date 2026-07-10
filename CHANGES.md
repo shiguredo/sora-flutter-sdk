@@ -4,6 +4,10 @@
 
 ### sora_sdk
 
+- [FIX] shared factory の音声デバイス初期化を明示設定に変更する
+  - メディア生成前に `useAudioDevice` を指定できるようにし、呼び出し順への依存を解消する
+  - @zztkm
+
 - [ADD] Linux リモート映像レンダリングを実装する
   - RenderingSink による I420 フレーム受信・RGBA 変換・Flutter Texture 配信を実装する
   - @zztkm

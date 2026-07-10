@@ -67,6 +67,11 @@ const int _defaultVideoFrameRate = 30;
 
 /// local メディア入力を生成・列挙する static API です。
 abstract final class MediaDevices {
+  /// 共有 factory の音声デバイス使用設定を、メディア生成前に指定する。
+  static void setUseAudioDevice(bool value) {
+    WebrtcClient.useAudioDevice = value;
+  }
+
   /// 空の local MediaStream を生成する。
   static LocalMediaStream createMediaStream() {
     final lib = WebrtcClient.sharedLib;

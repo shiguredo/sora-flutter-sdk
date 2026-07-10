@@ -262,6 +262,7 @@ class SoraConnection {
 
     // WebRTC クライアントを dart:ffi で作成する
     late final SoraConnection soraConnection;
+    WebrtcClient.useAudioDevice = config.useAudioDevice;
     final webrtcClient = WebrtcClient.create(
       config: config.toMap(),
       onEvent: (String type, Map<String, Object?> data) {

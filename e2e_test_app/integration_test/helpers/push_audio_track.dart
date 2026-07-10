@@ -1,6 +1,6 @@
 // PushAudioDevice を使う E2E 向けのダミー音声トラック補助。
 //
-// `useAudioDevice: false` で接続した場合でも local audio track を送信できるよう、
+// 実音声デバイスを使わない接続でも local audio track を送信できるよう、
 // PushAudio へ 10 ms ごとに PCM を流し続ける。
 
 import 'dart:async';

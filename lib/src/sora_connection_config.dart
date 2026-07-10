@@ -59,9 +59,9 @@ class SoraConnectionConfig {
   /// `false` にすると一切の音声デバイスを掴まず、`kDummyAudio` ADM を利用する。
   /// 実マイクを使わずにカスタム音声ソース (BeepAudioSource 等) を使いたい場合に指定する。
   ///
-  /// この設定は `WebrtcClient` の共有 `PeerConnectionFactory` 生成時に一度だけ
-  /// 適用される。最初の `createConnection()` 呼び出し時の設定が後続の全接続に影響
-  /// する点に注意すること。
+  /// メディア API を接続前に呼び出す場合は、先に
+  /// `MediaDevices.setUseAudioDevice()` または各 API の引数で指定すること。
+  /// 共有 `PeerConnectionFactory` 生成後に設定を変更することはできない。
   ///
   /// Android では `createAndroidAudioDeviceModule` を使用するため、
   /// この設定は無視され、常に実デバイスが使用される。

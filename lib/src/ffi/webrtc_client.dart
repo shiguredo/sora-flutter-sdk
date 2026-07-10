@@ -141,9 +141,22 @@ class WebrtcClient {
   // Dart 側で SetRecordingDevice を呼ぶために PCF に渡した後も release せず持ち続ける。
   static Pointer<WebrtcAudioDeviceModuleRefcounted>? _sharedAdmRef;
   static SimulcastVideoEncoderFactory? _sharedSimulcastVideoEncoderFactory;
-  // 音声デバイスを利用するかどうか。最初の create() 呼び出し時に設定される。
-  // false の場合は kDummyAudio が選択される。
+  // 音声デバイスを利用するかどうか。共有 factory の生成前に設定する。
+  // false の場合は push audio device が選択される。
   static bool _useAudioDevice = true;
+  static bool? _initialUseAudioDevice;
+
+  /// 共有 factory の音声デバイス使用設定を変更する。
+  ///
+  /// 共有 factory の生成後に異なる値へ変更することはできない。
+  static set useAudioDevice(bool value) {
+    if (_initialUseAudioDevice case final initial? when initial != value) {
+      throw StateError(
+        'Shared PeerConnectionFactory audio device setting cannot be changed.',
+      );
+    }
+    _useAudioDevice = value;
+  }
 
   // `LibWebrtcC` の共有インスタンスを返す。
   //
@@ -266,10 +279,18 @@ class WebrtcClient {
   /// network / worker / signaling thread、ADM、encoder/decoder factory、
   /// audio processing をまとめて依存オブジェクトへ積み、最後に modular
   /// factory を構築する。
-  static void _ensureSharedFactory() {
+  static void _ensureSharedFactory({bool? useAudioDevice}) {
     if (_sharedFactoryRef != null) {
+      if (useAudioDevice != null && _initialUseAudioDevice != useAudioDevice) {
+        throw StateError(
+          'Shared PeerConnectionFactory audio device setting cannot be changed.',
+        );
+      }
       return;
     }
+
+    final requestedUseAudioDevice = useAudioDevice ?? _useAudioDevice;
+    _initialUseAudioDevice = requestedUseAudioDevice;
 
     _sharedNetworkThread = sharedLib.threadCreateWithSocketServer();
     _sharedWorkerThread = sharedLib.threadCreate();
@@ -303,7 +324,7 @@ class WebrtcClient {
         );
       }
     } else if (Platform.isMacOS) {
-      if (_useAudioDevice) {
+      if (requestedUseAudioDevice) {
         final env = sharedLib.createEnvironment();
         final adm = sharedLib.createAudioDeviceModule(
           env,
@@ -345,7 +366,7 @@ class WebrtcClient {
         }
       }
     } else if (Platform.isWindows) {
-      if (_useAudioDevice) {
+      if (requestedUseAudioDevice) {
         // Windows: setjmp/longjmp で abort を捕捉して安全に ADM を作成する
         final env = sharedLib.createEnvironment();
         final adm = sharedLib.soraCreateAudioDeviceModule(
@@ -387,7 +408,7 @@ class WebrtcClient {
         }
       }
     } else if (Platform.isLinux) {
-      if (_useAudioDevice) {
+      if (requestedUseAudioDevice) {
         final env = sharedLib.createEnvironment();
         final adm = sharedLib.createAudioDeviceModule(
           env,
@@ -475,10 +496,6 @@ class WebrtcClient {
     required Map<String, Object?> config,
     required WebrtcClientEventCallback onEvent,
   }) {
-    // 最初の create() 呼び出し時に useAudioDevice を共有設定として記録する。
-    // _ensureSharedFactory() は一度だけ実行されるため、後続の create() で
-    // 異なる値を渡しても反映されない。
-    _useAudioDevice = (config['useAudioDevice'] as bool?) ?? true;
     return WebrtcClient._(
       lib: sharedLib,
       consts: sharedConsts,

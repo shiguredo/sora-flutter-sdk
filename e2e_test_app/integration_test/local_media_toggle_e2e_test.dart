@@ -55,15 +55,8 @@ void main() {
       Object? bodyError;
 
       try {
-        receiver = await ObservedConnection.create(
-          name: 'receiver',
-          config: receiverConfig,
-        );
-        sender = await ObservedConnection.create(
-          name: 'sender',
-          config: senderConfig,
-        );
-
+        // 接続生成より前にメディアを生成しても、音声デバイス設定が反映されることを確認する。
+        MediaDevices.setUseAudioDevice(false);
         stream = MediaDevices.createMediaStream();
         videoTrack = MediaDevices.createExternalVideoTrack();
         stream.addTrack(videoTrack);
@@ -71,6 +64,15 @@ void main() {
           width: 320,
           height: 180,
           frameRate: 30,
+        );
+
+        receiver = await ObservedConnection.create(
+          name: 'receiver',
+          config: receiverConfig,
+        );
+        sender = await ObservedConnection.create(
+          name: 'sender',
+          config: senderConfig,
         );
 
         logE2eMessage(

@@ -39,6 +39,10 @@
 - notification が `null` を返して即完了する smoke test がある
 - server が error response を返せる場合は `SoraRpcError` の test が追加されている
 
+## pending 理由
+
+本 issue の E2E テストは実サーバーの RPC 契約と認証情報が必要で、CI では実行せずローカル検証に限定する方針となった。自動実行できる検証基盤が整うまで pending とする。
+
 ## 解決方法
 
 1. 検証環境の RPC 用メソッド名、params、期待レスポンスを環境変数として定義する

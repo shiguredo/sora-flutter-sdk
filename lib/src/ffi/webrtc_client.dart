@@ -2212,7 +2212,7 @@ class WebrtcClient {
 
   // プラットフォーム既定のビデオエンコーダーファクトリを返す
   //
-  // iOS / Android ではプラットフォーム既定ファクトリを優先し、
+  // iOS / macOS / Android ではプラットフォーム既定ファクトリを優先し、
   // 取得できない場合のみ built-in にフォールバックする。
   static Pointer<WebrtcVideoEncoderFactoryUnique>
   _createDefaultVideoEncoderFactory() {
@@ -2221,8 +2221,8 @@ class WebrtcClient {
       return _createAndroidDefaultVideoEncoderFactory();
     }
 
-    // iOS は ObjC の既定 factory を native factory へ変換する。
-    if (Platform.isIOS) {
+    // iOS / macOS は ObjC の既定 factory (VideoToolbox) を native factory へ変換する。
+    if (Platform.isIOS || Platform.isMacOS) {
       final objcFactory = sharedLib.objcDefaultVideoEncoderFactoryNew();
       if (objcFactory == nullptr) {
         return sharedLib.createBuiltinVideoEncoderFactory();
@@ -2244,7 +2244,7 @@ class WebrtcClient {
 
   // プラットフォーム既定のビデオデコーダーファクトリを返す
   //
-  // iOS / Android ではプラットフォーム既定ファクトリを優先し、
+  // iOS / macOS / Android ではプラットフォーム既定ファクトリを優先し、
   // 取得できない場合のみ built-in にフォールバックする。
   static Pointer<WebrtcVideoDecoderFactoryUnique>
   _createDefaultVideoDecoderFactory() {
@@ -2253,8 +2253,8 @@ class WebrtcClient {
       return _createAndroidDefaultVideoDecoderFactory();
     }
 
-    // iOS は ObjC の既定 factory を native factory へ変換する。
-    if (Platform.isIOS) {
+    // iOS / macOS は ObjC の既定 factory (VideoToolbox) を native factory へ変換する。
+    if (Platform.isIOS || Platform.isMacOS) {
       final objcFactory = sharedLib.objcDefaultVideoDecoderFactoryNew();
       if (objcFactory == nullptr) {
         return sharedLib.createBuiltinVideoDecoderFactory();

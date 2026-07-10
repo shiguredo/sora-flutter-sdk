@@ -101,8 +101,10 @@ class _DevToolsPageState extends State<DevToolsPage>
   // external camera のライフサイクル管理。
   late final DevToolsExternalCameraManager _cameraManager;
 
-  // DataChannel messaging 用の設定
-  bool _dataChannelEnabled = false;
+  // DataChannel signaling を有効にするかどうか。
+  bool _dataChannelSignalingEnabled = false;
+  // WebSocket 切断通知を無視するかどうか。
+  bool _ignoreDisconnectWebSocketEnabled = false;
   // DataChannel label 入力欄の TextEditingController。
   late final TextEditingController _dataChannelLabelController;
   // DataChannel の送受信方向 (sendrecv / sendonly / recvonly)。
@@ -318,15 +320,11 @@ class _DevToolsPageState extends State<DevToolsPage>
   // DataChannel メッセージ送信が可能かどうかを返す。
   bool get _canSendMessage =>
       _isConnected &&
-      _dataChannelEnabled &&
       _dataChannelLabelController.text.trim().isNotEmpty &&
       _connection != null;
 
   // DataChannel 設定が有効な場合、接続用の Map リストを生成する。
   List<Map<String, Object?>> _buildDataChannelConfigs() {
-    if (!_dataChannelEnabled) {
-      return const <Map<String, Object?>>[];
-    }
     final label = _dataChannelLabelController.text.trim();
     if (label.isEmpty) {
       return const <Map<String, Object?>>[];
@@ -720,8 +718,9 @@ class _DevToolsPageState extends State<DevToolsPage>
                 Text(
                   'spotlight_unfocus_rid: ${_selectedSpotlightUnfocusRid ?? '未指定'}',
                 ),
+                Text('data_channels: Enabled'),
                 Text(
-                  'data_channels: ${_dataChannelEnabled ? 'Enabled' : 'Disabled'}',
+                  'data_channel_signaling: ${_dataChannelSignalingEnabled ? 'Enabled' : 'Disabled'}',
                 ),
               ],
             ),
@@ -876,6 +875,8 @@ class _DevToolsPageState extends State<DevToolsPage>
       existingLocalStream: _localStream,
       useExternalVideoTrack: _useExternalVideoTrack,
       dataChannels: _buildDataChannelConfigs(),
+      dataChannelSignaling: _dataChannelSignalingEnabled,
+      ignoreDisconnectWebSocket: _ignoreDisconnectWebSocketEnabled,
     );
   }
 
@@ -1441,26 +1442,57 @@ class _DevToolsPageState extends State<DevToolsPage>
 
   // DataChannel 設定セクションを返す。
   Widget _buildDataChannelSection() {
+    final disabled = _busy || _isConnected;
+    return ExpansionTile(
+      title: const Text('DataChannel'),
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              const Expanded(child: Text('dataChannelSignaling')),
+              Switch(
+                value: _dataChannelSignalingEnabled,
+                onChanged: disabled
+                    ? null
+                    : (value) {
+                        _mutateView(() {
+                          _dataChannelSignalingEnabled = value;
+                        });
+                      },
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              const Expanded(child: Text('ignoreDisconnectWebSocket')),
+              Switch(
+                value: _ignoreDisconnectWebSocketEnabled,
+                onChanged: disabled
+                    ? null
+                    : (value) {
+                        _mutateView(() {
+                          _ignoreDisconnectWebSocketEnabled = value;
+                        });
+                      },
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+
+  // dataChannels 設定セクションを返す。
+  Widget _buildDataChannelsSection() {
     const directionOptions = <String>['sendrecv', 'sendonly', 'recvonly'];
     final disabled = _busy || _isConnected;
     return ExpansionTile(
-      title: Row(
-        children: [
-          const Text('DataChannel'),
-          const Spacer(),
-          Switch(
-            value: _dataChannelEnabled,
-            onChanged: disabled
-                ? null
-                : (value) {
-                    _mutateView(() {
-                      _dataChannelEnabled = value;
-                    });
-                  },
-          ),
-        ],
-      ),
-      initiallyExpanded: _dataChannelEnabled,
+      title: const Text('dataChannels'),
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1472,7 +1504,7 @@ class _DevToolsPageState extends State<DevToolsPage>
               border: OutlineInputBorder(),
               isDense: true,
             ),
-            enabled: !disabled && _dataChannelEnabled,
+            enabled: !disabled,
           ),
         ),
         const SizedBox(height: 8),
@@ -1491,7 +1523,7 @@ class _DevToolsPageState extends State<DevToolsPage>
                       (dir) => DropdownMenuItem(value: dir, child: Text(dir)),
                     )
                     .toList(growable: false),
-                onChanged: (!disabled && _dataChannelEnabled)
+                onChanged: !disabled
                     ? (value) {
                         _mutateView(() {
                           _dataChannelDirection = value!;
@@ -1511,7 +1543,7 @@ class _DevToolsPageState extends State<DevToolsPage>
               const Spacer(),
               Switch(
                 value: _dataChannelOrdered,
-                onChanged: (!disabled && _dataChannelEnabled)
+                onChanged: !disabled
                     ? (value) {
                         _mutateView(() {
                           _dataChannelOrdered = value;
@@ -1533,7 +1565,7 @@ class _DevToolsPageState extends State<DevToolsPage>
                 isDense: true,
               ),
               keyboardType: TextInputType.number,
-              enabled: !disabled && _dataChannelEnabled,
+              enabled: !disabled,
               onChanged: (value) {
                 final parsed = int.tryParse(value);
                 if (parsed != null) {
@@ -1551,7 +1583,7 @@ class _DevToolsPageState extends State<DevToolsPage>
               const Spacer(),
               Switch(
                 value: _dataChannelCompress,
-                onChanged: (!disabled && _dataChannelEnabled)
+                onChanged: !disabled
                     ? (value) {
                         _mutateView(() {
                           _dataChannelCompress = value;
@@ -1579,6 +1611,8 @@ class _DevToolsPageState extends State<DevToolsPage>
           _buildMediaDeviceSection(),
           const SizedBox(height: 8),
           _buildDataChannelSection(),
+          const SizedBox(height: 8),
+          _buildDataChannelsSection(),
           const SizedBox(height: 8),
           ExpansionTile(
             title: const Text('Developer Option'),
@@ -1992,9 +2026,7 @@ class _DevToolsPageState extends State<DevToolsPage>
 
   // メッセージタブへ DataChannel メッセージングの送受信 UI を表示する。
   Widget _buildMessageTab() {
-    final label = _dataChannelEnabled && _isConnected
-        ? _dataChannelLabelController.text.trim()
-        : null;
+    final label = _isConnected ? _dataChannelLabelController.text.trim() : null;
     return DevToolsMessagePanel(
       label: label,
       messages: _messages,

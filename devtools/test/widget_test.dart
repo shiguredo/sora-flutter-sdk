@@ -86,6 +86,61 @@ void main() {
     expect(tester.widget<Switch>(videoSwitch).value, isFalse);
   });
 
+  testWidgets('DataChannel の詳細設定を個別に切り替えられる', (WidgetTester tester) async {
+    await tester.pumpWidget(const DevToolsApp());
+
+    expect(find.text('dataChannelSignaling'), findsNothing);
+    expect(find.text('ignoreDisconnectWebSocket'), findsNothing);
+
+    await tester.ensureVisible(find.text('DataChannel'));
+    await tester.tap(find.text('DataChannel'));
+    await tester.pumpAndSettle();
+    expect(find.text('dataChannelSignaling'), findsOneWidget);
+    expect(find.text('ignoreDisconnectWebSocket'), findsOneWidget);
+
+    final dataChannelSignalingSwitch = find.descendant(
+      of: find
+          .ancestor(
+            of: find.text('dataChannelSignaling'),
+            matching: find.byType(Row),
+          )
+          .first,
+      matching: find.byType(Switch),
+    );
+    final ignoreDisconnectWebSocketSwitch = find.descendant(
+      of: find
+          .ancestor(
+            of: find.text('ignoreDisconnectWebSocket'),
+            matching: find.byType(Row),
+          )
+          .first,
+      matching: find.byType(Switch),
+    );
+    expect(tester.widget<Switch>(dataChannelSignalingSwitch).value, isFalse);
+    expect(
+      tester.widget<Switch>(ignoreDisconnectWebSocketSwitch).value,
+      isFalse,
+    );
+
+    await tester.ensureVisible(dataChannelSignalingSwitch);
+    await tester.tap(dataChannelSignalingSwitch);
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(dataChannelSignalingSwitch).value, isTrue);
+    expect(
+      tester.widget<Switch>(ignoreDisconnectWebSocketSwitch).value,
+      isFalse,
+    );
+
+    await tester.ensureVisible(ignoreDisconnectWebSocketSwitch);
+    await tester.tap(ignoreDisconnectWebSocketSwitch);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<Switch>(ignoreDisconnectWebSocketSwitch).value,
+      isTrue,
+    );
+    expect(tester.widget<Switch>(dataChannelSignalingSwitch).value, isTrue);
+  });
+
   testWidgets('接続中の Audio Track / Video Track toggle は操作できる', (
     WidgetTester tester,
   ) async {

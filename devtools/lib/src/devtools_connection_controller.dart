@@ -39,6 +39,8 @@ class DevToolsConnectRequest {
     required this.selectedResolution,
     required this.selectedFrameRate,
     required this.existingLocalStream,
+    required this.dataChannelSignaling,
+    required this.ignoreDisconnectWebSocket,
     this.useExternalVideoTrack = false,
     this.dataChannels = const <Map<String, Object?>>[],
   });
@@ -64,8 +66,46 @@ class DevToolsConnectRequest {
   final DevToolsVideoInputResolutionOption? selectedResolution;
   final int? selectedFrameRate;
   final LocalMediaStream? existingLocalStream;
+  // DataChannel signaling を利用するかどうか。
+  final bool dataChannelSignaling;
+  // WebSocket 切断通知を無視するかどうか。
+  final bool ignoreDisconnectWebSocket;
   final bool useExternalVideoTrack;
   final List<Map<String, Object?>> dataChannels;
+}
+
+// DevTools の接続要求を SDK の接続設定へ変換する。
+// DataChannel、dataChannels、DataChannel signaling 設定を別々に保持する。
+SoraConnectionConfig buildSoraConnectionConfig(DevToolsConnectRequest request) {
+  return SoraConnectionConfig(
+    signalingUrls: request.signalingUrls,
+    channelId: request.channelId,
+    role: request.role,
+    audio: request.configuredAudio,
+    video: request.configuredVideo,
+    useAudioDevice: !request.beepAudioEnabled,
+    videoCodecType: VideoCodecType.fromValue(request.selectedVideoCodecType),
+    videoBitRate: request.selectedVideoBitRate,
+    simulcast: request.simulcastEnabled ? true : null,
+    simulcastRequestRid: request.usesSimulcastRequestRid
+        ? SimulcastRequestRid.fromValue(request.selectedSimulcastRid)
+        : null,
+    spotlight: request.spotlightEnabled ? true : null,
+    spotlightFocusRid: request.usesSpotlightRid
+        ? SpotlightRid.fromValue(request.selectedSpotlightFocusRid)
+        : null,
+    spotlightUnfocusRid: request.usesSpotlightRid
+        ? SpotlightRid.fromValue(request.selectedSpotlightUnfocusRid)
+        : null,
+    timeoutOptions: const SoraTimeoutOptions(
+      connectionTimeout: Duration(seconds: 30),
+      disconnectWaitTimeout: Duration(seconds: 10),
+      signalingCandidateTimeout: Duration(seconds: 5),
+    ),
+    dataChannels: request.dataChannels,
+    dataChannelSignaling: request.dataChannelSignaling,
+    ignoreDisconnectWebSocket: request.ignoreDisconnectWebSocket,
+  );
 }
 
 class DevToolsConnectResult {
@@ -244,36 +284,7 @@ class DevToolsConnectionController {
     required void Function(int textureId) onLocalTextureReady,
   }) async {
     final connection = await Sora.createConnection(
-      SoraConnectionConfig(
-        signalingUrls: request.signalingUrls,
-        channelId: request.channelId,
-        role: request.role,
-        audio: request.configuredAudio,
-        video: request.configuredVideo,
-        useAudioDevice: !request.beepAudioEnabled,
-        videoCodecType: VideoCodecType.fromValue(
-          request.selectedVideoCodecType,
-        ),
-        videoBitRate: request.selectedVideoBitRate,
-        simulcast: request.simulcastEnabled ? true : null,
-        simulcastRequestRid: request.usesSimulcastRequestRid
-            ? SimulcastRequestRid.fromValue(request.selectedSimulcastRid)
-            : null,
-        spotlight: request.spotlightEnabled ? true : null,
-        spotlightFocusRid: request.usesSpotlightRid
-            ? SpotlightRid.fromValue(request.selectedSpotlightFocusRid)
-            : null,
-        spotlightUnfocusRid: request.usesSpotlightRid
-            ? SpotlightRid.fromValue(request.selectedSpotlightUnfocusRid)
-            : null,
-        timeoutOptions: const SoraTimeoutOptions(
-          connectionTimeout: Duration(seconds: 30),
-          disconnectWaitTimeout: Duration(seconds: 10),
-          signalingCandidateTimeout: Duration(seconds: 5),
-        ),
-        dataChannels: request.dataChannels,
-        dataChannelSignaling: request.dataChannels.isNotEmpty ? true : null,
-      ),
+      buildSoraConnectionConfig(request),
     );
 
     await _subscriptionController.bind(connection);

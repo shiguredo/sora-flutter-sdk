@@ -28,4 +28,15 @@ void main() {
 
     expect(notifier.filteredSelectedLogs, isEmpty);
   });
+
+  test('選択中のログだけを消去する', () {
+    final notifier = DevToolsPageNotifier()
+      ..addLog('app log')
+      ..addEventLog('event log');
+
+    notifier.clearSelectedLogs();
+
+    expect(notifier.logs, isEmpty);
+    expect(notifier.eventLogs, <String>['event log']);
+  });
 }

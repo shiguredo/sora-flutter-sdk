@@ -20,6 +20,10 @@ class DevToolsLogPanel extends StatelessWidget {
     required this.onLogTabChanged,
     required this.onLogSearchQueryChanged,
     required this.onCopyLogs,
+    required this.onClearLogs,
+    required this.scrollController,
+    required this.followLatest,
+    required this.onFollowLatestChanged,
     this.onClose,
     this.canFetchStats = false,
     this.onFetchStats,
@@ -33,6 +37,10 @@ class DevToolsLogPanel extends StatelessWidget {
   final ValueChanged<DevToolsLogTab> onLogTabChanged;
   final ValueChanged<String> onLogSearchQueryChanged;
   final VoidCallback onCopyLogs;
+  final VoidCallback onClearLogs;
+  final ScrollController scrollController;
+  final bool followLatest;
+  final ValueChanged<bool> onFollowLatestChanged;
   final VoidCallback? onClose;
   final bool canFetchStats;
   final VoidCallback? onFetchStats;
@@ -42,6 +50,13 @@ class DevToolsLogPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final logText = _buildLogText();
+    if (followLatest) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (scrollController.hasClients) {
+          scrollController.jumpTo(scrollController.position.maxScrollExtent);
+        }
+      });
+    }
     final content = Padding(
       padding: const EdgeInsets.all(12),
       child: Column(
@@ -116,21 +131,32 @@ class DevToolsLogPanel extends StatelessWidget {
             onChanged: onLogSearchQueryChanged,
           ),
           const SizedBox(height: 8),
-          Row(
+          Text(
+            selectedLogDescription,
+            style: Theme.of(context).textTheme.labelMedium,
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Expanded(
-                child: Text(
-                  selectedLogDescription,
-                  style: Theme.of(context).textTheme.labelMedium,
-                ),
+              FilterChip(
+                selected: followLatest,
+                onSelected: onFollowLatestChanged,
+                avatar: const Icon(Icons.vertical_align_bottom, size: 18),
+                label: const Text('Follow latest'),
               ),
-              const SizedBox(width: 8),
               if (selectedLogTab == DevToolsLogTab.stats &&
                   onFetchStats != null)
                 OutlinedButton(
                   onPressed: canFetchStats ? onFetchStats : null,
                   child: const Text('Get Stats'),
                 ),
+              OutlinedButton(
+                onPressed: selectedLogs.isEmpty ? null : onClearLogs,
+                child: const Text('Clear Logs'),
+              ),
               OutlinedButton(
                 onPressed: onCopyLogs,
                 child: const Text('Copy Logs'),
@@ -139,7 +165,25 @@ class DevToolsLogPanel extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Expanded(
-            child: SingleChildScrollView(child: SelectableText.rich(logText)),
+            child: NotificationListener<UserScrollNotification>(
+              onNotification: (notification) {
+                if (!scrollController.hasClients) {
+                  return false;
+                }
+                final distance =
+                    scrollController.position.maxScrollExtent -
+                    scrollController.position.pixels;
+                final isAtLatest = distance <= 48;
+                if (isAtLatest != followLatest) {
+                  onFollowLatestChanged(isAtLatest);
+                }
+                return false;
+              },
+              child: SingleChildScrollView(
+                controller: scrollController,
+                child: SelectableText.rich(logText),
+              ),
+            ),
           ),
         ],
       ),

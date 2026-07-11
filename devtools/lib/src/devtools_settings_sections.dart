@@ -699,6 +699,8 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
     required this.onVideoBitRateChanged,
     required this.onResolutionChanged,
     required this.onFrameRateChanged,
+    this.signalingUrlValidator,
+    this.channelIdValidator,
   });
 
   // シグナリング URL 入力欄の controller
@@ -706,6 +708,12 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
 
   // Channel ID 入力欄の controller
   final TextEditingController channelIdController;
+
+  // シグナリング URL の入力検証。
+  final FormFieldValidator<String>? signalingUrlValidator;
+
+  // Channel ID の入力検証。
+  final FormFieldValidator<String>? channelIdValidator;
 
   // 現在選択中の role
   final SoraRole selectedRole;
@@ -821,12 +829,14 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: TextField(
+                  child: TextFormField(
                     controller: signalingUrlController,
                     decoration: const InputDecoration(
                       labelText: 'Signaling URL',
                       border: OutlineInputBorder(),
                     ),
+                    validator: signalingUrlValidator,
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
                   ),
                 ),
               ],
@@ -835,13 +845,15 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: TextField(
+                  child: TextFormField(
                     controller: channelIdController,
                     decoration: const InputDecoration(
                       labelText: 'Channel ID',
                       border: OutlineInputBorder(),
                       isDense: true,
                     ),
+                    validator: channelIdValidator,
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
                   ),
                 ),
               ],
@@ -1072,19 +1084,6 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
                           }
                           onConnectAudioChanged(value);
                         },
-                      ),
-                      const SizedBox(height: 8),
-                      SwitchListTile(
-                        title: const Text('Send Beep Audio'),
-                        subtitle: const Text(
-                          'Send a 440Hz sine wave beep instead of microphone',
-                        ),
-                        value: beepAudioEnabled,
-                        onChanged: (value) {
-                          onBeepAudioEnabledChanged(value);
-                        },
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
                       ),
                       const SizedBox(height: 8),
                       DropdownButtonFormField<bool>(

@@ -11,11 +11,13 @@ import 'src/devtools_connection_subscription_controller.dart';
 import 'src/devtools_constants.dart';
 import 'src/devtools_external_camera_manager.dart';
 import 'src/devtools_event_handler.dart';
+import 'src/devtools_input_validation.dart';
 import 'src/devtools_local_preview_policy.dart';
 import 'src/devtools_log_panel.dart';
 import 'src/devtools_logging_support.dart';
 import 'src/devtools_media_devices_support.dart';
 import 'src/devtools_message_panel.dart';
+import 'src/devtools_message_send_policy.dart';
 import 'src/devtools_models.dart';
 import 'src/devtools_settings_sections.dart';
 import 'src/devtools_track_state.dart';
@@ -79,6 +81,9 @@ class _DevToolsPageState extends State<DevToolsPage>
   late final TextEditingController _rpcTimeoutController;
   // ログ検索欄の TextEditingController。
   late final TextEditingController _logSearchController;
+  late final ScrollController _logScrollController;
+  final GlobalKey<FormState> _connectionFormKey = GlobalKey<FormState>();
+  bool _followLatestLogs = true;
   // 画面状態の SSOT (ChangeNotifier)。
   late final DevToolsPageNotifier _pageNotifier;
   // 接続イベント購読の bind / unbind を管理する。
@@ -103,6 +108,8 @@ class _DevToolsPageState extends State<DevToolsPage>
 
   // DataChannel signaling を有効にするかどうか。
   bool _dataChannelSignalingEnabled = false;
+  // dataChannels 設定を接続設定へ含めるかどうか。
+  bool _dataChannelsEnabled = false;
   // WebSocket 切断通知を無視するかどうか。
   bool _ignoreDisconnectWebSocketEnabled = false;
   // DataChannel label 入力欄の TextEditingController。
@@ -317,16 +324,32 @@ class _DevToolsPageState extends State<DevToolsPage>
   // データチャネルメッセージング関連。
   List<DevToolsMessageEntry> get _messages => _pageNotifier.messages;
 
-  // DataChannel メッセージ送信が可能かどうかを返す。
-  bool get _canSendMessage =>
-      _isConnected &&
-      _dataChannelLabelController.text.trim().isNotEmpty &&
-      _connection != null;
+  // dataChannels の label まで設定済みかどうか。
+  bool get _hasDataChannelConfig =>
+      _dataChannelsEnabled &&
+      _dataChannelLabelController.text.trim().isNotEmpty;
+
+  // DataChannel signaling と dataChannels を含めたメッセージ送信可否。
+  bool get _canSendMessage => canSendDataChannelMessage(
+    isConnected: _isConnected,
+    hasConnection: _connection != null,
+    dataChannelSignalingEnabled: _dataChannelSignalingEnabled,
+    dataChannelsEnabled: _dataChannelsEnabled,
+    hasDataChannelConfig: _hasDataChannelConfig,
+  );
+
+  // メッセージを送信できない場合に表示する次の操作。
+  String? get _messageSendGuidance => buildDataChannelMessageSendGuidance(
+    isConnected: _isConnected,
+    dataChannelSignalingEnabled: _dataChannelSignalingEnabled,
+    dataChannelsEnabled: _dataChannelsEnabled,
+    hasDataChannelConfig: _hasDataChannelConfig,
+  );
 
   // DataChannel 設定が有効な場合、接続用の Map リストを生成する。
   List<Map<String, Object?>> _buildDataChannelConfigs() {
     final label = _dataChannelLabelController.text.trim();
-    if (label.isEmpty) {
+    if (!_dataChannelsEnabled || label.isEmpty) {
       return const <Map<String, Object?>>[];
     }
     return <Map<String, Object?>>[
@@ -413,6 +436,7 @@ class _DevToolsPageState extends State<DevToolsPage>
     // RPC リクエスト時のタイムアウト入力欄の TextEditingController。
     _rpcTimeoutController = TextEditingController(text: '5000');
     _logSearchController = TextEditingController();
+    _logScrollController = ScrollController();
     // DataChannel リアルタイムメッセージングのラベル入力欄の TextEditingController。
     _dataChannelLabelController = TextEditingController(text: '#chat');
     // DataChannel リアルタイムメッセージングの max_packet_life_time 入力欄の TextEditingController。
@@ -430,6 +454,7 @@ class _DevToolsPageState extends State<DevToolsPage>
     _rpcParamsController.dispose();
     _rpcTimeoutController.dispose();
     _logSearchController.dispose();
+    _logScrollController.dispose();
     _dataChannelLabelController.dispose();
     _dataChannelMaxPacketLifeTimeController.dispose();
     _tabController.dispose();
@@ -641,7 +666,7 @@ class _DevToolsPageState extends State<DevToolsPage>
   void _handleSendMessage(String text) {
     final conn = _connection;
     final label = _dataChannelLabelController.text.trim();
-    if (conn == null || label.isEmpty || !_isConnected) {
+    if (conn == null || label.isEmpty || !_canSendMessage) {
       return;
     }
     conn.sendDataChannelMessage(label, Uint8List.fromList(utf8.encode(text)));
@@ -690,6 +715,31 @@ class _DevToolsPageState extends State<DevToolsPage>
     if (_busy) {
       return;
     }
+    final validationErrors = <String?>[
+      validateSignalingUrl(_signalingUrl),
+      validateChannelId(_channelId),
+      if (_dataChannelsEnabled)
+        validateDataChannelLabel(_dataChannelLabelController.text),
+      if (_dataChannelsEnabled && !_dataChannelOrdered)
+        validateMaxPacketLifeTime(_dataChannelMaxPacketLifeTimeController.text),
+    ].whereType<String>().toList(growable: false);
+    // Connect タブが未マウントの場合も、上の直接検証だけで接続操作を継続できる。
+    final formIsValid = _connectionFormKey.currentState?.validate() ?? true;
+    if (!formIsValid || validationErrors.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            validationErrors.isEmpty
+                ? '接続設定の入力エラーを修正してください'
+                : validationErrors.join('\n'),
+          ),
+        ),
+      );
+      _tabController.animateTo(0);
+      return;
+    }
+    final dataChannels = _buildDataChannelConfigs();
+    final dataChannel = dataChannels.isEmpty ? null : dataChannels.first;
     final shouldConnect = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -703,6 +753,16 @@ class _DevToolsPageState extends State<DevToolsPage>
                 Text('signaling_url: $_signalingUrl'),
                 Text('channel_id: $_channelId'),
                 Text('role: ${_selectedRole.value}'),
+                Text('audio: $_configuredAudio'),
+                Text('video: $_configuredVideo'),
+                Text('video_codec: ${_selectedVideoCodecType ?? '未指定'}'),
+                Text(
+                  'video_bit_rate: ${_selectedVideoBitRate != null ? '$_selectedVideoBitRate kbps' : '未指定'}',
+                ),
+                Text('resolution: ${_selectedResolution ?? '未指定'}'),
+                Text(
+                  'frame_rate: ${_selectedFrameRate != null ? '$_selectedFrameRate fps' : '未指定'}',
+                ),
                 Text(
                   'simulcast: ${_simulcastEnabled ? 'Enabled' : 'Disabled'}',
                 ),
@@ -718,9 +778,29 @@ class _DevToolsPageState extends State<DevToolsPage>
                 Text(
                   'spotlight_unfocus_rid: ${_selectedSpotlightUnfocusRid ?? '未指定'}',
                 ),
-                Text('data_channels: Enabled'),
+                Text(
+                  'data_channels: ${_dataChannelsEnabled ? 'Enabled' : 'Disabled'}',
+                ),
+                if (_dataChannelsEnabled) ...[
+                  Text('data_channel_label: ${dataChannel?['label'] ?? '未指定'}'),
+                  Text(
+                    'data_channel_direction: ${dataChannel?['direction'] ?? '未指定'}',
+                  ),
+                  Text(
+                    'data_channel_ordered: ${dataChannel?['ordered'] ?? '未指定'}',
+                  ),
+                  Text(
+                    'data_channel_compress: ${dataChannel?['compress'] ?? '未指定'}',
+                  ),
+                  Text(
+                    'data_channel_max_packet_life_time: ${dataChannel?['max_packet_life_time'] ?? '未指定'}',
+                  ),
+                ],
                 Text(
                   'data_channel_signaling: ${_dataChannelSignalingEnabled ? 'Enabled' : 'Disabled'}',
+                ),
+                Text(
+                  'ignore_disconnect_websocket: $_ignoreDisconnectWebSocketEnabled',
                 ),
               ],
             ),
@@ -1352,6 +1432,11 @@ class _DevToolsPageState extends State<DevToolsPage>
     ).showSnackBar(const SnackBar(content: Text('Copied logs')));
   }
 
+  // 表示中のログ種別だけを消去する。
+  void _clearLogs() {
+    _mutateView(_pageNotifier.clearSelectedLogs);
+  }
+
   // 表示選択中のログ種類
   List<String> get _selectedLogs => _pageNotifier.filteredSelectedLogs;
 
@@ -1384,6 +1469,14 @@ class _DevToolsPageState extends State<DevToolsPage>
       },
       onClose: onClose,
       onCopyLogs: _copyLogs,
+      onClearLogs: _clearLogs,
+      scrollController: _logScrollController,
+      followLatest: _followLatestLogs,
+      onFollowLatestChanged: (value) {
+        _mutateView(() {
+          _followLatestLogs = value;
+        });
+      },
       canFetchStats: _canFetchStats,
       onFetchStats: _fetchStats,
       plain: plain,
@@ -1430,6 +1523,8 @@ class _DevToolsPageState extends State<DevToolsPage>
     return DevToolsVideoPanel(
       showsRemoteVideo: _showsRemoteVideo,
       showsLocalPreview: _showsLocalPreview,
+      isConnected: _isConnected,
+      isConnecting: _isConnecting,
       needsCamera: _needsCamera,
       localTextureId: _localTextureId,
       localPreviewMirror: _localPreviewMirror,
@@ -1448,38 +1543,34 @@ class _DevToolsPageState extends State<DevToolsPage>
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              const Expanded(child: Text('dataChannelSignaling')),
-              Switch(
-                value: _dataChannelSignalingEnabled,
-                onChanged: disabled
-                    ? null
-                    : (value) {
-                        _mutateView(() {
-                          _dataChannelSignalingEnabled = value;
-                        });
-                      },
-              ),
-            ],
+          child: SwitchListTile(
+            title: const Text('DataChannel Signaling'),
+            subtitle: const Text('data_channel_signaling'),
+            contentPadding: EdgeInsets.zero,
+            value: _dataChannelSignalingEnabled,
+            onChanged: disabled
+                ? null
+                : (value) {
+                    _mutateView(() {
+                      _dataChannelSignalingEnabled = value;
+                    });
+                  },
           ),
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              const Expanded(child: Text('ignoreDisconnectWebSocket')),
-              Switch(
-                value: _ignoreDisconnectWebSocketEnabled,
-                onChanged: disabled
-                    ? null
-                    : (value) {
-                        _mutateView(() {
-                          _ignoreDisconnectWebSocketEnabled = value;
-                        });
-                      },
-              ),
-            ],
+          child: SwitchListTile(
+            title: const Text('Ignore WebSocket Disconnect'),
+            subtitle: const Text('ignore_disconnect_websocket'),
+            contentPadding: EdgeInsets.zero,
+            value: _ignoreDisconnectWebSocketEnabled,
+            onChanged: disabled
+                ? null
+                : (value) {
+                    _mutateView(() {
+                      _ignoreDisconnectWebSocketEnabled = value;
+                    });
+                  },
           ),
         ),
         const SizedBox(height: 8),
@@ -1496,175 +1587,200 @@ class _DevToolsPageState extends State<DevToolsPage>
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: TextField(
-            controller: _dataChannelLabelController,
-            decoration: const InputDecoration(
-              labelText: 'label',
-              helperText: '先頭に # をつける（例: #chat）',
-              border: OutlineInputBorder(),
-              isDense: true,
-            ),
-            enabled: !disabled,
+          child: SwitchListTile(
+            title: const Text('Enable DataChannels'),
+            subtitle: const Text('data_channels'),
+            contentPadding: EdgeInsets.zero,
+            value: _dataChannelsEnabled,
+            onChanged: disabled
+                ? null
+                : (value) {
+                    _mutateView(() {
+                      _dataChannelsEnabled = value;
+                    });
+                  },
           ),
         ),
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              const Text('direction'),
-              const Spacer(),
-              DropdownButton<String>(
-                value: _dataChannelDirection,
-                underline: const SizedBox(),
-                style: Theme.of(context).textTheme.bodyMedium,
-                items: directionOptions
-                    .map(
-                      (dir) => DropdownMenuItem(value: dir, child: Text(dir)),
-                    )
-                    .toList(growable: false),
-                onChanged: !disabled
-                    ? (value) {
-                        _mutateView(() {
-                          _dataChannelDirection = value!;
-                        });
-                      }
-                    : null,
-              ),
-            ],
+        if (!_dataChannelsEnabled)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Text('有効にすると label、direction、ordered、compress を設定できます。'),
           ),
-        ),
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              const Text('ordered'),
-              const Spacer(),
-              Switch(
-                value: _dataChannelOrdered,
-                onChanged: !disabled
-                    ? (value) {
-                        _mutateView(() {
-                          _dataChannelOrdered = value;
-                        });
-                      }
-                    : null,
-              ),
-            ],
-          ),
-        ),
-        if (!_dataChannelOrdered)
+        if (_dataChannelsEnabled) ...[
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: TextField(
-              controller: _dataChannelMaxPacketLifeTimeController,
+            child: TextFormField(
+              controller: _dataChannelLabelController,
               decoration: const InputDecoration(
-                labelText: 'max_packet_life_time (ms)',
+                labelText: 'label',
+                helperText: '先頭に # をつける（例: #chat）',
                 border: OutlineInputBorder(),
                 isDense: true,
               ),
-              keyboardType: TextInputType.number,
               enabled: !disabled,
-              onChanged: (value) {
-                final parsed = int.tryParse(value);
-                if (parsed != null) {
-                  _dataChannelMaxPacketLifeTime = parsed;
-                }
-              },
+              validator: validateDataChannelLabel,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
             ),
           ),
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              const Text('compress'),
-              const Spacer(),
-              Switch(
-                value: _dataChannelCompress,
-                onChanged: !disabled
-                    ? (value) {
-                        _mutateView(() {
-                          _dataChannelCompress = value;
-                        });
-                      }
-                    : null,
-              ),
-            ],
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                const Text('direction'),
+                const Spacer(),
+                DropdownButton<String>(
+                  value: _dataChannelDirection,
+                  underline: const SizedBox(),
+                  style: Theme.of(context).textTheme.bodyMedium,
+                  items: directionOptions
+                      .map(
+                        (dir) => DropdownMenuItem(value: dir, child: Text(dir)),
+                      )
+                      .toList(growable: false),
+                  onChanged: !disabled
+                      ? (value) {
+                          _mutateView(() {
+                            _dataChannelDirection = value!;
+                          });
+                        }
+                      : null,
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: SwitchListTile(
+              title: const Text('Ordered delivery'),
+              subtitle: const Text('ordered'),
+              contentPadding: EdgeInsets.zero,
+              value: _dataChannelOrdered,
+              onChanged: !disabled
+                  ? (value) {
+                      _mutateView(() {
+                        _dataChannelOrdered = value;
+                      });
+                    }
+                  : null,
+            ),
+          ),
+          if (!_dataChannelOrdered)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: TextFormField(
+                controller: _dataChannelMaxPacketLifeTimeController,
+                decoration: const InputDecoration(
+                  labelText: 'max_packet_life_time (ms)',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                  helperText: '0 〜 65535 ms',
+                ),
+                keyboardType: TextInputType.number,
+                enabled: !disabled,
+                validator: validateMaxPacketLifeTime,
+                autovalidateMode: AutovalidateMode.onUserInteraction,
+                onChanged: (value) {
+                  final parsed = int.tryParse(value);
+                  if (parsed != null) {
+                    _dataChannelMaxPacketLifeTime = parsed;
+                  }
+                },
+              ),
+            ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: SwitchListTile(
+              title: const Text('Compression'),
+              subtitle: const Text('compress'),
+              contentPadding: EdgeInsets.zero,
+              value: _dataChannelCompress,
+              onChanged: !disabled
+                  ? (value) {
+                      _mutateView(() {
+                        _dataChannelCompress = value;
+                      });
+                    }
+                  : null,
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
       ],
     );
   }
 
   // 接続タブへ接続設定、主要操作、状態 summary をまとめて表示する。
   Widget _buildConnectionTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildConnectionSettingsSection(),
-          const SizedBox(height: 8),
-          _buildMediaDeviceSection(),
-          const SizedBox(height: 8),
-          _buildDataChannelSection(),
-          const SizedBox(height: 8),
-          _buildDataChannelsSection(),
-          const SizedBox(height: 8),
-          ExpansionTile(
-            title: const Text('Developer Option'),
-            initiallyExpanded: _useExternalVideoTrack,
-            children: [
-              SwitchListTile(
-                title: const Text('External Video Track'),
-                subtitle: const Text(
-                  'pub.dev の camera package 利用で映像を配信する検証用機能です',
+    return Form(
+      key: _connectionFormKey,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildConnectionSettingsSection(),
+            const SizedBox(height: 8),
+            _buildMediaDeviceSection(),
+            const SizedBox(height: 8),
+            _buildDataChannelSection(),
+            const SizedBox(height: 8),
+            _buildDataChannelsSection(),
+            const SizedBox(height: 8),
+            ExpansionTile(
+              title: const Text('Developer Option'),
+              initiallyExpanded: _useExternalVideoTrack,
+              children: [
+                SwitchListTile(
+                  title: const Text('External Video Track'),
+                  subtitle: const Text(
+                    'pub.dev の camera package 利用で映像を配信する検証用機能です',
+                  ),
+                  value: _useExternalVideoTrack,
+                  onChanged: _busy || _isConnected || Platform.isWindows
+                      ? null
+                      : (value) {
+                          _mutateView(() {
+                            _useExternalVideoTrack = value;
+                          });
+                        },
+                  dense: true,
                 ),
-                value: _useExternalVideoTrack,
-                onChanged: _busy || _isConnected || Platform.isWindows
-                    ? null
-                    : (value) {
-                        _mutateView(() {
-                          _useExternalVideoTrack = value;
-                        });
-                      },
-                dense: true,
+              ],
+            ),
+            const SizedBox(height: 8),
+            DevToolsActionSection(
+              busy: _busy,
+              isConnecting: _isConnecting,
+              isConnected: _isConnected,
+              onConnectionButtonPressed: _handleConnectionButtonPressed,
+            ),
+            if (_isConnected && _beepAudioEnabled) ...[
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: _busy ? null : _handleTriggerBeep,
+                icon: const Icon(Icons.volume_up),
+                label: const Text('Trigger Beep'),
               ),
             ],
-          ),
-          const SizedBox(height: 8),
-          DevToolsActionSection(
-            busy: _busy,
-            isConnecting: _isConnecting,
-            isConnected: _isConnected,
-            onConnectionButtonPressed: _handleConnectionButtonPressed,
-          ),
-          if (_isConnected && _beepAudioEnabled) ...[
             const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: _busy ? null : _handleTriggerBeep,
-              icon: const Icon(Icons.volume_up),
-              label: const Text('Trigger Beep'),
+            DevToolsConnectionStatusSection(
+              connectionStateLabel: _connectionStateLabel,
+              peerConnectionStateLabel: _peerConnectionStateLabel,
+              iceStateLabel: _iceStateLabel,
+              dtlsStateLabel: _dtlsStateLabel,
+              sessionId: _connection?.sessionId,
+              connectionId: _connection?.connectionId,
+              clientId: _selfClientId,
+              disconnectCloseInfo: _disconnectCloseInfo,
+              connectionErrorCode: _connectionErrorCode,
+              connectionErrorMessage: _connectionErrorMessage,
             ),
+            const SizedBox(height: 12),
           ],
-          const SizedBox(height: 12),
-          DevToolsConnectionStatusSection(
-            connectionStateLabel: _connectionStateLabel,
-            peerConnectionStateLabel: _peerConnectionStateLabel,
-            iceStateLabel: _iceStateLabel,
-            dtlsStateLabel: _dtlsStateLabel,
-            sessionId: _connection?.sessionId,
-            connectionId: _connection?.connectionId,
-            clientId: _selfClientId,
-            disconnectCloseInfo: _disconnectCloseInfo,
-            connectionErrorCode: _connectionErrorCode,
-            connectionErrorMessage: _connectionErrorMessage,
-          ),
-          const SizedBox(height: 12),
-        ],
+        ),
       ),
     );
   }
@@ -1680,74 +1796,40 @@ class _DevToolsPageState extends State<DevToolsPage>
             spacing: 12,
             runSpacing: 12,
             children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    width: 200,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Flexible(
-                          child: Text(
-                            'Audio Track',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        Switch(
-                          value: _audioEnabled,
-                          onChanged: _canToggleAudioEnabled
-                              ? (_) => _toggleAudioEnabled()
-                              : null,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  SizedBox(
-                    width: 200,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Flexible(
-                          child: Text(
-                            'Video Track',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        Switch(
-                          value: _videoEnabled,
-                          onChanged: _canToggleVideoEnabled
-                              ? (_) => _toggleVideoEnabled()
-                              : null,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  SizedBox(
-                    width: 200,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Flexible(
-                          child: Text(
-                            'Mirror Preview',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        Switch(
-                          value: _localPreviewMirror,
-                          onChanged: (value) {
-                            _mutateView(() {
-                              _localPreviewMirror = value;
-                            });
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+              SizedBox(
+                width: 220,
+                child: SwitchListTile(
+                  title: const Text('Audio Track'),
+                  contentPadding: EdgeInsets.zero,
+                  value: _audioEnabled,
+                  onChanged: _canToggleAudioEnabled
+                      ? (_) => _toggleAudioEnabled()
+                      : null,
+                ),
+              ),
+              SizedBox(
+                width: 220,
+                child: SwitchListTile(
+                  title: const Text('Video Track'),
+                  contentPadding: EdgeInsets.zero,
+                  value: _videoEnabled,
+                  onChanged: _canToggleVideoEnabled
+                      ? (_) => _toggleVideoEnabled()
+                      : null,
+                ),
+              ),
+              SizedBox(
+                width: 220,
+                child: SwitchListTile(
+                  title: const Text('Mirror Preview'),
+                  contentPadding: EdgeInsets.zero,
+                  value: _localPreviewMirror,
+                  onChanged: (value) {
+                    _mutateView(() {
+                      _localPreviewMirror = value;
+                    });
+                  },
+                ),
               ),
             ],
           ),
@@ -1909,6 +1991,8 @@ class _DevToolsPageState extends State<DevToolsPage>
         });
         unawaited(_clearLocalPreview());
       },
+      signalingUrlValidator: validateSignalingUrl,
+      channelIdValidator: validateChannelId,
     );
   }
 
@@ -2026,11 +2110,14 @@ class _DevToolsPageState extends State<DevToolsPage>
 
   // メッセージタブへ DataChannel メッセージングの送受信 UI を表示する。
   Widget _buildMessageTab() {
-    final label = _isConnected ? _dataChannelLabelController.text.trim() : null;
+    final label = _hasDataChannelConfig
+        ? _dataChannelLabelController.text.trim()
+        : null;
     return DevToolsMessagePanel(
       label: label,
       messages: _messages,
       sendEnabled: _canSendMessage,
+      sendGuidance: _messageSendGuidance,
       onSend: _handleSendMessage,
     );
   }
@@ -2044,6 +2131,28 @@ class _DevToolsPageState extends State<DevToolsPage>
         return Scaffold(
           appBar: AppBar(
             title: const Text('sora_sdk DevTools'),
+            actions: [
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Chip(
+                  avatar: Icon(
+                    _isConnected ? Icons.link : Icons.link_off,
+                    size: 16,
+                  ),
+                  label: Text(_connectionStateLabel),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+              IconButton(
+                onPressed: _busy || _isConnecting
+                    ? null
+                    : () {
+                        unawaited(_handleConnectionButtonPressed());
+                      },
+                tooltip: _isConnected ? 'Disconnect' : 'Connect',
+                icon: Icon(_isConnected ? Icons.link_off : Icons.link),
+              ),
+            ],
             bottom: TabBar(controller: _tabController, tabs: _tabs),
           ),
           body: TabBarView(

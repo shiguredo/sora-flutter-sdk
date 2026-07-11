@@ -308,6 +308,11 @@ class DevToolsPageNotifier extends ChangeNotifier {
     statsLogs.add(line);
   }
 
+  // 現在選択中のログ種別だけを消去する。
+  void clearSelectedLogs() {
+    selectedLogs.clear();
+  }
+
   // ログ画面で選択中のログ一覧を返す。
   List<String> get selectedLogs => switch (selectedLogTab) {
     DevToolsLogTab.app => logs,

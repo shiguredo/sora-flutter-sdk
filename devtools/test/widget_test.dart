@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sora_sdk/sora_sdk.dart';
 
 import 'package:sora_devtools/main.dart';
+import 'package:sora_devtools/src/devtools_input_validation.dart';
 import 'package:sora_devtools/src/devtools_local_preview_policy.dart';
 import 'package:sora_devtools/src/devtools_models.dart';
 import 'package:sora_devtools/src/devtools_settings_sections.dart';
@@ -51,6 +52,51 @@ void main() {
     expect(find.text('Video Track'), findsOneWidget);
   });
 
+  testWidgets('390 px 幅の Video タブでも右 overflow が発生しない', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(const DevToolsApp());
+    await tester.tap(_findTabText('Video'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Audio Track'), findsOneWidget);
+    expect(find.text('Video Track'), findsOneWidget);
+    expect(find.text('Mirror Preview'), findsOneWidget);
+  });
+
+  testWidgets('狭い幅でも Send Beep Audio は 1 個だけ表示する', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(const DevToolsApp());
+    await tester.ensureVisible(find.text('Send Beep Audio'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Send Beep Audio'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('接続状態と接続操作を全タブ共通の AppBar に表示する', (WidgetTester tester) async {
+    await tester.pumpWidget(const DevToolsApp());
+
+    expect(find.text('disconnected'), findsOneWidget);
+    expect(find.byTooltip('Connect'), findsOneWidget);
+
+    await tester.tap(_findTabText('Messages'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('disconnected'), findsOneWidget);
+    expect(find.byTooltip('Connect'), findsOneWidget);
+  });
+
   testWidgets('未接続でも Video タブの Audio Track / Video Track を切り替えられる', (
     WidgetTester tester,
   ) async {
@@ -59,19 +105,13 @@ void main() {
     await tester.tap(_findTabText('Video'));
     await tester.pumpAndSettle();
 
-    // Audio Track / Video Track のテキストを直接含む Row の子孫から Switch を特定する
-    final audioRow = find
-        .ancestor(of: find.text('Audio Track'), matching: find.byType(Row))
-        .first;
-    final videoRow = find
-        .ancestor(of: find.text('Video Track'), matching: find.byType(Row))
-        .first;
+    // ラベルとスイッチを結び付ける SwitchListTile ごとに操作対象を特定する。
     final audioSwitch = find.descendant(
-      of: audioRow,
+      of: find.widgetWithText(SwitchListTile, 'Audio Track'),
       matching: find.byType(Switch),
     );
     final videoSwitch = find.descendant(
-      of: videoRow,
+      of: find.widgetWithText(SwitchListTile, 'Video Track'),
       matching: find.byType(Switch),
     );
     expect(tester.widget<Switch>(audioSwitch).value, isTrue);
@@ -89,31 +129,21 @@ void main() {
   testWidgets('DataChannel の詳細設定を個別に切り替えられる', (WidgetTester tester) async {
     await tester.pumpWidget(const DevToolsApp());
 
-    expect(find.text('dataChannelSignaling'), findsNothing);
-    expect(find.text('ignoreDisconnectWebSocket'), findsNothing);
+    expect(find.text('DataChannel Signaling'), findsNothing);
+    expect(find.text('Ignore WebSocket Disconnect'), findsNothing);
 
     await tester.ensureVisible(find.text('DataChannel'));
     await tester.tap(find.text('DataChannel'));
     await tester.pumpAndSettle();
-    expect(find.text('dataChannelSignaling'), findsOneWidget);
-    expect(find.text('ignoreDisconnectWebSocket'), findsOneWidget);
+    expect(find.text('DataChannel Signaling'), findsOneWidget);
+    expect(find.text('Ignore WebSocket Disconnect'), findsOneWidget);
 
     final dataChannelSignalingSwitch = find.descendant(
-      of: find
-          .ancestor(
-            of: find.text('dataChannelSignaling'),
-            matching: find.byType(Row),
-          )
-          .first,
+      of: find.widgetWithText(SwitchListTile, 'DataChannel Signaling'),
       matching: find.byType(Switch),
     );
     final ignoreDisconnectWebSocketSwitch = find.descendant(
-      of: find
-          .ancestor(
-            of: find.text('ignoreDisconnectWebSocket'),
-            matching: find.byType(Row),
-          )
-          .first,
+      of: find.widgetWithText(SwitchListTile, 'Ignore WebSocket Disconnect'),
       matching: find.byType(Switch),
     );
     expect(tester.widget<Switch>(dataChannelSignalingSwitch).value, isFalse);
@@ -139,6 +169,36 @@ void main() {
       isTrue,
     );
     expect(tester.widget<Switch>(dataChannelSignalingSwitch).value, isTrue);
+  });
+
+  testWidgets('dataChannels を有効化した場合だけ詳細を設定できる', (WidgetTester tester) async {
+    await tester.pumpWidget(const DevToolsApp());
+
+    await tester.ensureVisible(find.text('dataChannels'));
+    await tester.tap(find.text('dataChannels'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Enable DataChannels'), findsOneWidget);
+    expect(find.text('label'), findsNothing);
+    expect(find.text('direction'), findsNothing);
+
+    final enabledSwitch = find.descendant(
+      of: find.widgetWithText(SwitchListTile, 'Enable DataChannels'),
+      matching: find.byType(Switch),
+    );
+    await tester.tap(enabledSwitch);
+    await tester.pumpAndSettle();
+
+    expect(find.text('label'), findsOneWidget);
+    expect(find.text('direction'), findsOneWidget);
+    expect(find.text('Ordered delivery'), findsOneWidget);
+    expect(find.text('Compression'), findsOneWidget);
+
+    await tester.tap(enabledSwitch);
+    await tester.pumpAndSettle();
+
+    expect(find.text('label'), findsNothing);
+    expect(find.text('direction'), findsNothing);
   });
 
   testWidgets('接続中の Audio Track / Video Track toggle は操作できる', (
@@ -326,7 +386,7 @@ void main() {
     expect(_findTabText('Video'), findsOneWidget);
     expect(find.text('Show Local Preview'), findsOneWidget);
     expect(find.text('Switch Camera'), findsOneWidget);
-    expect(find.text('No video'), findsOneWidget);
+    expect(find.text('Local preview is not started'), findsOneWidget);
 
     await tester.tap(_findTabText('RPC'));
     await tester.pumpAndSettle();
@@ -341,6 +401,8 @@ void main() {
     expect(find.text('Log Type'), findsOneWidget);
     expect(find.text('Search Logs'), findsOneWidget);
     expect(find.text('No logs yet'), findsOneWidget);
+    expect(find.text('Follow latest'), findsOneWidget);
+    expect(find.text('Clear Logs'), findsOneWidget);
 
     // Stats タブに切り替えて Get Stats ボタンを確認する
     await tester.tap(find.byType(DropdownButtonFormField<DevToolsLogTab>));
@@ -349,6 +411,100 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Get Stats'), findsOneWidget);
   });
+
+  testWidgets('未接続の Messages タブに送信可能にする操作を表示する', (WidgetTester tester) async {
+    await tester.pumpWidget(const DevToolsApp());
+
+    await tester.tap(_findTabText('Messages'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Connect タブで接続するとメッセージを送信できます。'), findsOneWidget);
+    expect(
+      tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
+      isNull,
+    );
+  });
+
+  testWidgets('接続操作では不正な Signaling URL と空の Channel ID を表示する', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(const DevToolsApp());
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Signaling URL'),
+      'https://example.com',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Channel ID'),
+      '',
+    );
+    await tester.tap(find.byTooltip('Connect'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('ws:// または wss:// で始まる URL を入力してください'), findsOneWidget);
+    expect(find.text('Channel ID を入力してください'), findsOneWidget);
+    expect(find.text('Connect Settings'), findsNothing);
+  });
+
+  testWidgets('接続確認には実際に生成する主要設定を表示する', (WidgetTester tester) async {
+    await tester.pumpWidget(const DevToolsApp());
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Signaling URL'),
+      'wss://example.com/signaling',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Channel ID'),
+      'test-channel',
+    );
+    await tester.tap(find.byTooltip('Connect'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Connect Settings'), findsOneWidget);
+    expect(find.text('audio: true'), findsOneWidget);
+    expect(find.text('video: true'), findsOneWidget);
+    expect(find.text('data_channels: Disabled'), findsOneWidget);
+    expect(find.text('data_channel_label: #chat'), findsNothing);
+    expect(find.text('ignore_disconnect_websocket: false'), findsOneWidget);
+  });
+
+  testWidgets('Messages タブから有効な設定で接続確認を開ける', (WidgetTester tester) async {
+    await tester.pumpWidget(const DevToolsApp());
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Signaling URL'),
+      'wss://example.com/signaling',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Channel ID'),
+      'test-channel',
+    );
+    await tester.tap(_findTabText('Messages'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Connect'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Connect Settings'), findsOneWidget);
+    expect(
+      find.text('signaling_url: wss://example.com/signaling'),
+      findsOneWidget,
+    );
+    expect(find.text('channel_id: test-channel'), findsOneWidget);
+  });
+
+  test('接続設定の入力値を仕様に沿って検証する', _verifyInputValidation);
+}
+
+void _verifyInputValidation() {
+  // Widget テストファイル内でも、接続前に利用する各検証条件を固定する。
+  expect(validateSignalingUrl('wss://example.com/signaling'), isNull);
+  expect(validateSignalingUrl('https://example.com'), isNotNull);
+  expect(validateChannelId(''), isNotNull);
+  expect(validateDataChannelLabel('#chat'), isNull);
+  expect(validateDataChannelLabel('chat'), isNotNull);
+  expect(validateMaxPacketLifeTime('0'), isNull);
+  expect(validateMaxPacketLifeTime('65535'), isNull);
+  expect(validateMaxPacketLifeTime('65536'), isNotNull);
 }
 
 Finder _findTabText(String label) {

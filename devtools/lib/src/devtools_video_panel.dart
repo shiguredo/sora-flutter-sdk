@@ -15,6 +15,8 @@ class DevToolsVideoPanel extends StatelessWidget {
     super.key,
     required this.showsRemoteVideo,
     required this.showsLocalPreview,
+    required this.isConnected,
+    required this.isConnecting,
     required this.needsCamera,
     required this.localTextureId,
     required this.localPreviewMirror,
@@ -26,6 +28,8 @@ class DevToolsVideoPanel extends StatelessWidget {
 
   final bool showsRemoteVideo;
   final bool showsLocalPreview;
+  final bool isConnected;
+  final bool isConnecting;
   final bool needsCamera;
   final int? localTextureId;
   final bool localPreviewMirror;
@@ -41,7 +45,7 @@ class DevToolsVideoPanel extends StatelessWidget {
         (localTextureId == null &&
             remoteVideos.isEmpty &&
             remoteAudios.isEmpty)) {
-      return const Center(child: Text('No video'));
+      return _buildEmptyState(context);
     }
 
     final remoteVideoGroups = _groupRemoteVideosByConnection();
@@ -72,6 +76,50 @@ class DevToolsVideoPanel extends StatelessWidget {
         }
         return const SizedBox.shrink();
       },
+    );
+  }
+
+  // 接続状態と media 設定に応じて、次に取れる操作を案内する。
+  Widget _buildEmptyState(BuildContext context) {
+    final (title, description) = switch ((
+      isConnecting,
+      isConnected,
+      needsCamera,
+      showsRemoteVideo,
+    )) {
+      (true, _, _, _) => ('Connecting', '接続が完了すると映像または音声トラックがここに表示されます。'),
+      (false, true, _, true) => (
+        'Waiting for remote media',
+        '接続先が映像または音声を配信しているか確認してください。',
+      ),
+      (false, true, true, false) => (
+        'Waiting for local video',
+        'カメラ権限と映像入力デバイスを確認してください。',
+      ),
+      (false, false, true, _) => (
+        'Local preview is not started',
+        'Show Local Preview を選ぶか、Connect タブから接続してください。',
+      ),
+      _ => ('Video is disabled', 'Connect タブで映像を有効にするか、受信可能な role を選んでください。'),
+    };
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.videocam_off_outlined,
+              size: 40,
+              color: Theme.of(context).colorScheme.outline,
+            ),
+            const SizedBox(height: 12),
+            Text(title, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 6),
+            Text(description, textAlign: TextAlign.center),
+          ],
+        ),
+      ),
     );
   }
 

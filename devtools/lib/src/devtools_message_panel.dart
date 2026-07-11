@@ -11,12 +11,14 @@ class DevToolsMessagePanel extends StatefulWidget {
     required this.label,
     required this.messages,
     required this.sendEnabled,
+    required this.sendGuidance,
     required this.onSend,
   });
 
   final String? label;
   final List<DevToolsMessageEntry> messages;
   final bool sendEnabled;
+  final String? sendGuidance;
   final void Function(String text) onSend;
 
   @override
@@ -25,17 +27,63 @@ class DevToolsMessagePanel extends StatefulWidget {
 
 class _DevToolsMessagePanelState extends State<DevToolsMessagePanel> {
   late final TextEditingController _messageController;
+  late final ScrollController _scrollController;
+  bool _followsLatest = true;
+  late int _previousMessageCount;
 
   @override
   void initState() {
     super.initState();
     _messageController = TextEditingController();
+    _scrollController = ScrollController()..addListener(_handleScroll);
+    _previousMessageCount = widget.messages.length;
+  }
+
+  @override
+  void didUpdateWidget(covariant DevToolsMessagePanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final hasNewMessage = widget.messages.length > _previousMessageCount;
+    _previousMessageCount = widget.messages.length;
+    if (hasNewMessage && _followsLatest) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToLatest());
+    }
   }
 
   @override
   void dispose() {
     _messageController.dispose();
+    _scrollController
+      ..removeListener(_handleScroll)
+      ..dispose();
     super.dispose();
+  }
+
+  // 末尾付近にいる間だけ、新着メッセージへの追従を継続する。
+  void _handleScroll() {
+    if (!_scrollController.hasClients) {
+      return;
+    }
+    final next =
+        _scrollController.position.maxScrollExtent -
+            _scrollController.position.pixels <=
+        48;
+    if (next != _followsLatest) {
+      setState(() {
+        _followsLatest = next;
+      });
+    }
+  }
+
+  // メッセージ一覧の末尾へ移動する。
+  void _scrollToLatest() {
+    if (!mounted || !_scrollController.hasClients) {
+      return;
+    }
+    _scrollController.animateTo(
+      _scrollController.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+    );
   }
 
   void _send() {
@@ -94,11 +142,28 @@ class _DevToolsMessagePanelState extends State<DevToolsMessagePanel> {
             ],
           ),
         ),
+        if (widget.sendGuidance case final guidance?)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.info_outline,
+                  size: 18,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(child: Text(guidance)),
+              ],
+            ),
+          ),
         const Divider(height: 1),
         Expanded(
           child: widget.messages.isEmpty
               ? const Center(child: Text('No messages'))
               : ListView.builder(
+                  controller: _scrollController,
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   itemCount: widget.messages.length,
                   itemBuilder: (context, index) {

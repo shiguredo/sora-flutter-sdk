@@ -5,38 +5,38 @@ library;
 bool canSendDataChannelMessage({
   required bool isConnected,
   required bool hasConnection,
-  required bool dataChannelSignalingEnabled,
   required bool dataChannelsEnabled,
   required bool hasDataChannelConfig,
+  required String? label,
+  required Set<String> openedDataChannelLabels,
 }) {
   return isConnected &&
       hasConnection &&
-      dataChannelSignalingEnabled &&
       dataChannelsEnabled &&
-      hasDataChannelConfig;
+      hasDataChannelConfig &&
+      label != null &&
+      openedDataChannelLabels.contains(label);
 }
 
 /// DataChannel メッセージを送信できない理由を、次の操作として返す。
 String? buildDataChannelMessageSendGuidance({
   required bool isConnected,
-  required bool dataChannelSignalingEnabled,
   required bool dataChannelsEnabled,
   required bool hasDataChannelConfig,
+  required String? label,
+  required Set<String> openedDataChannelLabels,
 }) {
   if (!isConnected) {
     return 'Connect タブで接続するとメッセージを送信できます。';
-  }
-  if (!dataChannelSignalingEnabled && !dataChannelsEnabled) {
-    return 'Connect タブで DataChannel Signaling を有効にし、dataChannels に label を設定してから再接続してください。';
-  }
-  if (!dataChannelSignalingEnabled) {
-    return 'Connect タブで DataChannel Signaling を有効にしてから再接続してください。';
   }
   if (!dataChannelsEnabled) {
     return 'Connect タブで dataChannels を有効にし、label を設定してから再接続してください。';
   }
   if (!hasDataChannelConfig) {
     return 'Connect タブの dataChannels で # から始まる label を設定し、再接続してください。';
+  }
+  if (label == null || !openedDataChannelLabels.contains(label)) {
+    return 'DataChannel が open するまでメッセージを送信できません。';
   }
   return null;
 }

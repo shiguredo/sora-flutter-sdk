@@ -283,23 +283,44 @@ class DevToolsConnectionController {
     required DevToolsConnectRequest request,
     required void Function(int textureId) onLocalTextureReady,
   }) async {
-    final connection = await Sora.createConnection(
-      buildSoraConnectionConfig(request),
-    );
-
-    await _subscriptionController.bind(connection);
-    await applySelectedAudioOutputDevice(request.selectedAudioOutputDeviceId);
-
-    final localStream = await _prepareLocalStream(
-      request: request,
-      onLocalTextureReady: onLocalTextureReady,
-    );
-
-    await connection.connect(localStream);
-    return DevToolsConnectResult(
-      connection: connection,
-      localStream: localStream,
-    );
+    SoraConnection? connection;
+    LocalMediaStream? localStream;
+    var mediaPreparationStarted = false;
+    try {
+      connection = await Sora.createConnection(
+        buildSoraConnectionConfig(request),
+      );
+      await _subscriptionController.bind(connection);
+      await applySelectedAudioOutputDevice(request.selectedAudioOutputDeviceId);
+      mediaPreparationStarted = true;
+      localStream = await _prepareLocalStream(
+        request: request,
+        onLocalTextureReady: onLocalTextureReady,
+      );
+      await connection.connect(localStream);
+      return DevToolsConnectResult(
+        connection: connection,
+        localStream: localStream,
+      );
+    } catch (error, stackTrace) {
+      // connect() 失敗時に SDK が発行する connection_error / disconnected を
+      // 購読側が受け取ってから資源を解放する。
+      await Future<void>.delayed(Duration.zero);
+      // transaction 内で確保した資源は、呼び出し元へ渡す前に必ず解放する。
+      try {
+        await disposeConnectionResources(
+          connection: connection,
+          localStream: mediaPreparationStarted
+              ? localStream
+              : request.existingLocalStream,
+        );
+      } catch (cleanupError) {
+        _appendLog(
+          'connection cleanup: transaction failed error=$cleanupError',
+        );
+      }
+      Error.throwWithStackTrace(error, stackTrace);
+    }
   }
 
   // Android で選択中の audio output routing を native 側へ適用する。
@@ -533,8 +554,41 @@ class DevToolsConnectionController {
 
   // 接続中 peer を切断し、音声出力 routing を既定状態へ戻す。
   Future<void> disconnect(SoraConnection connection) async {
-    await connection.disconnect();
-    await clearAudioOutputRouting();
+    try {
+      await connection.disconnect();
+    } finally {
+      await clearAudioOutputRouting();
+    }
+  }
+
+  // 接続、購読、local stream、beep、audio routing を順序付きで解放する。
+  // 接続・画面破棄・接続 transaction 失敗のすべてで同じ cleanup 経路を利用する。
+  Future<void> disposeConnectionResources({
+    required SoraConnection? connection,
+    required LocalMediaStream? localStream,
+  }) async {
+    try {
+      await _subscriptionController.unbind(connection: connection);
+    } catch (error) {
+      _appendLog('connection cleanup: unbind failed error=$error');
+    }
+    try {
+      if (connection != null) {
+        await connection.dispose();
+      }
+    } catch (error) {
+      _appendLog('connection cleanup: dispose failed error=$error');
+    } finally {
+      try {
+        await disposeLocalStream(localStream);
+      } catch (error) {
+        _appendLog(
+          'connection cleanup: local stream dispose failed error=$error',
+        );
+      } finally {
+        await clearAudioOutputRouting();
+      }
+    }
   }
 
   // 接続中 peer から統計情報を取得して整形する。
@@ -618,104 +672,109 @@ class DevToolsConnectionController {
   }) async {
     if (request.role != SoraRole.sendonly &&
         request.role != SoraRole.sendrecv) {
+      await disposeLocalStream(request.existingLocalStream);
       return null;
     }
     if (!request.configuredAudio && !request.configuredVideo) {
+      await disposeLocalStream(request.existingLocalStream);
       return null;
     }
 
-    // 前回の BeepAudioTrack があれば破棄する
-    await _beepAudioTrack?.dispose();
-    _beepAudioTrack = null;
-
     LocalMediaStream? localStream = request.existingLocalStream;
-    if (localStream == null) {
-      if (request.useExternalVideoTrack) {
-        localStream = MediaDevices.createMediaStream();
-        localStream.addTrack(MediaDevices.createExternalVideoTrack());
+    try {
+      // 再利用する stream に残った beep track は、先に stream から外して破棄する。
+      await disposeBeepAudioTrack(localStream: localStream);
+      if (localStream == null) {
+        if (request.useExternalVideoTrack) {
+          localStream = MediaDevices.createMediaStream();
+          localStream.addTrack(MediaDevices.createExternalVideoTrack());
+          if (request.configuredAudio) {
+            if (request.beepAudioEnabled) {
+              final audioTrack = await MediaDevices.createAudioTrack();
+              _beepAudioTrack = DevToolsBeepAudioTrack.fromTrack(audioTrack);
+              _beepAudioTrack!.start();
+              localStream.addTrack(audioTrack);
+            } else {
+              localStream.addTrack(
+                await MediaDevices.createAudioTrack(
+                  audioDeviceId: request.selectedAudioInputDeviceId,
+                ),
+              );
+            }
+          }
+        } else {
+          final audioEnabled =
+              request.configuredAudio && !request.beepAudioEnabled;
+          localStream = await MediaDevices.getUserMedia(
+            GetUserMediaOptions(
+              audio: audioEnabled,
+              audioDeviceId: request.selectedAudioInputDeviceId,
+              video: request.configuredVideo,
+              videoDeviceId: request.selectedVideoInputDeviceId,
+              videoWidth: request.selectedResolution?.width,
+              videoHeight: request.selectedResolution?.height,
+              videoFrameRate: request.selectedFrameRate,
+            ),
+          );
+          // beep 音声が有効な場合は getUserMedia の後で DevToolsBeepAudioTrack を追加する。
+          if (request.configuredAudio && request.beepAudioEnabled) {
+            final audioTrack = await MediaDevices.createAudioTrack();
+            _beepAudioTrack = DevToolsBeepAudioTrack.fromTrack(audioTrack);
+            _beepAudioTrack!.start();
+            localStream.addTrack(audioTrack);
+          }
+        }
+      } else {
+        if (request.useExternalVideoTrack) {
+          // 再接続時は古い video track を破棄して新しい external track を生成する。
+          for (final track in localStream.getVideoTracks()) {
+            localStream.removeTrack(track);
+            await track.dispose();
+          }
+          localStream.addTrack(MediaDevices.createExternalVideoTrack());
+        }
         if (request.configuredAudio) {
-          if (request.beepAudioEnabled) {
-            final audioTrack = await MediaDevices.createAudioTrack();
-            _beepAudioTrack = DevToolsBeepAudioTrack.fromTrack(audioTrack);
-            _beepAudioTrack!.start();
-            localStream.addTrack(audioTrack);
-          } else {
-            localStream.addTrack(
-              await MediaDevices.createAudioTrack(
-                audioDeviceId: request.selectedAudioInputDeviceId,
-              ),
-            );
+          if (localStream.getAudioTracks().isEmpty) {
+            if (request.beepAudioEnabled) {
+              final audioTrack = await MediaDevices.createAudioTrack();
+              _beepAudioTrack = DevToolsBeepAudioTrack.fromTrack(audioTrack);
+              _beepAudioTrack!.start();
+              localStream.addTrack(audioTrack);
+            } else {
+              localStream.addTrack(
+                await MediaDevices.createAudioTrack(
+                  audioDeviceId: request.selectedAudioInputDeviceId,
+                ),
+              );
+            }
+          }
+        } else {
+          for (final track in localStream.getAudioTracks()) {
+            localStream.removeTrack(track);
+            await track.dispose();
           }
         }
-      } else {
-        final audioEnabled =
-            request.configuredAudio && !request.beepAudioEnabled;
-        localStream = await MediaDevices.getUserMedia(
-          GetUserMediaOptions(
-            audio: audioEnabled,
-            audioDeviceId: request.selectedAudioInputDeviceId,
-            video: request.configuredVideo,
-            videoDeviceId: request.selectedVideoInputDeviceId,
-            videoWidth: request.selectedResolution?.width,
-            videoHeight: request.selectedResolution?.height,
-            videoFrameRate: request.selectedFrameRate,
-          ),
-        );
-        // beep 音声が有効な場合は getUserMedia の後で DevToolsBeepAudioTrack を追加する
-        if (request.configuredAudio && request.beepAudioEnabled) {
-          final audioTrack = await MediaDevices.createAudioTrack();
-          _beepAudioTrack = DevToolsBeepAudioTrack.fromTrack(audioTrack);
-          _beepAudioTrack!.start();
-          localStream.addTrack(audioTrack);
-        }
-      }
-    } else {
-      if (request.useExternalVideoTrack) {
-        // 再接続時は古い video track を破棄して新しい external track を生成する
-        for (final track in localStream.getVideoTracks()) {
-          localStream.removeTrack(track);
-          await track.dispose();
-        }
-        localStream.addTrack(MediaDevices.createExternalVideoTrack());
-      }
-      if (request.configuredAudio) {
-        if (localStream.getAudioTracks().isEmpty) {
-          if (request.beepAudioEnabled) {
-            final audioTrack = await MediaDevices.createAudioTrack();
-            _beepAudioTrack = DevToolsBeepAudioTrack.fromTrack(audioTrack);
-            _beepAudioTrack!.start();
-            localStream.addTrack(audioTrack);
-          } else {
-            localStream.addTrack(
-              await MediaDevices.createAudioTrack(
-                audioDeviceId: request.selectedAudioInputDeviceId,
-              ),
-            );
+        if (!request.configuredVideo) {
+          for (final track in localStream.getVideoTracks()) {
+            localStream.removeTrack(track);
+            await track.dispose();
           }
         }
-      } else {
-        for (final track in localStream.getAudioTracks()) {
-          localStream.removeTrack(track);
-          await track.dispose();
-        }
       }
-      if (!request.configuredVideo) {
-        for (final track in localStream.getVideoTracks()) {
-          localStream.removeTrack(track);
-          await track.dispose();
-        }
-      }
-    }
 
-    final videoTracks = localStream.getVideoTracks();
-    if (request.configuredVideo &&
-        videoTracks.isNotEmpty &&
-        !request.useExternalVideoTrack) {
-      final textureId = await videoTracks.first.textureId;
-      onLocalTextureReady(textureId);
-      _appendEventLog('local_video_ready: textureId=$textureId');
+      final videoTracks = localStream.getVideoTracks();
+      if (request.configuredVideo &&
+          videoTracks.isNotEmpty &&
+          !request.useExternalVideoTrack) {
+        final textureId = await videoTracks.first.textureId;
+        onLocalTextureReady(textureId);
+        _appendEventLog('local_video_ready: textureId=$textureId');
+      }
+      return localStream;
+    } catch (_) {
+      await disposeLocalStream(localStream);
+      rethrow;
     }
-    return localStream;
   }
 
   // 指定 local stream を破棄する。
@@ -723,12 +782,25 @@ class DevToolsConnectionController {
     if (stream == null) {
       return;
     }
+    await disposeBeepAudioTrack(localStream: stream);
     await _disposeLocalStream(stream);
   }
 
-  // BeepAudioTrack を停止・破棄する。
-  Future<void> disposeBeepAudioTrack() async {
-    await _beepAudioTrack?.dispose();
+  // BeepAudioTrack を stream から外して停止・破棄する。
+  Future<void> disposeBeepAudioTrack({LocalMediaStream? localStream}) async {
+    final beepAudioTrack = _beepAudioTrack;
+    if (beepAudioTrack == null) {
+      return;
+    }
     _beepAudioTrack = null;
+    if (localStream != null) {
+      final attachedTracks = localStream.getAudioTracks();
+      if (attachedTracks.any(
+        (track) => identical(track, beepAudioTrack.audioTrack),
+      )) {
+        localStream.removeTrack(beepAudioTrack.audioTrack);
+      }
+    }
+    await beepAudioTrack.dispose();
   }
 }

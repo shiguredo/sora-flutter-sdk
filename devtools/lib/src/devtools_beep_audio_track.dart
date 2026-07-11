@@ -79,7 +79,10 @@ class DevToolsBeepAudioTrack {
     if (_disposed) return;
     _disposed = true;
     stop();
-    PushAudio.dispose();
-    await audioTrack.dispose();
+    try {
+      PushAudio.dispose();
+    } finally {
+      await audioTrack.dispose();
+    }
   }
 }

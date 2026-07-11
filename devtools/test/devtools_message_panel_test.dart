@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sora_devtools/src/devtools_message_panel.dart';
@@ -38,11 +40,11 @@ void main() {
     expect(controller.offset, offsetBeforeNewMessage);
   });
 
-  testWidgets('DataChannel signaling 未設定ではメッセージを送信できない', (
+  testWidgets('DataChannel が open していない間はメッセージを送信できない', (
     WidgetTester tester,
   ) async {
     var sent = false;
-    const guidance = 'Connect タブで DataChannel Signaling を有効にしてから再接続してください。';
+    const guidance = 'DataChannel が open するまでメッセージを送信できません。';
 
     await tester.pumpWidget(
       MaterialApp(
@@ -68,14 +70,15 @@ void main() {
     expect(sent, isFalse);
   });
 
-  test('DataChannel signaling と有効な dataChannels が揃った場合だけ送信できる', () {
+  test('open 済みの custom DataChannel だけ送信できる', () {
     expect(
       canSendDataChannelMessage(
         isConnected: true,
         hasConnection: true,
-        dataChannelSignalingEnabled: true,
         dataChannelsEnabled: true,
         hasDataChannelConfig: true,
+        label: '#chat',
+        openedDataChannelLabels: <String>{'#chat'},
       ),
       isTrue,
     );
@@ -83,9 +86,10 @@ void main() {
       canSendDataChannelMessage(
         isConnected: true,
         hasConnection: true,
-        dataChannelSignalingEnabled: false,
         dataChannelsEnabled: true,
         hasDataChannelConfig: true,
+        label: '#chat',
+        openedDataChannelLabels: <String>{},
       ),
       isFalse,
     );
@@ -93,9 +97,10 @@ void main() {
       canSendDataChannelMessage(
         isConnected: true,
         hasConnection: true,
-        dataChannelSignalingEnabled: true,
         dataChannelsEnabled: false,
         hasDataChannelConfig: true,
+        label: '#chat',
+        openedDataChannelLabels: <String>{'#chat'},
       ),
       isFalse,
     );
@@ -103,9 +108,10 @@ void main() {
       canSendDataChannelMessage(
         isConnected: true,
         hasConnection: true,
-        dataChannelSignalingEnabled: true,
         dataChannelsEnabled: true,
         hasDataChannelConfig: false,
+        label: '#chat',
+        openedDataChannelLabels: <String>{'#chat'},
       ),
       isFalse,
     );
@@ -115,12 +121,56 @@ void main() {
     expect(
       buildDataChannelMessageSendGuidance(
         isConnected: true,
-        dataChannelSignalingEnabled: true,
         dataChannelsEnabled: false,
         hasDataChannelConfig: false,
+        label: null,
+        openedDataChannelLabels: <String>{},
       ),
       'Connect タブで dataChannels を有効にし、label を設定してから再接続してください。',
     );
+  });
+
+  test('メッセージ履歴は件数と一件当たりのサイズを制限する', () {
+    final notifier = DevToolsPageNotifier();
+    final longText = 'a' * (DevToolsMessageHistory.maxMessageBytes + 1);
+    notifier.addSentMessage(
+      DevToolsMessageEntry(
+        timestamp: DateTime(2026, 7, 11),
+        label: '#chat',
+        text: longText,
+        isSent: true,
+      ),
+    );
+    expect(notifier.messages.single.text, contains('[truncated 1 bytes]'));
+
+    final receivedText = DevToolsMessageHistory.decodeReceivedMessage(
+      Uint8List.fromList(
+        List<int>.filled(DevToolsMessageHistory.maxMessageBytes + 1, 0x61),
+      ),
+    );
+    notifier.addReceivedMessage(
+      DevToolsMessageEntry(
+        timestamp: DateTime(2026, 7, 11),
+        label: '#chat',
+        text: receivedText,
+        isSent: false,
+      ),
+    );
+    expect(notifier.messages.last.text, endsWith('[truncated 1 bytes]'));
+
+    for (var index = 0; index <= DevToolsMessageHistory.maxEntries; index++) {
+      notifier.addReceivedMessage(
+        DevToolsMessageEntry(
+          timestamp: DateTime(2026, 7, 11),
+          label: '#chat',
+          text: 'message $index',
+          isSent: false,
+        ),
+      );
+    }
+
+    expect(notifier.messages, hasLength(DevToolsMessageHistory.maxEntries));
+    expect(notifier.messages.first.text, 'message 1');
   });
 }
 

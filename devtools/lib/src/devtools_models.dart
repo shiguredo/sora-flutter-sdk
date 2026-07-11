@@ -4,6 +4,9 @@
 /// 補助型をここに集約する。
 library;
 
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:sora_sdk/sora_sdk.dart';
 
@@ -94,6 +97,39 @@ class DevToolsMessageEntry {
   final String label;
   final String text;
   final bool isSent;
+}
+
+// DataChannel メッセージ履歴のメモリ上限を一箇所で定義する。
+class DevToolsMessageHistory {
+  // UI に保持する最大メッセージ件数。
+  static const int maxEntries = 200;
+  // 1 件についてデコード・保持する最大 byte 数。
+  static const int maxMessageBytes = 16 * 1024;
+
+  // 受信 payload を安全にデコードし、上限を超える部分を表示しない。
+  static String decodeReceivedMessage(Uint8List data) {
+    final retainedLength = data.length > maxMessageBytes
+        ? maxMessageBytes
+        : data.length;
+    final text = const Utf8Decoder(
+      allowMalformed: true,
+    ).convert(data.sublist(0, retainedLength));
+    if (retainedLength == data.length) {
+      return text;
+    }
+    return '$text\n[truncated ${data.length - retainedLength} bytes]';
+  }
+
+  // 送信メッセージも UTF-8 byte 数で制限し、履歴の増大を防ぐ。
+  static String truncateText(String text) {
+    final data = utf8.encode(text);
+    if (data.length <= maxMessageBytes) {
+      return text;
+    }
+    final retained = data.sublist(0, maxMessageBytes);
+    final decoded = const Utf8Decoder(allowMalformed: true).convert(retained);
+    return '$decoded\n[truncated ${data.length - maxMessageBytes} bytes]';
+  }
 }
 
 class DevToolsPageNotifier extends ChangeNotifier {
@@ -202,11 +238,47 @@ class DevToolsPageNotifier extends ChangeNotifier {
 
   // 送受信メッセージの履歴。
   final List<DevToolsMessageEntry> messages = <DevToolsMessageEntry>[];
+  // open イベントを受け取った custom DataChannel label 一覧。
+  final Set<String> openedDataChannelLabels = <String>{};
 
-  // 送受信メッセージを履歴に追加する。
+  // 送信メッセージを UTF-8 byte 上限付きで履歴に追加する。
   // notifyListeners() は呼ばない（呼び出し元の _mutateView → mutate() 経由で発火させる）。
-  void addMessage(DevToolsMessageEntry entry) {
+  void addSentMessage(DevToolsMessageEntry entry) {
+    _addMessage(
+      DevToolsMessageEntry(
+        timestamp: entry.timestamp,
+        label: entry.label,
+        text: DevToolsMessageHistory.truncateText(entry.text),
+        isSent: true,
+      ),
+    );
+  }
+
+  // EventHandler が byte 上限を適用済みの受信メッセージを履歴に追加する。
+  // marker の byte 数を壊さないため、ここでは再度切り詰めない。
+  void addReceivedMessage(DevToolsMessageEntry entry) {
+    _addMessage(
+      DevToolsMessageEntry(
+        timestamp: entry.timestamp,
+        label: entry.label,
+        text: entry.text,
+        isSent: false,
+      ),
+    );
+  }
+
+  // 件数上限を適用して履歴に追加する。
+  void _addMessage(DevToolsMessageEntry entry) {
     messages.add(entry);
+    final overflow = messages.length - DevToolsMessageHistory.maxEntries;
+    if (overflow > 0) {
+      messages.removeRange(0, overflow);
+    }
+  }
+
+  // DataChannel open イベントで送信可能な label を記録する。
+  void markDataChannelOpen(String label) {
+    openedDataChannelLabels.add(label);
   }
 
   // RPC 実行を開始する。
@@ -252,6 +324,7 @@ class DevToolsPageNotifier extends ChangeNotifier {
     timelineLogs.clear();
     statsLogs.clear();
     messages.clear();
+    openedDataChannelLabels.clear();
     audioEnabled = audioEnabledValue;
     videoEnabled = videoEnabledValue;
   }
@@ -263,12 +336,18 @@ class DevToolsPageNotifier extends ChangeNotifier {
     required bool videoEnabledValue,
     required bool notify,
   }) {
+    state = const SoraDisconnectedState();
+    peerConnectionStateLabel = 'disconnected';
+    iceStateLabel = 'unknown';
+    dtlsStateLabel = 'unknown';
+    localTextureId = null;
     audioEnabled = audioEnabledValue;
     videoEnabled = videoEnabledValue;
     remoteAudios.clear();
     remoteVideos.clear();
     remoteClients.clear();
     messages.clear();
+    openedDataChannelLabels.clear();
     if (notify) notifyListeners();
   }
 
@@ -286,6 +365,7 @@ class DevToolsPageNotifier extends ChangeNotifier {
     remoteVideos.clear();
     remoteClients.clear();
     messages.clear();
+    openedDataChannelLabels.clear();
   }
 
   // 状態変更を伴わずにアプリログへ 1 行追加する。

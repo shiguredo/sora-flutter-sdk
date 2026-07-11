@@ -7,8 +7,6 @@
 /// RPC method 同期や remote client 一覧更新もここで扱う。
 library;
 
-import 'dart:convert';
-
 import 'package:sora_sdk/sora_sdk.dart';
 
 import 'devtools_connection_controller.dart';
@@ -25,6 +23,7 @@ class DevToolsEventHandler {
     required DevToolsConnectionController connectionController,
     required DevToolsRpcTemplateRequest Function() buildRpcTemplateRequest,
     required void Function(String text) setRpcParamsText,
+    required void Function(String label) onDataChannelOpen,
     required void Function(DevToolsMessageEntry entry) onDataChannelMessage,
   }) : _pageNotifier = pageNotifier,
        _mutateView = mutateView,
@@ -34,6 +33,7 @@ class DevToolsEventHandler {
        _connectionController = connectionController,
        _buildRpcTemplateRequest = buildRpcTemplateRequest,
        _setRpcParamsText = setRpcParamsText,
+       _onDataChannelOpen = onDataChannelOpen,
        _onDataChannelMessage = onDataChannelMessage;
 
   final DevToolsPageNotifier _pageNotifier;
@@ -44,6 +44,7 @@ class DevToolsEventHandler {
   final DevToolsConnectionController _connectionController;
   final DevToolsRpcTemplateRequest Function() _buildRpcTemplateRequest;
   final void Function(String) _setRpcParamsText;
+  final void Function(String) _onDataChannelOpen;
   final void Function(DevToolsMessageEntry) _onDataChannelMessage;
 
   /// SoraConnection の主要イベントを画面状態とログへ反映する。
@@ -83,6 +84,7 @@ class DevToolsEventHandler {
         _appendEventLog(
           DevToolsLoggingSupport.formatDataChannelEventLog(event),
         );
+        _onDataChannelOpen(event.label);
       case SoraDataChannelMessageEvent(message: final message):
         _appendEventLog(
           DevToolsLoggingSupport.formatDataChannelMessageLog(message),
@@ -91,7 +93,7 @@ class DevToolsEventHandler {
           DevToolsMessageEntry(
             timestamp: DateTime.now(),
             label: message.label,
-            text: const Utf8Decoder(allowMalformed: true).convert(message.data),
+            text: DevToolsMessageHistory.decodeReceivedMessage(message.data),
             isSent: false,
           ),
         );

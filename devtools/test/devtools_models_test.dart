@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sora_devtools/src/devtools_models.dart';
+import 'package:sora_sdk/sora_sdk.dart';
 
 void main() {
   test('ログ検索は大文字小文字を無視した部分一致で絞り込む', () {
@@ -38,5 +39,34 @@ void main() {
 
     expect(notifier.logs, isEmpty);
     expect(notifier.eventLogs, <String>['event log']);
+  });
+
+  test('切断後は接続状態を戻しつつエラーと close info を保持する', () {
+    final notifier = DevToolsPageNotifier()
+      ..state = const SoraConnectedState()
+      ..disconnectCloseInfo = const SoraDisconnectCloseInfo(
+        code: 1011,
+        reason: 'internal error',
+      )
+      ..connectionErrorCode = 'CONNECTION_TIMEOUT'
+      ..connectionErrorMessage = 'timed out'
+      ..peerConnectionStateLabel = 'connected'
+      ..iceStateLabel = 'connected'
+      ..dtlsStateLabel = 'connected';
+
+    notifier.resetAfterDisconnect(
+      audioEnabledValue: true,
+      videoEnabledValue: true,
+      notify: false,
+    );
+
+    expect(notifier.state, isA<SoraDisconnectedState>());
+    expect(notifier.disconnectCloseInfo?.code, 1011);
+    expect(notifier.disconnectCloseInfo?.reason, 'internal error');
+    expect(notifier.connectionErrorCode, 'CONNECTION_TIMEOUT');
+    expect(notifier.connectionErrorMessage, 'timed out');
+    expect(notifier.peerConnectionStateLabel, 'disconnected');
+    expect(notifier.iceStateLabel, 'unknown');
+    expect(notifier.dtlsStateLabel, 'unknown');
   });
 }

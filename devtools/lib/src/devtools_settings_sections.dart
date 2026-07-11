@@ -426,6 +426,9 @@ class DevToolsMediaDeviceSection extends StatelessWidget {
     super.key,
     required this.isAndroid,
     required this.needsCamera,
+    required this.canChangeAudioInput,
+    required this.canChangeAudioOutput,
+    required this.canChangeVideoInput,
     required this.cameraSubtitle,
     required this.selectedAudioInputLabel,
     required this.selectedAudioInputDeviceId,
@@ -445,6 +448,15 @@ class DevToolsMediaDeviceSection extends StatelessWidget {
 
   // カメラ入力が必要な状態かどうか
   final bool needsCamera;
+
+  // Audio Input を次回接続用に変更できるかどうか。
+  final bool canChangeAudioInput;
+
+  // Audio Route を変更できるかどうか。
+  final bool canChangeAudioOutput;
+
+  // Camera を次回接続用に変更できるかどうか。
+  final bool canChangeVideoInput;
 
   // タイル見出し下に表示するカメラ情報
   final String cameraSubtitle;
@@ -521,12 +533,14 @@ class DevToolsMediaDeviceSection extends StatelessWidget {
                         ),
                       );
                     }).toList(),
-                    onChanged: (deviceId) {
-                      if (deviceId == null) {
-                        return;
-                      }
-                      onAudioOutputChanged(deviceId);
-                    },
+                    onChanged: canChangeAudioOutput
+                        ? (deviceId) {
+                            if (deviceId == null) {
+                              return;
+                            }
+                            onAudioOutputChanged(deviceId);
+                          }
+                        : null,
                   ),
                 ),
               ],
@@ -571,44 +585,14 @@ class DevToolsMediaDeviceSection extends StatelessWidget {
                         ),
                       );
                     }).toList(),
-                    onChanged: (deviceId) {
-                      if (deviceId == null) {
-                        return;
-                      }
-                      onAudioInputChanged(deviceId);
-                    },
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    key: ValueKey<String?>(selectedAudioOutputDeviceId),
-                    initialValue: selectedAudioOutputDeviceId,
-                    decoration: const InputDecoration(
-                      labelText: 'Audio Output',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                      helperText: 'Android は接続時と選択変更時に適用します。',
-                    ),
-                    items: audioOutputOptions.map((option) {
-                      return DropdownMenuItem(
-                        value: option.value,
-                        child: Text(
-                          option.label,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      );
-                    }).toList(),
-                    onChanged: (deviceId) {
-                      if (deviceId == null) {
-                        return;
-                      }
-                      onAudioOutputChanged(deviceId);
-                    },
+                    onChanged: canChangeAudioInput
+                        ? (deviceId) {
+                            if (deviceId == null) {
+                              return;
+                            }
+                            onAudioInputChanged(deviceId);
+                          }
+                        : null,
                   ),
                 ),
               ],
@@ -636,12 +620,14 @@ class DevToolsMediaDeviceSection extends StatelessWidget {
                         ),
                       );
                     }).toList(),
-                    onChanged: (deviceId) {
-                      if (deviceId == null) {
-                        return;
-                      }
-                      onVideoInputChanged(deviceId);
-                    },
+                    onChanged: canChangeVideoInput
+                        ? (deviceId) {
+                            if (deviceId == null) {
+                              return;
+                            }
+                            onVideoInputChanged(deviceId);
+                          }
+                        : null,
                   ),
                 ),
               ],
@@ -675,6 +661,7 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
     required this.connectVideo,
     required this.beepAudioEnabled,
     required this.needsCamera,
+    required this.connectionParametersEditable,
     required this.canEditSimulcastRequestRid,
     required this.canEditSpotlightRid,
     required this.selectedVideoCodecType,
@@ -744,6 +731,9 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
 
   // 現在の設定でカメラが必要かどうか
   final bool needsCamera;
+
+  // 接続確立パラメータを編集できるかどうか。
+  final bool connectionParametersEditable;
 
   // simulcast_request_rid を編集可能かどうか
   final bool canEditSimulcastRequestRid;
@@ -825,6 +815,7 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
         _DevToolsSettingsGroup(
           title: 'Signaling',
           initiallyExpanded: true,
+          enabled: connectionParametersEditable,
           children: [
             Row(
               children: [
@@ -890,6 +881,7 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
         _DevToolsSettingsGroup(
           title: 'Simulcast',
           subtitle: simulcastEnabled ? 'Enabled' : 'Disabled',
+          enabled: connectionParametersEditable,
           children: [
             Row(
               children: [
@@ -957,6 +949,7 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
         _DevToolsSettingsGroup(
           title: 'Spotlight',
           subtitle: spotlightEnabled ? 'Enabled' : 'Disabled',
+          enabled: connectionParametersEditable,
           children: [
             Row(
               children: [
@@ -1054,6 +1047,7 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
         _DevToolsSettingsGroup(
           title: 'Media',
           initiallyExpanded: true,
+          enabled: connectionParametersEditable,
           children: [
             LayoutBuilder(
               builder: (context, constraints) {
@@ -1317,12 +1311,14 @@ class _DevToolsSettingsGroup extends StatelessWidget {
     required this.children,
     this.subtitle,
     this.initiallyExpanded = false,
+    this.enabled = true,
   });
 
   final String title;
   final List<Widget> children;
   final String? subtitle;
   final bool initiallyExpanded;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -1338,7 +1334,18 @@ class _DevToolsSettingsGroup extends StatelessWidget {
           title: Text(title),
           subtitle: subtitle == null ? null : Text(subtitle!),
           childrenPadding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-          children: children,
+          children: [
+            ExcludeFocus(
+              excluding: !enabled,
+              child: IgnorePointer(
+                ignoring: !enabled,
+                child: Opacity(
+                  opacity: enabled ? 1 : 0.55,
+                  child: Column(children: children),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

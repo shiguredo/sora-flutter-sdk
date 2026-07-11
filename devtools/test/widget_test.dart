@@ -376,6 +376,86 @@ void main() {
     },
   );
 
+  testWidgets('接続中でも Simulcast 設定グループを展開して確認できる', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const _ConnectionSettingsHarness(
+        hasRetainedConnection: true,
+        connectionParametersEditable: false,
+      ),
+    );
+
+    await tester.ensureVisible(find.text('Simulcast'));
+    await tester.tap(find.text('Simulcast'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('simulcast_request_rid'), findsOneWidget);
+  });
+
+  testWidgets('接続開始後は既に focus 済みの Signaling URL を編集できない', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      const _ConnectionSettingsHarness(hasRetainedConnection: true),
+    );
+
+    final signalingUrl = find.widgetWithText(TextFormField, 'Signaling URL');
+    await tester.tap(signalingUrl);
+    await tester.pump();
+    final editableText = tester.widget<EditableText>(
+      find.descendant(of: signalingUrl, matching: find.byType(EditableText)),
+    );
+    expect(editableText.focusNode.hasFocus, isTrue);
+
+    final state = tester.state<_ConnectionSettingsHarnessState>(
+      find.byType(_ConnectionSettingsHarness),
+    );
+    state.setConnectionParametersEditable(false);
+    await tester.pump();
+
+    expect(editableText.focusNode.hasFocus, isFalse);
+  });
+
+  testWidgets('Android の Audio Route は入力選択と独立して変更できる', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DevToolsMediaDeviceSection(
+            isAndroid: true,
+            needsCamera: false,
+            canChangeAudioInput: false,
+            canChangeAudioOutput: true,
+            canChangeVideoInput: false,
+            cameraSubtitle: '',
+            selectedAudioInputLabel: 'Speaker',
+            selectedAudioInputDeviceId: 'speaker',
+            selectedAudioOutputDeviceId: 'speaker',
+            selectedVideoInputDeviceId: null,
+            audioInputOptions: const <DevToolsSelectionOption>[],
+            audioOutputOptions: const <DevToolsSelectionOption>[
+              DevToolsSelectionOption(value: 'speaker', label: 'Speaker'),
+              DevToolsSelectionOption(value: 'earpiece', label: 'Earpiece'),
+            ],
+            videoInputOptions: const <DevToolsSelectionOption>[],
+            onExpanded: () {},
+            onAudioInputChanged: (_) {},
+            onAudioOutputChanged: (_) {},
+            onVideoInputChanged: (_) {},
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Media Device'));
+    await tester.pumpAndSettle();
+
+    final audioRoute = tester.widget<DropdownButtonFormField<String>>(
+      find.byType(DropdownButtonFormField<String>),
+    );
+    expect(audioRoute.onChanged, isNotNull);
+  });
+
   testWidgets('タブで Video / RPC / Diagnostics を切り替えられる', (
     WidgetTester tester,
   ) async {
@@ -533,10 +613,12 @@ class _ConnectionSettingsHarness extends StatefulWidget {
   const _ConnectionSettingsHarness({
     required this.hasRetainedConnection,
     this.initialConnectVideo = true,
+    this.connectionParametersEditable = true,
   });
 
   final bool hasRetainedConnection;
   final bool initialConnectVideo;
+  final bool connectionParametersEditable;
 
   @override
   State<_ConnectionSettingsHarness> createState() =>
@@ -549,6 +631,7 @@ class _ConnectionSettingsHarnessState
   late final TextEditingController channelIdController;
   late bool connectAudio;
   late bool connectVideo;
+  late bool connectionParametersEditable;
   int clearLocalPreviewCount = 0;
 
   @override
@@ -558,6 +641,7 @@ class _ConnectionSettingsHarnessState
     channelIdController = TextEditingController();
     connectAudio = true;
     connectVideo = widget.initialConnectVideo;
+    connectionParametersEditable = widget.connectionParametersEditable;
   }
 
   @override
@@ -585,6 +669,7 @@ class _ConnectionSettingsHarnessState
             connectVideo: connectVideo,
             beepAudioEnabled: false,
             needsCamera: connectVideo,
+            connectionParametersEditable: connectionParametersEditable,
             canEditSimulcastRequestRid: false,
             canEditSpotlightRid: false,
             selectedVideoCodecType: null,
@@ -625,6 +710,13 @@ class _ConnectionSettingsHarnessState
       )) {
         clearLocalPreviewCount++;
       }
+    });
+  }
+
+  // 接続中への遷移を模擬して接続確立パラメータの編集可否を切り替える。
+  void setConnectionParametersEditable(bool value) {
+    setState(() {
+      connectionParametersEditable = value;
     });
   }
 

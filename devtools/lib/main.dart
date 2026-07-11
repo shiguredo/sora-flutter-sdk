@@ -105,6 +105,8 @@ class _DevToolsPageState extends State<DevToolsPage>
   bool _useExternalVideoTrack = false;
   // external camera のライフサイクル管理。
   late final DevToolsExternalCameraManager _cameraManager;
+  // 非同期の camera format 取得結果を最新選択だけに反映するための世代番号。
+  int _videoInputFormatGeneration = 0;
 
   // DataChannel signaling を有効にするかどうか。
   bool _dataChannelSignalingEnabled = false;
@@ -329,21 +331,23 @@ class _DevToolsPageState extends State<DevToolsPage>
       _dataChannelsEnabled &&
       _dataChannelLabelController.text.trim().isNotEmpty;
 
-  // DataChannel signaling と dataChannels を含めたメッセージ送信可否。
+  // open 済み custom DataChannel にだけメッセージを送信する。
   bool get _canSendMessage => canSendDataChannelMessage(
     isConnected: _isConnected,
     hasConnection: _connection != null,
-    dataChannelSignalingEnabled: _dataChannelSignalingEnabled,
     dataChannelsEnabled: _dataChannelsEnabled,
     hasDataChannelConfig: _hasDataChannelConfig,
+    label: _dataChannelLabelController.text.trim(),
+    openedDataChannelLabels: _pageNotifier.openedDataChannelLabels,
   );
 
   // メッセージを送信できない場合に表示する次の操作。
   String? get _messageSendGuidance => buildDataChannelMessageSendGuidance(
     isConnected: _isConnected,
-    dataChannelSignalingEnabled: _dataChannelSignalingEnabled,
     dataChannelsEnabled: _dataChannelsEnabled,
     hasDataChannelConfig: _hasDataChannelConfig,
+    label: _dataChannelLabelController.text.trim(),
+    openedDataChannelLabels: _pageNotifier.openedDataChannelLabels,
   );
 
   // DataChannel 設定が有効な場合、接続用の Map リストを生成する。
@@ -413,16 +417,21 @@ class _DevToolsPageState extends State<DevToolsPage>
       setRpcParamsText: (text) {
         _rpcParamsController.text = text;
       },
+      onDataChannelOpen: (label) {
+        _mutateView(() {
+          _pageNotifier.markDataChannelOpen(label);
+        });
+      },
       onDataChannelMessage: (entry) {
         _mutateView(() {
-          _pageNotifier.addMessage(entry);
+          _pageNotifier.addReceivedMessage(entry);
         });
       },
     );
     // external video track 用のカメラ管理。
     _cameraManager = DevToolsExternalCameraManager(onLog: _appendLog);
-    // Windows では External Video Track の動作が未検証のため無効化する
-    if (Platform.isWindows) {
+    // camera plugin を利用できない platform では External Video Track を無効化する。
+    if (!_supportsExternalVideoTrack) {
       _useExternalVideoTrack = false;
     }
     // シグナリング URL 入力欄の TextEditingController。
@@ -448,7 +457,12 @@ class _DevToolsPageState extends State<DevToolsPage>
 
   @override
   void dispose() {
-    unawaited(_connectionSubscriptionController.dispose());
+    final connection = _connection;
+    _connection = null;
+    final localStream = _localStream;
+    _localStream = null;
+    // State.dispose は await できないため、購読を先に無効化してから cleanup を開始する。
+    unawaited(_disposeAfterUnmount(connection, localStream));
     _signalingUrlController.dispose();
     _channelIdController.dispose();
     _rpcParamsController.dispose();
@@ -458,19 +472,42 @@ class _DevToolsPageState extends State<DevToolsPage>
     _dataChannelLabelController.dispose();
     _dataChannelMaxPacketLifeTimeController.dispose();
     _tabController.dispose();
-    final conn = _connection;
-    _connection = null;
-    final localStream = _localStream;
-    _localStream = null;
-    if (conn != null) {
-      unawaited(conn.dispose());
-    }
-    if (localStream != null) {
-      unawaited(_disposeLocalStream(localStream));
-    }
     _pageNotifier.dispose();
-    unawaited(_cameraManager.dispose());
     super.dispose();
+  }
+
+  // unmount 後に connection と media を順序付きで解放する。
+  Future<void> _disposeAfterUnmount(
+    SoraConnection? connection,
+    LocalMediaStream? localStream,
+  ) async {
+    try {
+      await _cameraManager.stop();
+    } catch (error) {
+      _appendLog('connection cleanup: camera stop failed error=$error');
+    }
+    try {
+      await _connectionController.disposeConnectionResources(
+        connection: connection,
+        localStream: localStream,
+      );
+    } catch (error) {
+      _appendLog('connection cleanup: resources dispose failed error=$error');
+    } finally {
+      try {
+        await _cameraManager.dispose();
+      } catch (error) {
+        _appendLog('connection cleanup: camera dispose failed error=$error');
+      } finally {
+        try {
+          await _connectionSubscriptionController.dispose();
+        } catch (error) {
+          _appendLog(
+            'connection cleanup: subscription dispose failed error=$error',
+          );
+        }
+      }
+    }
   }
 
   // sendonly | sendrecv ロールを送信用ロールとする
@@ -571,6 +608,16 @@ class _DevToolsPageState extends State<DevToolsPage>
 
   bool get _isConnected => _state is SoraConnectedState;
 
+  // 接続確立パラメータは接続中・接続処理中に変更させない。
+  bool get _canEditConnectionParameters =>
+      !_busy && !_isConnecting && !_isConnected;
+
+  // Android の Audio Route は接続中にも native routing へ即時反映できる。
+  bool get _canChangeAudioOutput => !_busy && !_isConnecting;
+
+  // camera plugin が動作する platform だけ External Video Track をサポートする。
+  bool get _supportsExternalVideoTrack => Platform.isAndroid || Platform.isIOS;
+
   String get _connectionStateLabel {
     final state = _state;
     return switch (state) {
@@ -597,10 +644,13 @@ class _DevToolsPageState extends State<DevToolsPage>
 
   // 選択中 video input device の対応解像度一覧を読み込む。
   Future<void> _loadVideoInputFormats(VideoInputDevice device) async {
+    final generation = ++_videoInputFormatGeneration;
     final resolutions = await DevToolsMediaDevicesSupport.loadVideoInputFormats(
       device,
     );
-    if (!mounted) {
+    if (!mounted ||
+        generation != _videoInputFormatGeneration ||
+        _selectedVideoInputDevice?.deviceId != device.deviceId) {
       return;
     }
     _mutateView(() {
@@ -650,6 +700,9 @@ class _DevToolsPageState extends State<DevToolsPage>
   // Device Id を指定して映像入力デバイスを選択する。
   // 見つからなかった場合は _videoInputDevices の先頭を返すフォールバックを行う。
   Future<void> _selectVideoInputDevice(String deviceId) async {
+    if (!_canEditConnectionParameters || _videoInputDevices.isEmpty) {
+      return;
+    }
     final device = _videoInputDevices.firstWhere(
       (d) => d.deviceId == deviceId,
       orElse: () => _videoInputDevices.first,
@@ -657,6 +710,7 @@ class _DevToolsPageState extends State<DevToolsPage>
     _mutateView(() {
       _selectedVideoInputDevice = device;
     });
+    // 接続前 preview だけを破棄し、接続中 stream の track は決して破棄しない。
     await _clearLocalPreview();
     await _loadVideoInputFormats(device);
   }
@@ -669,18 +723,22 @@ class _DevToolsPageState extends State<DevToolsPage>
     if (conn == null || label.isEmpty || !_canSendMessage) {
       return;
     }
-    conn.sendDataChannelMessage(label, Uint8List.fromList(utf8.encode(text)));
-    _mutateView(() {
-      _pageNotifier.addMessage(
-        DevToolsMessageEntry(
-          timestamp: DateTime.now(),
-          label: label,
-          text: text,
-          isSent: true,
-        ),
-      );
-    });
-    _appendLog('message: sent label=$label text=$text');
+    try {
+      conn.sendDataChannelMessage(label, Uint8List.fromList(utf8.encode(text)));
+      _mutateView(() {
+        _pageNotifier.addSentMessage(
+          DevToolsMessageEntry(
+            timestamp: DateTime.now(),
+            label: label,
+            text: text,
+            isSent: true,
+          ),
+        );
+      });
+      _appendLog('message: sent label=$label text=$text');
+    } catch (error) {
+      _appendLog('message: send failed label=$label error=$error');
+    }
   }
 
   // 入力欄の値を検証し、接続中の peer へ RPC を送信する。
@@ -856,12 +914,16 @@ class _DevToolsPageState extends State<DevToolsPage>
       if (!mounted) {
         return;
       }
-      if (_useExternalVideoTrack) {
+      if (_useExternalVideoTrack && _publishesVideo) {
         await _cameraManager.initialize();
       }
       _appendLog('connect: start role=${_selectedRole.value}');
+      // preview stream の所有権を接続 transaction へ渡す。
+      // 失敗時は controller が確実に解放するため、画面側には残さない。
+      final retainedLocalStream = _localStream;
+      _localStream = null;
       final result = await _connectionController.createAndConnect(
-        request: _buildConnectRequest(),
+        request: _buildConnectRequest(existingLocalStream: retainedLocalStream),
         onLocalTextureReady: (textureId) {
           if (!mounted) {
             return;
@@ -873,17 +935,21 @@ class _DevToolsPageState extends State<DevToolsPage>
       );
       final conn = result.connection;
       final localStream = result.localStream;
+      if (!mounted) {
+        await _connectionController.disposeConnectionResources(
+          connection: conn,
+          localStream: localStream,
+        );
+        return;
+      }
       _connection = conn;
       _localStream = localStream;
-      if (_useExternalVideoTrack && localStream != null) {
+      if (_useExternalVideoTrack && _publishesVideo && localStream != null) {
         final videoTracks = localStream.getVideoTracks();
         if (videoTracks.isNotEmpty &&
             videoTracks.first.captureType == VideoTrackCaptureType.external) {
           await _cameraManager.start(videoTracks.first);
         }
-      }
-      if (!mounted) {
-        return;
       }
       _mutateView(() {
         _audioEnabled = currentAudioTrackEnabled(
@@ -899,10 +965,7 @@ class _DevToolsPageState extends State<DevToolsPage>
       _tabController.animateTo(1);
     } catch (error) {
       _appendLog('connect: exception=$error');
-      // connect() 失敗直前に流れる connection_error / disconnected を
-      // event log へ取り込めるよう、購読解除を 1 tick 遅らせる。
-      await Future<void>.delayed(Duration.zero);
-      await _disposeClient(preserveLocalStream: true);
+      await _disposeClient();
       if (mounted) {
         _mutateView(() {
           _state = const SoraDisconnectedState();
@@ -928,7 +991,9 @@ class _DevToolsPageState extends State<DevToolsPage>
   }
 
   // 現在の UI 設定から接続要求を組み立てる。
-  DevToolsConnectRequest _buildConnectRequest() {
+  DevToolsConnectRequest _buildConnectRequest({
+    LocalMediaStream? existingLocalStream,
+  }) {
     return DevToolsConnectRequest(
       signalingUrls: _signalingUrl.isEmpty
           ? Environment.urls
@@ -952,8 +1017,8 @@ class _DevToolsPageState extends State<DevToolsPage>
       selectedVideoInputDeviceId: _selectedVideoInputDevice?.deviceId,
       selectedResolution: _selectedResolution,
       selectedFrameRate: _selectedFrameRate,
-      existingLocalStream: _localStream,
-      useExternalVideoTrack: _useExternalVideoTrack,
+      existingLocalStream: existingLocalStream,
+      useExternalVideoTrack: _useExternalVideoTrack && _publishesVideo,
       dataChannels: _buildDataChannelConfigs(),
       dataChannelSignaling: _dataChannelSignalingEnabled,
       ignoreDisconnectWebSocket: _ignoreDisconnectWebSocketEnabled,
@@ -1034,14 +1099,20 @@ class _DevToolsPageState extends State<DevToolsPage>
       if (conn != null) {
         await _connectionController.disconnect(conn);
       }
-      await _connectionController.disposeBeepAudioTrack();
+      _appendLog('disconnect: done');
+    } catch (error) {
+      _appendLog('disconnect: failed error=$error');
+    } finally {
+      try {
+        await _disposeClient();
+      } catch (error) {
+        _appendLog('disconnect: cleanup failed error=$error');
+      }
       _pageNotifier.resetAfterDisconnect(
         audioEnabledValue: _configuredAudio,
         videoEnabledValue: _configuredVideo,
         notify: mounted,
       );
-      _appendLog('disconnect: done');
-    } finally {
       if (mounted) {
         _mutateView(() {
           _busy = false;
@@ -1112,7 +1183,6 @@ class _DevToolsPageState extends State<DevToolsPage>
 
   // 接続購読と保持中 client をまとめて破棄し、状態を初期化する。
   Future<void> _disposeClient({bool preserveLocalStream = false}) async {
-    await _connectionSubscriptionController.unbind();
     _pageNotifier.resetDisposedClientState(
       audioEnabledValue: _configuredAudio,
       videoEnabledValue: _configuredVideo,
@@ -1123,18 +1193,28 @@ class _DevToolsPageState extends State<DevToolsPage>
     if (!preserveLocalStream) {
       _localStream = null;
     }
-    // クリーンアップ順序:
-    // 1. frame source 停止（track が生きているうちに stopImageStream する）
-    // 2. connection 破棄（track の native リソースが解放される）
-    // 3. preserveLocalStream=false の場合のみカメラも破棄
-    await _cameraManager.stop();
-    if (conn != null) {
-      await conn.dispose();
+    // track が生きているうちに frame source を停止してから接続を解放する。
+    try {
+      await _cameraManager.stop();
+    } catch (error) {
+      _appendLog('connection cleanup: camera stop failed error=$error');
     }
-    if (!preserveLocalStream) {
-      await _cameraManager.dispose();
+    try {
+      await _connectionController.disposeConnectionResources(
+        connection: conn,
+        localStream: localStream,
+      );
+    } catch (error) {
+      _appendLog('connection cleanup: resources dispose failed error=$error');
+    } finally {
+      if (!preserveLocalStream) {
+        try {
+          await _cameraManager.dispose();
+        } catch (error) {
+          _appendLog('connection cleanup: camera dispose failed error=$error');
+        }
+      }
     }
-    await _connectionController.disposeLocalStream(localStream);
   }
 
   // 画面内だけで保持している local preview を破棄する。
@@ -1149,7 +1229,7 @@ class _DevToolsPageState extends State<DevToolsPage>
       _localTextureId = null;
     }
     if (stream != null) {
-      await _disposeLocalStream(stream);
+      await _connectionController.disposeLocalStream(stream);
     }
   }
 
@@ -1739,7 +1819,11 @@ class _DevToolsPageState extends State<DevToolsPage>
                     'pub.dev の camera package 利用で映像を配信する検証用機能です',
                   ),
                   value: _useExternalVideoTrack,
-                  onChanged: _busy || _isConnected || Platform.isWindows
+                  onChanged:
+                      _busy ||
+                          _isConnected ||
+                          !_supportsExternalVideoTrack ||
+                          !_publishesVideo
                       ? null
                       : (value) {
                           _mutateView(() {
@@ -1891,6 +1975,7 @@ class _DevToolsPageState extends State<DevToolsPage>
       connectVideo: _connectVideo,
       beepAudioEnabled: _beepAudioEnabled,
       needsCamera: _needsCamera,
+      connectionParametersEditable: _canEditConnectionParameters,
       canEditSimulcastRequestRid: _canEditSimulcastRequestRid,
       canEditSpotlightRid: _canEditSpotlightRid,
       selectedVideoCodecType: _selectedVideoCodecType,
@@ -1907,6 +1992,9 @@ class _DevToolsPageState extends State<DevToolsPage>
           .map((resolution) => resolution.toString())
           .toList(growable: false),
       onRoleChanged: (value) {
+        if (!_canEditConnectionParameters) {
+          return;
+        }
         _mutateView(() {
           _selectedRole = value;
           if (!_usesSimulcastRequestRid) {
@@ -1980,12 +2068,18 @@ class _DevToolsPageState extends State<DevToolsPage>
         });
       },
       onResolutionChanged: (index) {
+        if (!_canEditConnectionParameters) {
+          return;
+        }
         _mutateView(() {
           _selectedResolution = _videoInputResolutions[index];
         });
         unawaited(_clearLocalPreview());
       },
       onFrameRateChanged: (value) {
+        if (!_canEditConnectionParameters) {
+          return;
+        }
         _mutateView(() {
           _selectedFrameRate = value;
         });
@@ -2001,6 +2095,9 @@ class _DevToolsPageState extends State<DevToolsPage>
     return DevToolsMediaDeviceSection(
       isAndroid: Platform.isAndroid,
       needsCamera: _needsCamera,
+      canChangeAudioInput: _canEditConnectionParameters,
+      canChangeAudioOutput: _canChangeAudioOutput,
+      canChangeVideoInput: _canEditConnectionParameters,
       cameraSubtitle: _needsCamera
           ? (_selectedVideoInputDevice?.label ?? '')
           : 'Camera is not used in current role',
@@ -2044,14 +2141,22 @@ class _DevToolsPageState extends State<DevToolsPage>
         unawaited(_loadAudioDevices());
       },
       onAudioInputChanged: (deviceId) {
+        if (!_canEditConnectionParameters || _audioInputDevices.isEmpty) {
+          return;
+        }
         _mutateView(() {
           _selectedAudioInputDevice = _audioInputDevices.firstWhere(
             (device) => device.deviceId == deviceId,
             orElse: () => _audioInputDevices.first,
           );
         });
+        // 次回接続で選択を確実に反映するため、接続前 preview を破棄する。
+        unawaited(_clearLocalPreview());
       },
       onAudioOutputChanged: (deviceId) {
+        if (!_canChangeAudioOutput || _audioOutputDevices.isEmpty) {
+          return;
+        }
         if (Platform.isAndroid) {
           final outputDevice = _audioOutputDevices.firstWhere(
             (device) => device.deviceId == deviceId,

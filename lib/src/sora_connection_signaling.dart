@@ -62,7 +62,7 @@ extension _SoraConnectionSignaling on SoraConnection {
         if (identical(_signalingState.connectingWebSocketChannel, channel)) {
           _signalingState.connectingWebSocketChannel = null;
         }
-        await channel?.sink.close();
+        _closeFailedSignalingCandidate(channel);
       } catch (error) {
         // タイムアウト以外の接続エラー。TimeoutException 時同様に後始末して次の候補 URL へ進む
         // channel.ready 成功前に catch に到達するため subscription は未設定。
@@ -73,7 +73,7 @@ extension _SoraConnectionSignaling on SoraConnection {
         if (identical(_signalingState.connectingWebSocketChannel, channel)) {
           _signalingState.connectingWebSocketChannel = null;
         }
-        await channel?.sink.close();
+        _closeFailedSignalingCandidate(channel);
       }
     }
     if (lastError is TimeoutException) {
@@ -84,6 +84,23 @@ extension _SoraConnectionSignaling on SoraConnection {
       );
     }
     throw lastError ?? Exception('No signaling URLs configured');
+  }
+
+  /// 接続に失敗した候補の WebSocket を非同期で閉じる。
+  ///
+  /// 接続未確立の channel では `sink.close()` が完了しない場合があるため、
+  /// 後始末の完了を待つと次のシグナリング URL へのフェイルオーバーが止まる。
+  void _closeFailedSignalingCandidate(WebSocketChannel? channel) {
+    if (channel == null) {
+      return;
+    }
+    unawaited(() async {
+      try {
+        await channel.sink.close();
+      } catch (error) {
+        _emitDebugMessage('ws failed candidate cleanup failed: $error');
+      }
+    }());
   }
 
   /// WebSocket シグナリングメッセージを処理する

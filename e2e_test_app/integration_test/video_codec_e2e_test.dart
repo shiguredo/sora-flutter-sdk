@@ -15,7 +15,15 @@ import 'helpers/video_source.dart';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
+  // CI 環境（GitHub Actions 等）では HEVC ハードウェアデコーダが利用できず
+  // H.265 の E2E が失敗するため、H.265 を除くコーデックのみテストする。
+  // ローカルでは全コーデックをテストする。
+  final isCi = Platform.environment['CI'] == 'true';
+
   for (final codec in VideoCodecType.values) {
+    if (isCi && codec == VideoCodecType.h265) {
+      continue;
+    }
     testWidgets('${codec.value}: 指定した Video Codec で映像を送受信できる', (
       WidgetTester tester,
     ) async {

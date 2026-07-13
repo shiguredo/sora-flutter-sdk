@@ -11,6 +11,7 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 import 'package:meta/meta.dart';
 
+import '../sora_codec_type.dart';
 import '../sora_error_code.dart';
 import 'bindings.dart';
 import 'callback_handlers.dart' show SdpNegotiationCallbacks;
@@ -2272,6 +2273,40 @@ class WebrtcClient {
 
     // それ以外のプラットフォームは built-in factory を使う。
     return sharedLib.createBuiltinVideoDecoderFactory();
+  }
+
+  /// プラットフォームのビデオデコーダがサポートする [VideoCodecType] の一覧。
+  ///
+  /// 内部で一時的なデコーダファクトリを生成して `GetSupportedFormats` を呼ぶ。
+  /// 戻り値の順序はプラットフォーム依存。
+  static List<VideoCodecType> get supportedVideoCodecTypes {
+    final dec = _createDefaultVideoDecoderFactory();
+    try {
+      final rawDec = sharedLib.videoDecoderFactoryUniqueGet(dec);
+      final formats = sharedLib.videoDecoderFactoryGetSupportedFormats(rawDec);
+      try {
+        final size = sharedLib.sdpVideoFormatVectorSize(formats);
+        final codecs = <VideoCodecType>[];
+        for (var i = 0; i < size; i++) {
+          final format = sharedLib.sdpVideoFormatVectorGet(formats, i);
+          final namePtr = sharedLib.sdpVideoFormatGetName(format);
+          if (namePtr == nullptr) {
+            continue;
+          }
+          final name = namePtr.cast<Utf8>().toDartString();
+          final codecName = name.trim().toUpperCase();
+          final codecType = VideoCodecType.fromValue(codecName);
+          if (codecType != null && !codecs.contains(codecType)) {
+            codecs.add(codecType);
+          }
+        }
+        return codecs;
+      } finally {
+        sharedLib.sdpVideoFormatVectorDelete(formats);
+      }
+    } finally {
+      sharedLib.videoDecoderFactoryUniqueDelete(dec);
+    }
   }
 
   // Android の既定ビデオエンコーダーファクトリを JNI 経由で作る。

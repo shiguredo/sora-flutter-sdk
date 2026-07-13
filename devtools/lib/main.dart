@@ -147,6 +147,8 @@ class _DevToolsPageState extends State<DevToolsPage>
   bool _useAudioDeviceSettingLocked = false;
   // 現在選択中の音声コーデックを保持する。
   String? _selectedAudioCodecType;
+  // Video Codec 選択肢。起動時に Sora.supportedVideoCodecTypes から動的に取得する。
+  List<String> _videoCodecTypeOptions = DevToolsConstants.videoCodecTypeOptions;
   // DataChannel label 入力欄の TextEditingController。
   late final TextEditingController _dataChannelLabelController;
   // DataChannel の送受信方向 (sendrecv / sendonly / recvonly)。
@@ -508,6 +510,16 @@ class _DevToolsPageState extends State<DevToolsPage>
       appendEventLog: _appendEventLog,
       disposeLocalStream: _disposeLocalStream,
     );
+    // プラットフォームがサポートする Video Codec 一覧を動的に取得する。
+    try {
+      final codecTypes = Sora.supportedVideoCodecTypes;
+      _videoCodecTypeOptions = codecTypes
+          .map((e) => e.value)
+          .toList(growable: false);
+    } catch (_) {
+      // 取得失敗時は DevToolsConstants.videoCodecTypeOptions を fallback として使う。
+    }
+
     // SDK イベントを画面状態とログへ反映する。
     _eventHandler = DevToolsEventHandler(
       pageNotifier: _pageNotifier,
@@ -2193,7 +2205,7 @@ class _DevToolsPageState extends State<DevToolsPage>
           : null,
       selectedFrameRate: _selectedFrameRate,
       simulcastRidOptions: DevToolsConstants.simulcastRidOptions,
-      videoCodecTypeOptions: DevToolsConstants.videoCodecTypeOptions,
+      videoCodecTypeOptions: _videoCodecTypeOptions,
       videoBitRateOptions: DevToolsConstants.videoBitRateOptions,
       frameRateOptions: DevToolsConstants.frameRateOptions,
       resolutionLabels: _videoInputResolutions

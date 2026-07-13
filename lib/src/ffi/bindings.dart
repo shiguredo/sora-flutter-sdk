@@ -62,6 +62,9 @@ final class WebrtcVideoEncoderFactoryUnique extends Opaque {}
 // video decoder factory の unique ownership ハンドル。
 final class WebrtcVideoDecoderFactoryUnique extends Opaque {}
 
+// 映像デコーダー生成元の raw factory。
+final class WebrtcVideoDecoderFactory extends Opaque {}
+
 // 個別の映像エンコーダー実体。
 final class WebrtcVideoEncoder extends Opaque {}
 
@@ -365,6 +368,76 @@ typedef VideoEncoderFactoryGetSupportedFormatsDartFn =
     Pointer<WebrtcSdpVideoFormatVector> Function(
       Pointer<WebrtcVideoEncoderFactory>,
     );
+
+// unique video decoder factory から raw factory を取り出す。
+typedef VideoDecoderFactoryUniqueGetNativeFn =
+    Pointer<WebrtcVideoDecoderFactory> Function(
+      Pointer<WebrtcVideoDecoderFactoryUnique>,
+    );
+
+// Dart 側で同シグネチャを扱うための型。
+typedef VideoDecoderFactoryUniqueGetDartFn =
+    Pointer<WebrtcVideoDecoderFactory> Function(
+      Pointer<WebrtcVideoDecoderFactoryUnique>,
+    );
+
+// unique decoder factory の delete 関数。
+typedef VideoDecoderFactoryUniqueDeleteNativeFn =
+    Void Function(Pointer<WebrtcVideoDecoderFactoryUnique>);
+
+// Dart 側で同シグネチャを扱うための型。
+typedef VideoDecoderFactoryUniqueDeleteDartFn =
+    void Function(Pointer<WebrtcVideoDecoderFactoryUnique>);
+
+// raw video decoder factory から対応 format 一覧を取得する。
+typedef VideoDecoderFactoryGetSupportedFormatsNativeFn =
+    Pointer<WebrtcSdpVideoFormatVector> Function(
+      Pointer<WebrtcVideoDecoderFactory>,
+    );
+
+// Dart 側で同シグネチャを扱うための型。
+typedef VideoDecoderFactoryGetSupportedFormatsDartFn =
+    Pointer<WebrtcSdpVideoFormatVector> Function(
+      Pointer<WebrtcVideoDecoderFactory>,
+    );
+
+// SdpVideoFormat の vector 長を返す。
+typedef SdpVideoFormatVectorSizeNativeFn =
+    IntPtr Function(Pointer<WebrtcSdpVideoFormatVector>);
+
+// Dart 側で同シグネチャを扱うための型。
+typedef SdpVideoFormatVectorSizeDartFn =
+    int Function(Pointer<WebrtcSdpVideoFormatVector>);
+
+// SdpVideoFormat vector から index 位置の要素を取得する。
+typedef SdpVideoFormatVectorGetNativeFn =
+    Pointer<WebrtcSdpVideoFormat> Function(
+      Pointer<WebrtcSdpVideoFormatVector>,
+      IntPtr,
+    );
+
+// Dart 側で同シグネチャを扱うための型。
+typedef SdpVideoFormatVectorGetDartFn =
+    Pointer<WebrtcSdpVideoFormat> Function(
+      Pointer<WebrtcSdpVideoFormatVector>,
+      int,
+    );
+
+// SdpVideoFormat の name を取得する。
+typedef SdpVideoFormatGetNameNativeFn =
+    Pointer<Char> Function(Pointer<WebrtcSdpVideoFormat>);
+
+// Dart 側で同シグネチャを扱うための型。
+typedef SdpVideoFormatGetNameDartFn =
+    Pointer<Char> Function(Pointer<WebrtcSdpVideoFormat>);
+
+// SdpVideoFormat vector を解放する。
+typedef SdpVideoFormatVectorDeleteNativeFn =
+    Void Function(Pointer<WebrtcSdpVideoFormatVector>);
+
+// Dart 側で同シグネチャを扱うための型。
+typedef SdpVideoFormatVectorDeleteDartFn =
+    void Function(Pointer<WebrtcSdpVideoFormatVector>);
 
 // simulcast encoder adapter を生成する。
 typedef SimulcastEncoderAdapterNewNativeFn =
@@ -1068,6 +1141,76 @@ class LibWebrtcC {
           Pointer<WebrtcObjcRTCVideoDecoderFactory>,
         )
       >('webrtc_ObjCToNativeVideoDecoderFactory');
+
+  late final videoDecoderFactoryUniqueGet = _lib
+      .lookupFunction<
+        VideoDecoderFactoryUniqueGetNativeFn,
+        VideoDecoderFactoryUniqueGetDartFn
+      >('webrtc_VideoDecoderFactory_unique_get');
+  late final videoDecoderFactoryUniqueGetPtr = _lib
+      .lookup<NativeFunction<VideoDecoderFactoryUniqueGetNativeFn>>(
+        'webrtc_VideoDecoderFactory_unique_get',
+      );
+
+  late final videoDecoderFactoryUniqueDelete = _lib
+      .lookupFunction<
+        VideoDecoderFactoryUniqueDeleteNativeFn,
+        VideoDecoderFactoryUniqueDeleteDartFn
+      >('webrtc_VideoDecoderFactory_unique_delete');
+  late final videoDecoderFactoryUniqueDeletePtr = _lib
+      .lookup<NativeFunction<VideoDecoderFactoryUniqueDeleteNativeFn>>(
+        'webrtc_VideoDecoderFactory_unique_delete',
+      );
+
+  late final videoDecoderFactoryGetSupportedFormats = _lib
+      .lookupFunction<
+        VideoDecoderFactoryGetSupportedFormatsNativeFn,
+        VideoDecoderFactoryGetSupportedFormatsDartFn
+      >('webrtc_VideoDecoderFactory_GetSupportedFormats');
+  late final videoDecoderFactoryGetSupportedFormatsPtr = _lib
+      .lookup<NativeFunction<VideoDecoderFactoryGetSupportedFormatsNativeFn>>(
+        'webrtc_VideoDecoderFactory_GetSupportedFormats',
+      );
+
+  late final sdpVideoFormatVectorSize = _lib
+      .lookupFunction<
+        SdpVideoFormatVectorSizeNativeFn,
+        SdpVideoFormatVectorSizeDartFn
+      >('webrtc_SdpVideoFormat_vector_size');
+  late final sdpVideoFormatVectorSizePtr = _lib
+      .lookup<NativeFunction<SdpVideoFormatVectorSizeNativeFn>>(
+        'webrtc_SdpVideoFormat_vector_size',
+      );
+
+  late final sdpVideoFormatVectorGet = _lib
+      .lookupFunction<
+        SdpVideoFormatVectorGetNativeFn,
+        SdpVideoFormatVectorGetDartFn
+      >('webrtc_SdpVideoFormat_vector_get');
+  late final sdpVideoFormatVectorGetPtr = _lib
+      .lookup<NativeFunction<SdpVideoFormatVectorGetNativeFn>>(
+        'webrtc_SdpVideoFormat_vector_get',
+      );
+
+  late final sdpVideoFormatGetName = _lib
+      .lookupFunction<
+        SdpVideoFormatGetNameNativeFn,
+        SdpVideoFormatGetNameDartFn
+      >('webrtc_SdpVideoFormat_get_name');
+  late final sdpVideoFormatGetNamePtr = _lib
+      .lookup<NativeFunction<SdpVideoFormatGetNameNativeFn>>(
+        'webrtc_SdpVideoFormat_get_name',
+      );
+
+  late final sdpVideoFormatVectorDelete = _lib
+      .lookupFunction<
+        SdpVideoFormatVectorDeleteNativeFn,
+        SdpVideoFormatVectorDeleteDartFn
+      >('webrtc_SdpVideoFormat_vector_delete');
+  late final sdpVideoFormatVectorDeletePtr = _lib
+      .lookup<NativeFunction<SdpVideoFormatVectorDeleteNativeFn>>(
+        'webrtc_SdpVideoFormat_vector_delete',
+      );
 
   late final jniAttachCurrentThreadIfNeeded = _lib
       .lookupFunction<

@@ -651,6 +651,19 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
     super.key,
     required this.signalingUrlController,
     required this.channelIdController,
+    required this.clientIdController,
+    required this.bundleIdController,
+    required this.metadataController,
+    required this.signalingNotifyMetadataController,
+    required this.audioBitRateController,
+    required this.videoVp9ParamsController,
+    required this.videoH264ParamsController,
+    required this.videoH265ParamsController,
+    required this.videoAv1ParamsController,
+    required this.forwardingFiltersController,
+    required this.connectionTimeoutController,
+    required this.disconnectWaitTimeoutController,
+    required this.signalingCandidateTimeoutController,
     required this.selectedRole,
     required this.simulcastEnabled,
     required this.selectedSimulcastRid,
@@ -660,12 +673,16 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
     required this.connectAudio,
     required this.connectVideo,
     required this.beepAudioEnabled,
+    required this.useAudioDevice,
+    required this.useAudioDeviceEditable,
+    required this.isAndroid,
     required this.needsCamera,
     required this.connectionParametersEditable,
     required this.canEditSimulcastRequestRid,
     required this.canEditSpotlightRid,
     required this.selectedVideoCodecType,
     required this.selectedVideoBitRate,
+    required this.selectedAudioCodecType,
     required this.selectedResolutionIndex,
     required this.selectedFrameRate,
     required this.simulcastRidOptions,
@@ -682,12 +699,20 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
     required this.onConnectAudioChanged,
     required this.onConnectVideoChanged,
     required this.onBeepAudioEnabledChanged,
+    required this.onUseAudioDeviceChanged,
+    required this.onAudioCodecTypeChanged,
     required this.onVideoCodecTypeChanged,
     required this.onVideoBitRateChanged,
     required this.onResolutionChanged,
     required this.onFrameRateChanged,
     this.signalingUrlValidator,
     this.channelIdValidator,
+    this.metadataValidator,
+    this.signalingNotifyMetadataValidator,
+    this.audioBitRateValidator,
+    this.videoCodecParamsValidator,
+    this.forwardingFiltersValidator,
+    this.timeoutValidator,
   });
 
   // シグナリング URL 入力欄の controller
@@ -696,11 +721,48 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
   // Channel ID 入力欄の controller
   final TextEditingController channelIdController;
 
+  // クライアント識別子入力欄の controller
+  final TextEditingController clientIdController;
+
+  // bundle ID 入力欄の controller
+  final TextEditingController bundleIdController;
+
+  // connect metadata 入力欄の controller
+  final TextEditingController metadataController;
+
+  // signaling notify metadata 入力欄の controller
+  final TextEditingController signalingNotifyMetadataController;
+
+  // 音声ビットレート入力欄の controller
+  final TextEditingController audioBitRateController;
+
+  // 映像コーデック別追加パラメータ入力欄の controller
+  final TextEditingController videoVp9ParamsController;
+  final TextEditingController videoH264ParamsController;
+  final TextEditingController videoH265ParamsController;
+  final TextEditingController videoAv1ParamsController;
+
+  // forwarding filters 入力欄の controller
+  final TextEditingController forwardingFiltersController;
+
+  // 接続ライフサイクルのタイムアウト入力欄の controller
+  final TextEditingController connectionTimeoutController;
+  final TextEditingController disconnectWaitTimeoutController;
+  final TextEditingController signalingCandidateTimeoutController;
+
   // シグナリング URL の入力検証。
   final FormFieldValidator<String>? signalingUrlValidator;
 
   // Channel ID の入力検証。
   final FormFieldValidator<String>? channelIdValidator;
+
+  // JSON および数値入力の検証。
+  final FormFieldValidator<String>? metadataValidator;
+  final FormFieldValidator<String>? signalingNotifyMetadataValidator;
+  final FormFieldValidator<String>? audioBitRateValidator;
+  final FormFieldValidator<String>? videoCodecParamsValidator;
+  final FormFieldValidator<String>? forwardingFiltersValidator;
+  final FormFieldValidator<String>? timeoutValidator;
 
   // 現在選択中の role
   final SoraRole selectedRole;
@@ -729,6 +791,15 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
   // beep 音声送信が有効かどうか
   final bool beepAudioEnabled;
 
+  // 実音声デバイスを利用するかどうか。
+  final bool useAudioDevice;
+
+  // 実音声デバイス利用設定を編集できるかどうか。
+  final bool useAudioDeviceEditable;
+
+  // Android 上で動作しているかどうか。
+  final bool isAndroid;
+
   // 現在の設定でカメラが必要かどうか
   final bool needsCamera;
 
@@ -746,6 +817,9 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
 
   // 現在選択中の Video Bitrate
   final int? selectedVideoBitRate;
+
+  // 現在選択中の Audio Codec
+  final String? selectedAudioCodecType;
 
   // 現在選択中の Resolution の index
   final int? selectedResolutionIndex;
@@ -795,6 +869,12 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
   // beep 音声送信設定変更時の処理
   final ValueChanged<bool> onBeepAudioEnabledChanged;
 
+  // 実音声デバイス利用設定変更時の処理
+  final ValueChanged<bool> onUseAudioDeviceChanged;
+
+  // Audio Codec 変更時の処理
+  final ValueChanged<String?> onAudioCodecTypeChanged;
+
   // Video Codec 変更時の処理
   final ValueChanged<String?> onVideoCodecTypeChanged;
 
@@ -825,9 +905,12 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
                     decoration: const InputDecoration(
                       labelText: 'Signaling URL',
                       border: OutlineInputBorder(),
+                      helperText: '1 行につき 1 URL。上から順にフェイルオーバーします。',
                     ),
                     validator: signalingUrlValidator,
                     autovalidateMode: AutovalidateMode.onUserInteraction,
+                    minLines: 1,
+                    maxLines: 4,
                   ),
                 ),
               ],
@@ -848,6 +931,60 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: clientIdController,
+                    decoration: const InputDecoration(
+                      labelText: 'Client ID',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextFormField(
+                    controller: bundleIdController,
+                    decoration: const InputDecoration(
+                      labelText: 'Bundle ID',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: metadataController,
+              decoration: const InputDecoration(
+                labelText: 'Metadata (JSON)',
+                border: OutlineInputBorder(),
+                alignLabelWithHint: true,
+              ),
+              validator: metadataValidator,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+              minLines: 2,
+              maxLines: 5,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: signalingNotifyMetadataController,
+              decoration: const InputDecoration(
+                labelText: 'Signaling Notify Metadata (JSON)',
+                border: OutlineInputBorder(),
+                alignLabelWithHint: true,
+              ),
+              validator: signalingNotifyMetadataValidator,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+              minLines: 2,
+              maxLines: 5,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
             ),
             const SizedBox(height: 8),
             Row(
@@ -1181,6 +1318,63 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
               contentPadding: EdgeInsets.zero,
             ),
             const SizedBox(height: 8),
+            SwitchListTile(
+              title: const Text('Use Audio Device'),
+              subtitle: Text(
+                isAndroid
+                    ? 'Android では常に実音声デバイスを利用します。'
+                    : useAudioDeviceEditable
+                    ? '実マイクなどの音声デバイスを利用します。Beep Audio と独立して指定できます。'
+                    : 'プレビューまたは接続の開始後は変更できません。変更するにはアプリを再起動してください。',
+              ),
+              value: useAudioDevice,
+              onChanged: useAudioDeviceEditable
+                  ? onUseAudioDeviceChanged
+                  : null,
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String?>(
+                    initialValue: selectedAudioCodecType,
+                    decoration: const InputDecoration(
+                      labelText: 'Audio Codec',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: const <DropdownMenuItem<String?>>[
+                      DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('未指定'),
+                      ),
+                      DropdownMenuItem<String?>(
+                        value: 'OPUS',
+                        child: Text('OPUS'),
+                      ),
+                    ],
+                    onChanged: onAudioCodecTypeChanged,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextFormField(
+                    controller: audioBitRateController,
+                    decoration: const InputDecoration(
+                      labelText: 'Audio Bitrate (bps)',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    validator: audioBitRateValidator,
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
+                    keyboardType: TextInputType.number,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
             Row(
               children: [
                 Expanded(
@@ -1297,6 +1491,129 @@ class DevToolsConnectionSettingsSection extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+          ],
+        ),
+        _DevToolsSettingsGroup(
+          title: 'Video Codec Parameters',
+          enabled: connectionParametersEditable,
+          children: [
+            TextFormField(
+              controller: videoVp9ParamsController,
+              decoration: const InputDecoration(
+                labelText: 'video_vp9_params (JSON object)',
+                border: OutlineInputBorder(),
+                alignLabelWithHint: true,
+              ),
+              validator: videoCodecParamsValidator,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+              minLines: 2,
+              maxLines: 4,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: videoH264ParamsController,
+              decoration: const InputDecoration(
+                labelText: 'video_h264_params (JSON object)',
+                border: OutlineInputBorder(),
+                alignLabelWithHint: true,
+              ),
+              validator: videoCodecParamsValidator,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+              minLines: 2,
+              maxLines: 4,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: videoH265ParamsController,
+              decoration: const InputDecoration(
+                labelText: 'video_h265_params (JSON object)',
+                border: OutlineInputBorder(),
+                alignLabelWithHint: true,
+              ),
+              validator: videoCodecParamsValidator,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+              minLines: 2,
+              maxLines: 4,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: videoAv1ParamsController,
+              decoration: const InputDecoration(
+                labelText: 'video_av1_params (JSON object)',
+                border: OutlineInputBorder(),
+                alignLabelWithHint: true,
+              ),
+              validator: videoCodecParamsValidator,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+              minLines: 2,
+              maxLines: 4,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
+          ],
+        ),
+        _DevToolsSettingsGroup(
+          title: 'Forwarding Filters',
+          enabled: connectionParametersEditable,
+          children: [
+            TextFormField(
+              controller: forwardingFiltersController,
+              decoration: const InputDecoration(
+                labelText: 'forwarding_filters (JSON object array)',
+                border: OutlineInputBorder(),
+                alignLabelWithHint: true,
+                helperText:
+                    '各要素は Sora の forwarding filter 仕様に従う JSON object です。',
+              ),
+              validator: forwardingFiltersValidator,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+              minLines: 3,
+              maxLines: 6,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
+          ],
+        ),
+        _DevToolsSettingsGroup(
+          title: 'Timeout',
+          enabled: connectionParametersEditable,
+          children: [
+            TextFormField(
+              controller: connectionTimeoutController,
+              decoration: const InputDecoration(
+                labelText: 'Connection Timeout (seconds)',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              validator: timeoutValidator,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+              keyboardType: TextInputType.number,
+            ),
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: disconnectWaitTimeoutController,
+              decoration: const InputDecoration(
+                labelText: 'Disconnect Wait Timeout (seconds)',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              validator: timeoutValidator,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+              keyboardType: TextInputType.number,
+            ),
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: signalingCandidateTimeoutController,
+              decoration: const InputDecoration(
+                labelText: 'Signaling Candidate Timeout (seconds)',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              validator: timeoutValidator,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+              keyboardType: TextInputType.number,
             ),
           ],
         ),

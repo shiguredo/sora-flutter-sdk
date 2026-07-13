@@ -75,6 +75,32 @@ class _DevToolsPageState extends State<DevToolsPage>
   late final TextEditingController _signalingUrlController;
   // channel ID 入力欄の TextEditingController。
   late final TextEditingController _channelIdController;
+  // client ID 入力欄の TextEditingController。
+  late final TextEditingController _clientIdController;
+  // bundle ID 入力欄の TextEditingController。
+  late final TextEditingController _bundleIdController;
+  // connect metadata 入力欄の TextEditingController。
+  late final TextEditingController _metadataController;
+  // signaling notify metadata 入力欄の TextEditingController。
+  late final TextEditingController _signalingNotifyMetadataController;
+  // 音声ビットレート入力欄の TextEditingController。
+  late final TextEditingController _audioBitRateController;
+  // VP9 追加パラメータ入力欄の TextEditingController。
+  late final TextEditingController _videoVp9ParamsController;
+  // H.264 追加パラメータ入力欄の TextEditingController。
+  late final TextEditingController _videoH264ParamsController;
+  // H.265 追加パラメータ入力欄の TextEditingController。
+  late final TextEditingController _videoH265ParamsController;
+  // AV1 追加パラメータ入力欄の TextEditingController。
+  late final TextEditingController _videoAv1ParamsController;
+  // forwarding filters 入力欄の TextEditingController。
+  late final TextEditingController _forwardingFiltersController;
+  // 接続確立タイムアウト入力欄の TextEditingController。
+  late final TextEditingController _connectionTimeoutController;
+  // 切断待機タイムアウト入力欄の TextEditingController。
+  late final TextEditingController _disconnectWaitTimeoutController;
+  // signaling candidate タイムアウト入力欄の TextEditingController。
+  late final TextEditingController _signalingCandidateTimeoutController;
   // RPC params 入力欄の TextEditingController。
   late final TextEditingController _rpcParamsController;
   // RPC timeout 入力欄の TextEditingController。
@@ -114,6 +140,13 @@ class _DevToolsPageState extends State<DevToolsPage>
   bool _dataChannelsEnabled = false;
   // WebSocket 切断通知を無視するかどうか。
   bool _ignoreDisconnectWebSocketEnabled = false;
+  // Beep Audio の既存挙動を保つため、未選択時は Beep Audio 設定から音声デバイス
+  // の利用可否を導出する。明示選択後は Beep Audio と独立してその値を利用する。
+  bool? _useAudioDeviceOverride;
+  // 共有 PeerConnectionFactory を初期化した後は音声デバイス設定を変更できない。
+  bool _useAudioDeviceSettingLocked = false;
+  // 現在選択中の音声コーデックを保持する。
+  String? _selectedAudioCodecType;
   // DataChannel label 入力欄の TextEditingController。
   late final TextEditingController _dataChannelLabelController;
   // DataChannel の送受信方向 (sendrecv / sendonly / recvonly)。
@@ -314,6 +347,20 @@ class _DevToolsPageState extends State<DevToolsPage>
   // signaling URL 入力欄の現在値を返す。
   String get _signalingUrl => _signalingUrlController.text.trim();
 
+  // 改行区切りで入力された signaling URL 一覧を返す。
+  List<String> get _signalingUrls => parseSignalingUrls(_signalingUrl);
+
+  // client ID 入力欄の現在値を返す。空欄は未指定として扱う。
+  String? get _clientId => _optionalText(_clientIdController);
+
+  // bundle ID 入力欄の現在値を返す。空欄は未指定として扱う。
+  String? get _bundleId => _optionalText(_bundleIdController);
+
+  // Beep Audio との後方互換用既定値またはユーザー選択値を返す。
+  // Android は SDK が常に実音声デバイスを利用するため true を返す。
+  bool get _useAudioDevice =>
+      Platform.isAndroid ? true : _useAudioDeviceOverride ?? !_beepAudioEnabled;
+
   // channel ID 入力欄の現在値を返す。
   String get _channelId => _channelIdController.text.trim();
 
@@ -322,6 +369,62 @@ class _DevToolsPageState extends State<DevToolsPage>
 
   // RPC timeout 入力欄の現在値を返す。
   String get _rpcTimeoutText => _rpcTimeoutController.text;
+
+  // 空欄を null として TextEditingController の値を返す。
+  String? _optionalText(TextEditingController controller) {
+    final value = controller.text.trim();
+    return value.isEmpty ? null : value;
+  }
+
+  // 確認ダイアログでは metadata の実値を露出させず、設定有無と JSON 型だけを表示する。
+  String _jsonSettingSummary(String value) {
+    final text = value.trim();
+    if (text.isEmpty) {
+      return '未指定';
+    }
+    final decoded = jsonDecode(text);
+    return switch (decoded) {
+      Map() => 'JSON object',
+      List() => 'JSON array',
+      String() => 'JSON string',
+      num() => 'JSON number',
+      bool() => 'JSON boolean',
+      null => 'JSON null',
+      _ => 'JSON value',
+    };
+  }
+
+  // 入力欄の timeout 値を SDK へ渡す実効値へ変換する。
+  SoraTimeoutOptions get _timeoutOptions {
+    return SoraTimeoutOptions(
+      connectionTimeout: Duration(
+        seconds: int.tryParse(_connectionTimeoutController.text.trim()) ?? 30,
+      ),
+      disconnectWaitTimeout: Duration(
+        seconds:
+            int.tryParse(_disconnectWaitTimeoutController.text.trim()) ?? 10,
+      ),
+      signalingCandidateTimeout: Duration(
+        seconds:
+            int.tryParse(_signalingCandidateTimeoutController.text.trim()) ?? 5,
+      ),
+    );
+  }
+
+  // 共有 PeerConnectionFactory の初期化前に音声デバイス設定を固定する。
+  //
+  // 初期化後に異なる値を SDK へ渡すと StateError になるため、Beep Audio の変更で
+  // 既定値が変わらないよう明示値として保存する。
+  void _lockUseAudioDeviceSetting() {
+    if (_useAudioDeviceSettingLocked) {
+      return;
+    }
+    final useAudioDevice = _useAudioDevice;
+    _mutateView(() {
+      _useAudioDeviceOverride = useAudioDevice;
+      _useAudioDeviceSettingLocked = true;
+    });
+  }
 
   // データチャネルメッセージング関連。
   List<DevToolsMessageEntry> get _messages => _pageNotifier.messages;
@@ -434,12 +537,25 @@ class _DevToolsPageState extends State<DevToolsPage>
     if (!_supportsExternalVideoTrack) {
       _useExternalVideoTrack = false;
     }
-    // シグナリング URL 入力欄の TextEditingController。
+    // シグナリング URL は改行区切りで全候補を初期表示する。
     _signalingUrlController = TextEditingController(
-      text: Environment.urls.isNotEmpty ? Environment.urls.first : '',
+      text: Environment.urls.join('\n'),
     );
     // チャネル ID 入力欄の TextEditingController。
     _channelIdController = TextEditingController(text: Environment.channelId);
+    _clientIdController = TextEditingController();
+    _bundleIdController = TextEditingController();
+    _metadataController = TextEditingController();
+    _signalingNotifyMetadataController = TextEditingController();
+    _audioBitRateController = TextEditingController();
+    _videoVp9ParamsController = TextEditingController();
+    _videoH264ParamsController = TextEditingController();
+    _videoH265ParamsController = TextEditingController();
+    _videoAv1ParamsController = TextEditingController();
+    _forwardingFiltersController = TextEditingController();
+    _connectionTimeoutController = TextEditingController(text: '30');
+    _disconnectWaitTimeoutController = TextEditingController(text: '10');
+    _signalingCandidateTimeoutController = TextEditingController(text: '5');
     // RPC リクエストパラメータ入力欄の TextEditingController。
     _rpcParamsController = TextEditingController(text: '{}');
     // RPC リクエスト時のタイムアウト入力欄の TextEditingController。
@@ -465,6 +581,19 @@ class _DevToolsPageState extends State<DevToolsPage>
     unawaited(_disposeAfterUnmount(connection, localStream));
     _signalingUrlController.dispose();
     _channelIdController.dispose();
+    _clientIdController.dispose();
+    _bundleIdController.dispose();
+    _metadataController.dispose();
+    _signalingNotifyMetadataController.dispose();
+    _audioBitRateController.dispose();
+    _videoVp9ParamsController.dispose();
+    _videoH264ParamsController.dispose();
+    _videoH265ParamsController.dispose();
+    _videoAv1ParamsController.dispose();
+    _forwardingFiltersController.dispose();
+    _connectionTimeoutController.dispose();
+    _disconnectWaitTimeoutController.dispose();
+    _signalingCandidateTimeoutController.dispose();
     _rpcParamsController.dispose();
     _rpcTimeoutController.dispose();
     _logSearchController.dispose();
@@ -774,8 +903,19 @@ class _DevToolsPageState extends State<DevToolsPage>
       return;
     }
     final validationErrors = <String?>[
-      validateSignalingUrl(_signalingUrl),
+      validateSignalingUrls(_signalingUrl),
       validateChannelId(_channelId),
+      validateOptionalJsonValue(_metadataController.text),
+      validateOptionalJsonValue(_signalingNotifyMetadataController.text),
+      validateOptionalPositiveInt(_audioBitRateController.text),
+      validateOptionalJsonObject(_videoVp9ParamsController.text),
+      validateOptionalJsonObject(_videoH264ParamsController.text),
+      validateOptionalJsonObject(_videoH265ParamsController.text),
+      validateOptionalJsonObject(_videoAv1ParamsController.text),
+      validateOptionalJsonObjectArray(_forwardingFiltersController.text),
+      validateOptionalNonNegativeInt(_connectionTimeoutController.text),
+      validateOptionalNonNegativeInt(_disconnectWaitTimeoutController.text),
+      validateOptionalNonNegativeInt(_signalingCandidateTimeoutController.text),
       if (_dataChannelsEnabled)
         validateDataChannelLabel(_dataChannelLabelController.text),
       if (_dataChannelsEnabled && !_dataChannelOrdered)
@@ -797,6 +937,7 @@ class _DevToolsPageState extends State<DevToolsPage>
       return;
     }
     final dataChannels = _buildDataChannelConfigs();
+    final timeoutOptions = _timeoutOptions;
     final dataChannel = dataChannels.isEmpty ? null : dataChannels.first;
     final shouldConnect = await showDialog<bool>(
       context: context,
@@ -808,12 +949,37 @@ class _DevToolsPageState extends State<DevToolsPage>
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('signaling_url: $_signalingUrl'),
+                Text('signaling_urls: ${_signalingUrls.join(', ')}'),
                 Text('channel_id: $_channelId'),
                 Text('role: ${_selectedRole.value}'),
                 Text('audio: $_configuredAudio'),
                 Text('video: $_configuredVideo'),
+                Text('use_audio_device: $_useAudioDevice'),
+                Text('client_id: ${_clientId ?? '未指定'}'),
+                Text('bundle_id: ${_bundleId ?? '未指定'}'),
+                Text(
+                  'metadata: ${_jsonSettingSummary(_metadataController.text)}',
+                ),
+                Text(
+                  'signaling_notify_metadata: ${_jsonSettingSummary(_signalingNotifyMetadataController.text)}',
+                ),
+                Text('audio_codec: ${_selectedAudioCodecType ?? '未指定'}'),
+                Text(
+                  'audio_bit_rate: ${_optionalText(_audioBitRateController) ?? '未指定'} bps',
+                ),
                 Text('video_codec: ${_selectedVideoCodecType ?? '未指定'}'),
+                Text(
+                  'video_vp9_params: ${_jsonSettingSummary(_videoVp9ParamsController.text)}',
+                ),
+                Text(
+                  'video_h264_params: ${_jsonSettingSummary(_videoH264ParamsController.text)}',
+                ),
+                Text(
+                  'video_h265_params: ${_jsonSettingSummary(_videoH265ParamsController.text)}',
+                ),
+                Text(
+                  'video_av1_params: ${_jsonSettingSummary(_videoAv1ParamsController.text)}',
+                ),
                 Text(
                   'video_bit_rate: ${_selectedVideoBitRate != null ? '$_selectedVideoBitRate kbps' : '未指定'}',
                 ),
@@ -859,6 +1025,12 @@ class _DevToolsPageState extends State<DevToolsPage>
                 ),
                 Text(
                   'ignore_disconnect_websocket: $_ignoreDisconnectWebSocketEnabled',
+                ),
+                Text(
+                  'forwarding_filters: ${_jsonSettingSummary(_forwardingFiltersController.text)}',
+                ),
+                Text(
+                  'timeouts (s): connection=${timeoutOptions.connectionTimeout.inSeconds}, disconnect_wait=${timeoutOptions.disconnectWaitTimeout.inSeconds}, signaling_candidate=${timeoutOptions.signalingCandidateTimeout.inSeconds}',
                 ),
               ],
             ),
@@ -917,6 +1089,7 @@ class _DevToolsPageState extends State<DevToolsPage>
       if (_useExternalVideoTrack && _publishesVideo) {
         await _cameraManager.initialize();
       }
+      _lockUseAudioDeviceSetting();
       _appendLog('connect: start role=${_selectedRole.value}');
       // preview stream の所有権を接続 transaction へ渡す。
       // 失敗時は controller が確実に解放するため、画面側には残さない。
@@ -995,14 +1168,13 @@ class _DevToolsPageState extends State<DevToolsPage>
     LocalMediaStream? existingLocalStream,
   }) {
     return DevToolsConnectRequest(
-      signalingUrls: _signalingUrl.isEmpty
-          ? Environment.urls
-          : <String>[_signalingUrl],
+      signalingUrls: _signalingUrls.isEmpty ? Environment.urls : _signalingUrls,
       channelId: _channelId,
       role: _selectedRole,
       configuredAudio: _configuredAudio,
       configuredVideo: _configuredVideo,
       beepAudioEnabled: _beepAudioEnabled,
+      useAudioDevice: _useAudioDevice,
       selectedVideoCodecType: _selectedVideoCodecType,
       selectedVideoBitRate: _selectedVideoBitRate,
       simulcastEnabled: _simulcastEnabled,
@@ -1022,6 +1194,22 @@ class _DevToolsPageState extends State<DevToolsPage>
       dataChannels: _buildDataChannelConfigs(),
       dataChannelSignaling: _dataChannelSignalingEnabled,
       ignoreDisconnectWebSocket: _ignoreDisconnectWebSocketEnabled,
+      clientId: _clientId,
+      bundleId: _bundleId,
+      metadata: parseOptionalJsonValue(_metadataController.text),
+      signalingNotifyMetadata: parseOptionalJsonValue(
+        _signalingNotifyMetadataController.text,
+      ),
+      selectedAudioCodecType: _selectedAudioCodecType,
+      selectedAudioBitRate: int.tryParse(_audioBitRateController.text.trim()),
+      videoVp9Params: parseOptionalJsonObject(_videoVp9ParamsController.text),
+      videoH264Params: parseOptionalJsonObject(_videoH264ParamsController.text),
+      videoH265Params: parseOptionalJsonObject(_videoH265ParamsController.text),
+      videoAv1Params: parseOptionalJsonObject(_videoAv1ParamsController.text),
+      forwardingFilters: parseOptionalJsonObjectArray(
+        _forwardingFiltersController.text,
+      ),
+      timeoutOptions: _timeoutOptions,
     );
   }
 
@@ -1048,8 +1236,10 @@ class _DevToolsPageState extends State<DevToolsPage>
       }
       await _refreshAudioDevicesAfterPermission();
       await _clearLocalPreview();
+      _lockUseAudioDeviceSetting();
       final result = await _connectionController.createLocalPreview(
         DevToolsPreviewRequest(
+          useAudioDevice: _useAudioDevice,
           selectedVideoInputDeviceId: _selectedVideoInputDevice?.deviceId,
           selectedResolution: _selectedResolution,
           selectedFrameRate: _selectedFrameRate,
@@ -1965,6 +2155,19 @@ class _DevToolsPageState extends State<DevToolsPage>
     return DevToolsConnectionSettingsSection(
       signalingUrlController: _signalingUrlController,
       channelIdController: _channelIdController,
+      clientIdController: _clientIdController,
+      bundleIdController: _bundleIdController,
+      metadataController: _metadataController,
+      signalingNotifyMetadataController: _signalingNotifyMetadataController,
+      audioBitRateController: _audioBitRateController,
+      videoVp9ParamsController: _videoVp9ParamsController,
+      videoH264ParamsController: _videoH264ParamsController,
+      videoH265ParamsController: _videoH265ParamsController,
+      videoAv1ParamsController: _videoAv1ParamsController,
+      forwardingFiltersController: _forwardingFiltersController,
+      connectionTimeoutController: _connectionTimeoutController,
+      disconnectWaitTimeoutController: _disconnectWaitTimeoutController,
+      signalingCandidateTimeoutController: _signalingCandidateTimeoutController,
       selectedRole: _selectedRole,
       simulcastEnabled: _simulcastEnabled,
       selectedSimulcastRid: _selectedSimulcastRid,
@@ -1974,12 +2177,17 @@ class _DevToolsPageState extends State<DevToolsPage>
       connectAudio: _connectAudio,
       connectVideo: _connectVideo,
       beepAudioEnabled: _beepAudioEnabled,
+      useAudioDevice: _useAudioDevice,
+      useAudioDeviceEditable:
+          !Platform.isAndroid && !_useAudioDeviceSettingLocked,
+      isAndroid: Platform.isAndroid,
       needsCamera: _needsCamera,
       connectionParametersEditable: _canEditConnectionParameters,
       canEditSimulcastRequestRid: _canEditSimulcastRequestRid,
       canEditSpotlightRid: _canEditSpotlightRid,
       selectedVideoCodecType: _selectedVideoCodecType,
       selectedVideoBitRate: _selectedVideoBitRate,
+      selectedAudioCodecType: _selectedAudioCodecType,
       selectedResolutionIndex: _selectedResolution != null
           ? _videoInputResolutions.indexOf(_selectedResolution!)
           : null,
@@ -2057,6 +2265,19 @@ class _DevToolsPageState extends State<DevToolsPage>
           _beepAudioEnabled = value;
         });
       },
+      onUseAudioDeviceChanged: (value) {
+        if (_useAudioDeviceSettingLocked || Platform.isAndroid) {
+          return;
+        }
+        _mutateView(() {
+          _useAudioDeviceOverride = value;
+        });
+      },
+      onAudioCodecTypeChanged: (value) {
+        _mutateView(() {
+          _selectedAudioCodecType = value;
+        });
+      },
       onVideoCodecTypeChanged: (value) {
         _mutateView(() {
           _selectedVideoCodecType = value;
@@ -2085,8 +2306,14 @@ class _DevToolsPageState extends State<DevToolsPage>
         });
         unawaited(_clearLocalPreview());
       },
-      signalingUrlValidator: validateSignalingUrl,
+      signalingUrlValidator: validateSignalingUrls,
       channelIdValidator: validateChannelId,
+      metadataValidator: validateOptionalJsonValue,
+      signalingNotifyMetadataValidator: validateOptionalJsonValue,
+      audioBitRateValidator: validateOptionalPositiveInt,
+      videoCodecParamsValidator: validateOptionalJsonObject,
+      forwardingFiltersValidator: validateOptionalJsonObjectArray,
+      timeoutValidator: validateOptionalNonNegativeInt,
     );
   }
 

@@ -258,6 +258,50 @@ void main() {
     expect(tester.widget<Switch>(find.byType(Switch).at(1)).value, isTrue);
   });
 
+  testWidgets('共有 factory 初期化後は Use Audio Device を変更できない', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      const _ConnectionSettingsHarness(
+        hasRetainedConnection: false,
+        useAudioDeviceEditable: false,
+      ),
+    );
+
+    await tester.ensureVisible(find.text('Use Audio Device'));
+    await tester.pumpAndSettle();
+
+    final setting = tester.widget<SwitchListTile>(
+      find.widgetWithText(SwitchListTile, 'Use Audio Device'),
+    );
+    expect(setting.onChanged, isNull);
+    expect(
+      find.text('プレビューまたは接続の開始後は変更できません。変更するにはアプリを再起動してください。'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('Android では Use Audio Device が固定される', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      const _ConnectionSettingsHarness(
+        hasRetainedConnection: false,
+        useAudioDeviceEditable: false,
+        isAndroid: true,
+      ),
+    );
+
+    await tester.ensureVisible(find.text('Use Audio Device'));
+    await tester.pumpAndSettle();
+
+    final setting = tester.widget<SwitchListTile>(
+      find.widgetWithText(SwitchListTile, 'Use Audio Device'),
+    );
+    expect(setting.onChanged, isNull);
+    expect(find.text('Android では常に実音声デバイスを利用します。'), findsOneWidget);
+  });
+
   testWidgets('connecting 状態では Audio Track / Video Track toggle を操作できない', (
     WidgetTester tester,
   ) async {
@@ -537,15 +581,74 @@ void main() {
       find.widgetWithText(TextFormField, 'Channel ID'),
       'test-channel',
     );
+    await tester.ensureVisible(find.widgetWithText(TextFormField, 'Client ID'));
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Client ID'),
+      'test-client',
+    );
+    await tester.ensureVisible(find.widgetWithText(TextFormField, 'Bundle ID'));
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Bundle ID'),
+      'test-bundle',
+    );
     await tester.tap(find.byTooltip('Connect'));
     await tester.pumpAndSettle();
 
     expect(find.text('Connect Settings'), findsOneWidget);
     expect(find.text('audio: true'), findsOneWidget);
     expect(find.text('video: true'), findsOneWidget);
+    expect(find.text('use_audio_device: true'), findsOneWidget);
+    expect(find.text('client_id: test-client'), findsOneWidget);
+    expect(find.text('bundle_id: test-bundle'), findsOneWidget);
+    expect(find.text('metadata: 未指定'), findsOneWidget);
+    expect(find.text('forwarding_filters: 未指定'), findsOneWidget);
     expect(find.text('data_channels: Disabled'), findsOneWidget);
     expect(find.text('data_channel_label: #chat'), findsNothing);
     expect(find.text('ignore_disconnect_websocket: false'), findsOneWidget);
+  });
+
+  testWidgets('空欄の timeout は接続確認に既定値を表示する', (WidgetTester tester) async {
+    await tester.pumpWidget(const DevToolsApp());
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Signaling URL'),
+      'wss://example.com/signaling',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Channel ID'),
+      'test-channel',
+    );
+    await tester.ensureVisible(find.text('Timeout'));
+    await tester.tap(find.text('Timeout'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.widgetWithText(TextFormField, 'Connection Timeout (seconds)'),
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Connection Timeout (seconds)'),
+      '',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Disconnect Wait Timeout (seconds)'),
+      '',
+    );
+    await tester.enterText(
+      find.widgetWithText(
+        TextFormField,
+        'Signaling Candidate Timeout (seconds)',
+      ),
+      '',
+    );
+
+    await tester.tap(find.byTooltip('Connect'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'timeouts (s): connection=30, disconnect_wait=10, signaling_candidate=5',
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('Messages タブから有効な設定で接続確認を開ける', (WidgetTester tester) async {
@@ -566,7 +669,7 @@ void main() {
 
     expect(find.text('Connect Settings'), findsOneWidget);
     expect(
-      find.text('signaling_url: wss://example.com/signaling'),
+      find.text('signaling_urls: wss://example.com/signaling'),
       findsOneWidget,
     );
     expect(find.text('channel_id: test-channel'), findsOneWidget);
@@ -579,12 +682,39 @@ void _verifyInputValidation() {
   // Widget テストファイル内でも、接続前に利用する各検証条件を固定する。
   expect(validateSignalingUrl('wss://example.com/signaling'), isNull);
   expect(validateSignalingUrl('https://example.com'), isNotNull);
+  expect(
+    validateSignalingUrls(
+      'wss://primary.example.com/signaling\nwss://secondary.example.com/signaling',
+    ),
+    isNull,
+  );
+  expect(
+    parseSignalingUrls(
+      'wss://primary.example.com/signaling\n\nwss://secondary.example.com/signaling',
+    ),
+    <String>[
+      'wss://primary.example.com/signaling',
+      'wss://secondary.example.com/signaling',
+    ],
+  );
   expect(validateChannelId(''), isNotNull);
   expect(validateDataChannelLabel('#chat'), isNull);
   expect(validateDataChannelLabel('chat'), isNotNull);
   expect(validateMaxPacketLifeTime('0'), isNull);
   expect(validateMaxPacketLifeTime('65535'), isNull);
   expect(validateMaxPacketLifeTime('65536'), isNotNull);
+  expect(validateOptionalJsonValue('"value"'), isNull);
+  expect(validateOptionalJsonValue('null'), isNotNull);
+  expect(validateOptionalJsonValue('{'), isNotNull);
+  expect(validateOptionalJsonObject('{"key": true}'), isNull);
+  expect(validateOptionalJsonObject('["value"]'), isNotNull);
+  expect(validateOptionalJsonObjectArray('[{"name": "filter"}]'), isNull);
+  expect(validateOptionalJsonObjectArray('{"name": "filter"}'), isNotNull);
+  expect(validateOptionalJsonObjectArray('["filter"]'), isNotNull);
+  expect(validateOptionalPositiveInt('64000'), isNull);
+  expect(validateOptionalPositiveInt('0'), isNotNull);
+  expect(validateOptionalNonNegativeInt('0'), isNull);
+  expect(validateOptionalNonNegativeInt('-1'), isNotNull);
 }
 
 Finder _findTabText(String label) {
@@ -614,11 +744,15 @@ class _ConnectionSettingsHarness extends StatefulWidget {
     required this.hasRetainedConnection,
     this.initialConnectVideo = true,
     this.connectionParametersEditable = true,
+    this.useAudioDeviceEditable = true,
+    this.isAndroid = false,
   });
 
   final bool hasRetainedConnection;
   final bool initialConnectVideo;
   final bool connectionParametersEditable;
+  final bool useAudioDeviceEditable;
+  final bool isAndroid;
 
   @override
   State<_ConnectionSettingsHarness> createState() =>
@@ -629,6 +763,19 @@ class _ConnectionSettingsHarnessState
     extends State<_ConnectionSettingsHarness> {
   late final TextEditingController signalingUrlController;
   late final TextEditingController channelIdController;
+  late final TextEditingController clientIdController;
+  late final TextEditingController bundleIdController;
+  late final TextEditingController metadataController;
+  late final TextEditingController signalingNotifyMetadataController;
+  late final TextEditingController audioBitRateController;
+  late final TextEditingController videoVp9ParamsController;
+  late final TextEditingController videoH264ParamsController;
+  late final TextEditingController videoH265ParamsController;
+  late final TextEditingController videoAv1ParamsController;
+  late final TextEditingController forwardingFiltersController;
+  late final TextEditingController connectionTimeoutController;
+  late final TextEditingController disconnectWaitTimeoutController;
+  late final TextEditingController signalingCandidateTimeoutController;
   late bool connectAudio;
   late bool connectVideo;
   late bool connectionParametersEditable;
@@ -639,6 +786,19 @@ class _ConnectionSettingsHarnessState
     super.initState();
     signalingUrlController = TextEditingController();
     channelIdController = TextEditingController();
+    clientIdController = TextEditingController();
+    bundleIdController = TextEditingController();
+    metadataController = TextEditingController();
+    signalingNotifyMetadataController = TextEditingController();
+    audioBitRateController = TextEditingController();
+    videoVp9ParamsController = TextEditingController();
+    videoH264ParamsController = TextEditingController();
+    videoH265ParamsController = TextEditingController();
+    videoAv1ParamsController = TextEditingController();
+    forwardingFiltersController = TextEditingController();
+    connectionTimeoutController = TextEditingController(text: '30');
+    disconnectWaitTimeoutController = TextEditingController(text: '10');
+    signalingCandidateTimeoutController = TextEditingController(text: '5');
     connectAudio = true;
     connectVideo = widget.initialConnectVideo;
     connectionParametersEditable = widget.connectionParametersEditable;
@@ -648,6 +808,19 @@ class _ConnectionSettingsHarnessState
   void dispose() {
     signalingUrlController.dispose();
     channelIdController.dispose();
+    clientIdController.dispose();
+    bundleIdController.dispose();
+    metadataController.dispose();
+    signalingNotifyMetadataController.dispose();
+    audioBitRateController.dispose();
+    videoVp9ParamsController.dispose();
+    videoH264ParamsController.dispose();
+    videoH265ParamsController.dispose();
+    videoAv1ParamsController.dispose();
+    forwardingFiltersController.dispose();
+    connectionTimeoutController.dispose();
+    disconnectWaitTimeoutController.dispose();
+    signalingCandidateTimeoutController.dispose();
     super.dispose();
   }
 
@@ -659,6 +832,21 @@ class _ConnectionSettingsHarnessState
           child: DevToolsConnectionSettingsSection(
             signalingUrlController: signalingUrlController,
             channelIdController: channelIdController,
+            clientIdController: clientIdController,
+            bundleIdController: bundleIdController,
+            metadataController: metadataController,
+            signalingNotifyMetadataController:
+                signalingNotifyMetadataController,
+            audioBitRateController: audioBitRateController,
+            videoVp9ParamsController: videoVp9ParamsController,
+            videoH264ParamsController: videoH264ParamsController,
+            videoH265ParamsController: videoH265ParamsController,
+            videoAv1ParamsController: videoAv1ParamsController,
+            forwardingFiltersController: forwardingFiltersController,
+            connectionTimeoutController: connectionTimeoutController,
+            disconnectWaitTimeoutController: disconnectWaitTimeoutController,
+            signalingCandidateTimeoutController:
+                signalingCandidateTimeoutController,
             selectedRole: SoraRole.sendrecv,
             simulcastEnabled: false,
             selectedSimulcastRid: null,
@@ -668,12 +856,16 @@ class _ConnectionSettingsHarnessState
             connectAudio: connectAudio,
             connectVideo: connectVideo,
             beepAudioEnabled: false,
+            useAudioDevice: true,
+            useAudioDeviceEditable: widget.useAudioDeviceEditable,
+            isAndroid: widget.isAndroid,
             needsCamera: connectVideo,
             connectionParametersEditable: connectionParametersEditable,
             canEditSimulcastRequestRid: false,
             canEditSpotlightRid: false,
             selectedVideoCodecType: null,
             selectedVideoBitRate: null,
+            selectedAudioCodecType: null,
             selectedResolutionIndex: null,
             selectedFrameRate: null,
             simulcastRidOptions: const <String>['r0', 'r1', 'r2'],
@@ -690,6 +882,8 @@ class _ConnectionSettingsHarnessState
             onConnectAudioChanged: _changeConnectAudio,
             onConnectVideoChanged: _changeConnectVideo,
             onBeepAudioEnabledChanged: (_) {},
+            onUseAudioDeviceChanged: (_) {},
+            onAudioCodecTypeChanged: (_) {},
             onVideoCodecTypeChanged: (_) {},
             onVideoBitRateChanged: (_) {},
             onResolutionChanged: (_) {},

@@ -24,6 +24,7 @@ class DevToolsConnectRequest {
     required this.configuredAudio,
     required this.configuredVideo,
     required this.beepAudioEnabled,
+    required this.useAudioDevice,
     required this.selectedVideoCodecType,
     required this.selectedVideoBitRate,
     required this.simulcastEnabled,
@@ -41,6 +42,18 @@ class DevToolsConnectRequest {
     required this.existingLocalStream,
     required this.dataChannelSignaling,
     required this.ignoreDisconnectWebSocket,
+    required this.timeoutOptions,
+    this.clientId,
+    this.bundleId,
+    this.metadata,
+    this.signalingNotifyMetadata,
+    this.selectedAudioCodecType,
+    this.selectedAudioBitRate,
+    this.videoVp9Params,
+    this.videoH264Params,
+    this.videoH265Params,
+    this.videoAv1Params,
+    this.forwardingFilters,
     this.useExternalVideoTrack = false,
     this.dataChannels = const <Map<String, Object?>>[],
   });
@@ -51,6 +64,8 @@ class DevToolsConnectRequest {
   final bool configuredAudio;
   final bool configuredVideo;
   final bool beepAudioEnabled;
+  // 実音声デバイスを利用するかどうか。Beep Audio 設定とは独立して指定する。
+  final bool useAudioDevice;
   final String? selectedVideoCodecType;
   final int? selectedVideoBitRate;
   final bool simulcastEnabled;
@@ -70,6 +85,27 @@ class DevToolsConnectRequest {
   final bool dataChannelSignaling;
   // WebSocket 切断通知を無視するかどうか。
   final bool ignoreDisconnectWebSocket;
+  // WebRTC 接続ライフサイクルのタイムアウト設定。
+  final SoraTimeoutOptions timeoutOptions;
+  // Sora サーバーへ送るクライアント識別子。
+  final String? clientId;
+  // 同一接続グループを隔離する bundle ID。
+  final String? bundleId;
+  // connect メッセージへ含める任意の JSON 値。
+  final Object? metadata;
+  // signaling notify へ含める任意の JSON 値。
+  final Object? signalingNotifyMetadata;
+  // 音声コーデック。
+  final String? selectedAudioCodecType;
+  // 音声ビットレート (bps)。
+  final int? selectedAudioBitRate;
+  // 映像コーデック別追加パラメータ。
+  final Map<String, Object?>? videoVp9Params;
+  final Map<String, Object?>? videoH264Params;
+  final Map<String, Object?>? videoH265Params;
+  final Map<String, Object?>? videoAv1Params;
+  // 転送フィルタ設定。
+  final List<Map<String, Object?>>? forwardingFilters;
   final bool useExternalVideoTrack;
   final List<Map<String, Object?>> dataChannels;
 }
@@ -83,9 +119,19 @@ SoraConnectionConfig buildSoraConnectionConfig(DevToolsConnectRequest request) {
     role: request.role,
     audio: request.configuredAudio,
     video: request.configuredVideo,
-    useAudioDevice: !request.beepAudioEnabled,
+    useAudioDevice: request.useAudioDevice,
+    clientId: request.clientId,
+    bundleId: request.bundleId,
+    metadata: request.metadata,
+    signalingNotifyMetadata: request.signalingNotifyMetadata,
+    audioCodecType: AudioCodecType.fromValue(request.selectedAudioCodecType),
+    audioBitRate: request.selectedAudioBitRate,
     videoCodecType: VideoCodecType.fromValue(request.selectedVideoCodecType),
     videoBitRate: request.selectedVideoBitRate,
+    videoVp9Params: request.videoVp9Params,
+    videoH264Params: request.videoH264Params,
+    videoH265Params: request.videoH265Params,
+    videoAv1Params: request.videoAv1Params,
     simulcast: request.simulcastEnabled ? true : null,
     simulcastRequestRid: request.usesSimulcastRequestRid
         ? SimulcastRequestRid.fromValue(request.selectedSimulcastRid)
@@ -97,12 +143,9 @@ SoraConnectionConfig buildSoraConnectionConfig(DevToolsConnectRequest request) {
     spotlightUnfocusRid: request.usesSpotlightRid
         ? SpotlightRid.fromValue(request.selectedSpotlightUnfocusRid)
         : null,
-    timeoutOptions: const SoraTimeoutOptions(
-      connectionTimeout: Duration(seconds: 30),
-      disconnectWaitTimeout: Duration(seconds: 10),
-      signalingCandidateTimeout: Duration(seconds: 5),
-    ),
+    timeoutOptions: request.timeoutOptions,
     dataChannels: request.dataChannels,
+    forwardingFilters: request.forwardingFilters,
     dataChannelSignaling: request.dataChannelSignaling,
     ignoreDisconnectWebSocket: request.ignoreDisconnectWebSocket,
   );
@@ -122,11 +165,14 @@ class DevToolsConnectResult {
 class DevToolsPreviewRequest {
   // 接続前 preview 生成に必要な入力値をまとめる。
   const DevToolsPreviewRequest({
+    required this.useAudioDevice,
     required this.selectedVideoInputDeviceId,
     required this.selectedResolution,
     required this.selectedFrameRate,
   });
 
+  // preview 生成前に適用する実音声デバイス利用設定。
+  final bool useAudioDevice;
   final String? selectedVideoInputDeviceId;
   final DevToolsVideoInputResolutionOption? selectedResolution;
   final int? selectedFrameRate;
@@ -410,6 +456,8 @@ class DevToolsConnectionController {
   Future<DevToolsPreviewResult> createLocalPreview(
     DevToolsPreviewRequest request,
   ) async {
+    // getUserMedia() が共有 PeerConnectionFactory を生成する前に設定する。
+    MediaDevices.setUseAudioDevice(request.useAudioDevice);
     final previewStream = await MediaDevices.getUserMedia(
       GetUserMediaOptions(
         audio: false,

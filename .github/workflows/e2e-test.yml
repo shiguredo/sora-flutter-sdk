@@ -62,8 +62,8 @@ jobs:
             target: integration_test/notify_metadata_e2e_test.dart
           - name: custom data channel
             target: integration_test/custom_data_channel_e2e_test.dart
-          - name: connection failure and failover
-            target: integration_test/connection_failure_e2e_test.dart
+          - name: connection failover
+            target: integration_test/connection_failover_e2e_test.dart
     defaults:
       run:
         shell: bash
@@ -190,8 +190,8 @@ jobs:
             target: integration_test/notify_metadata_e2e_test.dart
           - name: custom data channel
             target: integration_test/custom_data_channel_e2e_test.dart
-          - name: connection failure and failover
-            target: integration_test/connection_failure_e2e_test.dart
+          - name: connection failover
+            target: integration_test/connection_failover_e2e_test.dart
     defaults:
       run:
         shell: bash
@@ -304,8 +304,8 @@ jobs:
             target: integration_test/notify_metadata_e2e_test.dart
           - name: custom data channel
             target: integration_test/custom_data_channel_e2e_test.dart
-          - name: connection failure and failover
-            target: integration_test/connection_failure_e2e_test.dart
+          - name: connection failover
+            target: integration_test/connection_failover_e2e_test.dart
     defaults:
       run:
         shell: bash

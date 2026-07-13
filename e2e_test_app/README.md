@@ -100,6 +100,7 @@ flutter test integration_test/remote_media_stream_e2e_test.dart -d macos
 flutter test integration_test/local_media_toggle_e2e_test.dart -d macos
 flutter test integration_test/bundle_id_isolation_e2e_test.dart -d macos
 flutter test integration_test/connection_failure_e2e_test.dart -d macos
+flutter test integration_test/connection_failover_e2e_test.dart -d macos
 ```
 
 実カメラを使う macOS ローカル専用ストレス E2E:

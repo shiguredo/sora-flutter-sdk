@@ -19,7 +19,7 @@ Please read <https://github.com/shiguredo/oss/blob/master/README.en.md> before u
 
 ## Sora Flutter SDK について
 
-iOS / macOS / Android / Windows に対応した WebRTC SFU Sora 向けの Flutter SDK です。
+iOS / macOS / Android / Windows / Linux に対応した WebRTC SFU Sora 向けの Flutter SDK です。
 
 WebRTC ライブラリには [libwebrtc](https://webrtc.googlesource.com/src/) を採用しています。
 WebRTC のコアロジック (PeerConnection、SDP 処理、ICE、DataChannel) は `dart:ffi` 経由で
@@ -413,6 +413,7 @@ flutter test integration_test/video_codec_e2e_test.dart -d macos
 - [macOS](docs/MACOS.md)
 - [Android](docs/ANDROID.md)
 - [Windows](docs/WINDOWS.md)
+- [Linux](docs/LINUX.md)
 - [WebRTC ビルド](docs/WEBRTC_BUILD.md)
 
 ## ビルド
@@ -482,6 +483,10 @@ Android 10 (API 29) 以上をサポートします。
 ### Windows の対応バージョン
 
 Windows 10 20H2 以上 (x86_64) をサポートします。
+
+### Linux の対応バージョン
+
+Ubuntu 24.04 (x86_64) をサポートします。
 
 ## 優先実装
 

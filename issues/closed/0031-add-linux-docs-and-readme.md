@@ -2,6 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-03
+- Completed: 2026-07-14
 - Model: Opus 4.8
 - Branch: feature/add-linux-docs
 - Polished: 2026-06-03

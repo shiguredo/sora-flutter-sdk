@@ -84,3 +84,7 @@
   - `ci.yml` に `build-linux` ジョブを追加し、PR で Linux ビルドを実行する
   - `e2e-test.yml` に `integration-test-linux` ジョブを追加する
   - @zztkm
+
+- [ADD] Linux のドキュメントを追加し README のサポート OS を更新する
+  - `docs/LINUX.md` を追加し、README の対応プラットフォーム表に Linux を反映する
+  - @zztkm

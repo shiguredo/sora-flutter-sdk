@@ -8,6 +8,8 @@ version '1.0-SNAPSHOT'
 def libwebrtcCDir = file("${projectDir}/../third_party/libwebrtc-c")
 def libwebrtcCBuildDir = file("${libwebrtcCDir}/build-android_arm64")
 def packageRootDir = file("${projectDir}/..")
+def soraHwasanEnabled = project.findProperty('sora.hwasan') == 'true'
+def soraUbsanEnabled = project.findProperty('sora.ubsan') == 'true'
 
 def resolveDartExecutable() {
     def flutterSdkPath = project.findProperty('flutter.sdk') ?: System.getenv('FLUTTER_ROOT')
@@ -52,15 +54,11 @@ android {
                     "-DANDROID_PLATFORM=29",
                     "-DANDROID_NATIVE_API_LEVEL=29",
                     "-DLIBWEBRTC_C_DIR=${libwebrtcCDir}",
-                    "-DLIBWEBRTC_C_BUILD_DIR=${libwebrtcCBuildDir}"
+                    "-DLIBWEBRTC_C_BUILD_DIR=${libwebrtcCBuildDir}",
+                    "-DANDROID_STL=${soraHwasanEnabled ? 'c++_shared' : 'c++_static'}",
+                    "-DSORA_SDK_ENABLE_HWASAN=${soraHwasanEnabled ? 'ON' : 'OFF'}",
+                    "-DSORA_SDK_ENABLE_UBSAN=${soraUbsanEnabled ? 'ON' : 'OFF'}"
                 ]
-
-                if (project.findProperty('sora.asan') == 'true') {
-                    cmakeArgs.add("-DSORA_SDK_ENABLE_ASAN=ON")
-                }
-                if (project.findProperty('sora.ubsan') == 'true') {
-                    cmakeArgs.add("-DSORA_SDK_ENABLE_UBSAN=ON")
-                }
 
                 arguments(cmakeArgs as String[])
             }

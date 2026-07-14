@@ -30,8 +30,9 @@
 
 ### misc
 
-- [ADD] Android JNI に AddressSanitizer / UndefinedBehaviorSanitizer ビルドオプションを追加する
-  - CMake option (`SORA_SDK_ENABLE_ASAN` / `SORA_SDK_ENABLE_UBSAN`) と gradle property (`-Psora.asan=true` / `-Psora.ubsan=true`) を追加する
+- [ADD] Android JNI に HWAddressSanitizer / UndefinedBehaviorSanitizer ビルドオプションを追加する
+  - CMake option (`SORA_SDK_ENABLE_HWASAN` / `SORA_SDK_ENABLE_UBSAN`) と Gradle property (`-Psora.hwasan=true` / `-Psora.ubsan=true`) を追加する
+  - DevTools に HWASan の実機検証用 `wrap.sh` を追加する
   - UBSan はランタイム不要の trap モードを採用する
   - @zztkm
 

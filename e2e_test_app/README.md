@@ -20,10 +20,11 @@ Sora Flutter SDK の recvonly / sendonly / sendrecv 接続と、2 クライア�
 |------|------|
 | `TEST_SECRET_KEY` | 接続 metadata 用（JWT 文字列、JSON オブジェクト文字列、または平文トークン） |
 | `TEST_SIGNALING_URLS` | シグナリング URL をカンマまたは空白区切り（例: `wss://a/signaling,wss://b/signaling`） |
-| `TEST_CHANNEL_ID_PREFIX` | チャンネル ID のプレフィックス。CI では `GITHUB_RUN_ID` を連結し、ローカルでは時刻でユニーク化する |
+| `TEST_CHANNEL_ID_PREFIX` | チャンネル ID のプレフィックス。CI では `GITHUB_RUN_ID` と OS 名を連結し、ローカルでは時刻でユニーク化する |
 | `TEST_SEND_DURATION` | （任意）sendonly / sendrecv テストの送信継続秒数（例: `60`） |
 | `TEST_MACOS_CAMERA_STRESS_ROUNDS` | （任意）macOS 実カメラストレス E2E の反復回数。未指定時は `10` |
 | `TEST_PUSH_EXPECTED_TYPE` | （任意）notify metadata テストで push 受信を確認する場合、期待する `event_type` 値を設定する |
+| `TEST_ENABLE_CAMERA_TEXTURE_E2E` | （任意）`true` の場合、実カメラを使う local Texture E2E を実行する |
 
 接続失敗系 E2E の前提:
 
@@ -49,6 +50,14 @@ Notify metadata E2E（`notify_metadata_e2e_test.dart`）の前提:
 - `bundleId` は設定しない。同じ `bundleId` を設定すると相互受信しない
 - sender 側は external video track を使うため、カメラ権限には依存しない
 - audio track を含むテスト（`remote_media_stream_e2e_test.dart`、`local_media_toggle_e2e_test.dart`）は `MediaDevices.createAudioTrack()` を使用するため、macOS のマイク権限と入力デバイスが必要
+
+クリティカルパス E2E の検証内容:
+
+- `sendrecv_bidirectional_e2e_test.dart`: 2 接続をともに `sendrecv` とし、双方の remote track と映像 outbound / inbound RTP 増加を確認する
+- `connection_lifecycle_e2e_test.dart`: 同じ `SoraConnection` で接続・切断・再接続し、並列 `disconnect()` が単一の切断処理を共有することを確認する
+- `audio_media_e2e_test.dart`: PushAudioDevice へ無音と非ゼロの正弦波 PCM を投入し、送受信側の Opus payload 密度とデコード後の audio energy が増加することを確認する
+- `texture_rendering_e2e_test.dart`: remote renderer の Texture ID を `SoraRemoteVideoWidget` へ渡し、track 削除時の renderer 破棄まで確認する
+- `texture_rendering_e2e_test.dart` の local preview は実カメラを必要とするため、`TEST_ENABLE_CAMERA_TEXTURE_E2E=true` の場合だけ実行する
 
 Video Codec E2E（`video_codec_e2e_test.dart`）の前提:
 
@@ -92,6 +101,10 @@ flutter pub get
 flutter test integration_test/recvonly_e2e_test.dart -d macos
 flutter test integration_test/sendonly_dummy_video_e2e_test.dart -d macos
 flutter test integration_test/sendrecv_smoke_e2e_test.dart -d macos
+flutter test integration_test/sendrecv_bidirectional_e2e_test.dart -d macos
+flutter test integration_test/connection_lifecycle_e2e_test.dart -d macos
+flutter test integration_test/audio_media_e2e_test.dart -d macos
+flutter test integration_test/texture_rendering_e2e_test.dart -d macos
 flutter test integration_test/track_event_e2e_test.dart -d macos
 flutter test integration_test/two_party_media_e2e_test.dart -d macos
 flutter test integration_test/video_codec_e2e_test.dart -d macos
@@ -109,6 +122,13 @@ flutter test integration_test/connection_failover_e2e_test.dart -d macos
 ```bash
 export TEST_MACOS_CAMERA_STRESS_ROUNDS=50
 flutter test integration_test/macos_camera_runtime_stress_e2e_test.dart -d macos
+```
+
+実カメラの local Texture まで確認する場合:
+
+```bash
+export TEST_ENABLE_CAMERA_TEXTURE_E2E=true
+flutter test integration_test/texture_rendering_e2e_test.dart -d macos
 ```
 
 ## ローカル実行例（Windows）

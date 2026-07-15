@@ -4,10 +4,6 @@
 
 ### sora_sdk
 
-- [FIX] shared factory の音声デバイス初期化を明示設定に変更する
-  - メディア生成前に `useAudioDevice` を指定できるようにし、呼び出し順への依存を解消する
-  - @zztkm
-
 - [ADD] Linux リモート映像レンダリングを実装する
   - RenderingSink による I420 フレーム受信・RGBA 変換・Flutter Texture 配信を実装する
   - @zztkm
@@ -20,6 +16,10 @@
   - Linux の PeerConnectionFactory 生成時に `kPlatformDefaultAudio` で ADM を初期化し、音声入出力を有効化する
   - @zztkm
 
+- [ADD] PushAudioDevice にデバイスレスの受信音声再生を追加する
+  - 10 ms ごとに受信音声を pull できる API を追加し、物理出力デバイスなしで音声デコードを進める
+  - @zztkm
+
 - [ADD] Linux カメラキャプチャ (V4L2) を実装する
   - V4L2 によるデバイス列挙・フォーマット取得・フレームキャプチャ・I420 変換・ローカルプレビューを実装する
   - @zztkm
@@ -28,7 +28,18 @@
   - PulseAudio を用いた音声入出力デバイスの列挙と入力デバイス切り替えを実装する
   - @zztkm
 
+- [FIX] shared factory の音声デバイス初期化を明示設定に変更する
+  - メディア生成前に `useAudioDevice` を指定できるようにし、呼び出し順への依存を解消する
+  - @zztkm
+
+- [FIX] PushAudio の PCM 注入時に native 関数へ渡す引数順を修正する
+  - @zztkm
+
 ### misc
+
+- [ADD] SDK のクリティカルパスを検証する E2E テストを追加する
+  - 双方向 sendrecv、接続ライフサイクル、音声メディア、Texture 描画を検証する
+  - @zztkm
 
 - [ADD] Android JNI に HWAddressSanitizer / UndefinedBehaviorSanitizer ビルドオプションを追加する
   - CMake option (`SORA_SDK_ENABLE_HWASAN` / `SORA_SDK_ENABLE_UBSAN`) と Gradle property (`-Psora.hwasan=true` / `-Psora.ubsan=true`) を追加する

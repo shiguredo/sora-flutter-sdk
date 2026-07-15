@@ -399,6 +399,10 @@ flutter pub get
 flutter test integration_test/recvonly_e2e_test.dart -d macos
 flutter test integration_test/sendonly_dummy_video_e2e_test.dart -d macos
 flutter test integration_test/sendrecv_smoke_e2e_test.dart -d macos
+flutter test integration_test/sendrecv_bidirectional_e2e_test.dart -d macos
+flutter test integration_test/connection_lifecycle_e2e_test.dart -d macos
+flutter test integration_test/audio_media_e2e_test.dart -d macos
+flutter test integration_test/texture_rendering_e2e_test.dart -d macos
 flutter test integration_test/two_party_media_e2e_test.dart -d macos
 flutter test integration_test/video_codec_e2e_test.dart -d macos
 ```

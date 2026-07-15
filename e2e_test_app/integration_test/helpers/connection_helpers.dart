@@ -52,8 +52,7 @@ final class ObservedConnection {
       <SoraDataChannelEvent>[];
   final List<SoraDataChannelMessage> dataChannelMessages =
       <SoraDataChannelMessage>[];
-  final List<Map<String, Object?>> switchedEvents =
-      <Map<String, Object?>>[];
+  final List<Map<String, Object?>> switchedEvents = <Map<String, Object?>>[];
   final List<Map<String, Object?>> notifyEvents = <Map<String, Object?>>[];
   final List<Map<String, Object?>> pushEvents = <Map<String, Object?>>[];
 
@@ -196,6 +195,23 @@ final class ObservedConnection {
       remoteConnectionId: remoteConnectionId,
       timeout: timeout,
       label: 'add',
+      kind: 'video',
+    );
+  }
+
+  /// 指定 connectionId の remote audio track が追加されるまで待つ。
+  Future<RemoteTrackObservation> waitForRemoteAudioTrackFrom(
+    WidgetTester tester, {
+    required String remoteConnectionId,
+    required Duration timeout,
+  }) async {
+    return _waitForObservation(
+      tester,
+      observations: trackEvents,
+      remoteConnectionId: remoteConnectionId,
+      timeout: timeout,
+      label: 'add',
+      kind: 'audio',
     );
   }
 
@@ -210,6 +226,7 @@ final class ObservedConnection {
       remoteConnectionId: remoteConnectionId,
       timeout: timeout,
       label: 'remove',
+      kind: 'video',
     );
   }
 
@@ -307,6 +324,7 @@ final class ObservedConnection {
     required String remoteConnectionId,
     required Duration timeout,
     required String label,
+    required String kind,
   }) async {
     const interval = Duration(milliseconds: 200);
     final deadline = DateTime.now().add(timeout);
@@ -315,7 +333,7 @@ final class ObservedConnection {
       throwIfHasErrors();
 
       for (final observation in observations) {
-        if (observation.kind == 'video' &&
+        if (observation.kind == kind &&
             observation.connectionId == remoteConnectionId) {
           return observation;
         }
@@ -325,7 +343,7 @@ final class ObservedConnection {
     }
 
     throw StateError(
-      'Timed out while waiting for $label remote video track on $name. '
+      'Timed out while waiting for $label remote $kind track on $name. '
       'remoteConnectionId=$remoteConnectionId '
       'trackEvents=$trackEvents '
       'removeTrackEvents=$removeTrackEvents '

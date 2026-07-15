@@ -1,5 +1,5 @@
 # recvonly / sendonly / sendrecv / 2 クライアント疎通の E2E（integration_test）。
-# macOS および Linux デスクトップで実行する。
+# macOS、Windows、Linux デスクトップで実行する。
 name: E2E Test
 
 on:
@@ -46,6 +46,14 @@ jobs:
             target: integration_test/sendonly_dummy_video_e2e_test.dart
           - name: sendrecv smoke
             target: integration_test/sendrecv_smoke_e2e_test.dart
+          - name: sendrecv bidirectional
+            target: integration_test/sendrecv_bidirectional_e2e_test.dart
+          - name: connection lifecycle
+            target: integration_test/connection_lifecycle_e2e_test.dart
+          - name: audio media
+            target: integration_test/audio_media_e2e_test.dart
+          - name: texture rendering
+            target: integration_test/texture_rendering_e2e_test.dart
           - name: two-party media
             target: integration_test/two_party_media_e2e_test.dart
           - name: video codec
@@ -176,6 +184,14 @@ jobs:
             target: integration_test/sendonly_dummy_video_e2e_test.dart
           - name: sendrecv smoke
             target: integration_test/sendrecv_smoke_e2e_test.dart
+          - name: sendrecv bidirectional
+            target: integration_test/sendrecv_bidirectional_e2e_test.dart
+          - name: connection lifecycle
+            target: integration_test/connection_lifecycle_e2e_test.dart
+          - name: audio media
+            target: integration_test/audio_media_e2e_test.dart
+          - name: texture rendering
+            target: integration_test/texture_rendering_e2e_test.dart
           - name: two-party media
             target: integration_test/two_party_media_e2e_test.dart
           - name: track event
@@ -290,6 +306,14 @@ jobs:
             target: integration_test/sendonly_dummy_video_e2e_test.dart
           - name: sendrecv smoke
             target: integration_test/sendrecv_smoke_e2e_test.dart
+          - name: sendrecv bidirectional
+            target: integration_test/sendrecv_bidirectional_e2e_test.dart
+          - name: connection lifecycle
+            target: integration_test/connection_lifecycle_e2e_test.dart
+          - name: audio media
+            target: integration_test/audio_media_e2e_test.dart
+          - name: texture rendering
+            target: integration_test/texture_rendering_e2e_test.dart
           - name: two-party media
             target: integration_test/two_party_media_e2e_test.dart
           - name: track event

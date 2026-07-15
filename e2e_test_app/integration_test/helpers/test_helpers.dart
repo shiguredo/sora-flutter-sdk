@@ -16,16 +16,24 @@ List<String> parseSignalingUrls(String raw) {
       .toList();
 }
 
-/// CI では [GITHUB_RUN_ID] を付与し、ローカルでは時刻でユニーク化する。
+/// CI では [GITHUB_RUN_ID] と OS 名を付与し、ローカルでは時刻でユニーク化する。
 ///
 /// CI では同じ workflow run 内の値を使い、ログ上で追跡しやすくする。
+/// 同じテストが複数 OS で並列実行されても、OS 名によって channel を分離する。
 /// ローカルでは連続実行しても channelId が衝突しないよう、現在時刻を付ける。
 /// [suffix] を指定すると channel ID の末尾に付与する。CI の matrix 並列実行時に
 /// テスト間で channel ID が衝突するのを防ぐために使う。
-String buildChannelId(String prefix, {String suffix = ''}) {
-  final runId = Platform.environment['GITHUB_RUN_ID']?.trim();
+String buildChannelId(
+  String prefix, {
+  String suffix = '',
+  Map<String, String>? environment,
+  String? operatingSystem,
+}) {
+  final currentEnvironment = environment ?? Platform.environment;
+  final currentOperatingSystem = operatingSystem ?? Platform.operatingSystem;
+  final runId = currentEnvironment['GITHUB_RUN_ID']?.trim();
   if (runId != null && runId.isNotEmpty) {
-    return '$prefix$runId$suffix';
+    return '$prefix$runId-$currentOperatingSystem$suffix';
   }
   return '$prefix${DateTime.now().microsecondsSinceEpoch}$suffix';
 }

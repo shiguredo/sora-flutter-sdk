@@ -2722,6 +2722,12 @@ class LibWebrtcC {
         void Function(Pointer<Int16>, int, int, int)
       >('sora_push_audio_on_data');
 
+  late final soraPullAudioData = _lib
+      .lookupFunction<
+        Int32 Function(Pointer<Int16>, Int32, Int32, Int32),
+        int Function(Pointer<Int16>, int, int, int)
+      >('sora_pull_audio_data');
+
   // --- AudioTrack ---
   // local audio track と local media stream を生成・操作する API。
 

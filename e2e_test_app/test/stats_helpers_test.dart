@@ -61,4 +61,43 @@ void main() {
       expect(inbound!.mimeType, 'video/H264');
     });
   });
+
+  group('audio RTP 統計', () {
+    test('送受信量と MIME type を取得する', () {
+      const raw = '''
+{
+  "outbound": {
+    "type": "outbound-rtp",
+    "kind": "audio",
+    "codecId": "audio-codec",
+    "bytesSent": 1200,
+    "packetsSent": 12
+  },
+  "inbound": {
+    "type": "inbound-rtp",
+    "mediaType": "audio",
+    "codecId": "audio-codec",
+    "bytesReceived": "1100",
+    "packetsReceived": 11
+  },
+  "audio-codec": {
+    "type": "codec",
+    "mimeType": "audio/opus"
+  }
+}
+''';
+
+      final outbound = extractAudioOutboundStats(raw);
+      final inbound = extractAudioInboundStats(raw);
+
+      expect(outbound, isNotNull);
+      expect(outbound!.bytesSent, 1200);
+      expect(outbound.packetsSent, 12);
+      expect(outbound.mimeType, 'audio/opus');
+      expect(inbound, isNotNull);
+      expect(inbound!.bytesReceived, 1100);
+      expect(inbound.packetsReceived, 11);
+      expect(inbound.mimeType, 'audio/opus');
+    });
+  });
 }

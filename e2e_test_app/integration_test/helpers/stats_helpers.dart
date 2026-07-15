@@ -101,7 +101,7 @@ Map<String, Map<Object?, Object?>> statsReportsById(String raw) {
 }
 
 /// RTP report 自身または `codecId` が参照する codec report から MIME type を返す。
-String? videoMimeTypeForRtpReport(
+String? mimeTypeForRtpReport(
   Map<Object?, Object?> report,
   Map<String, Map<Object?, Object?>> reportsById,
 ) {
@@ -243,7 +243,7 @@ VideoOutboundStats? extractVideoOutboundStats(String raw) {
       framesSent = (framesSent ?? 0) + reportFramesSent;
     }
 
-    mimeType ??= videoMimeTypeForRtpReport(report, reportsById);
+    mimeType ??= mimeTypeForRtpReport(report, reportsById);
     width ??= intValue(report['frameWidth']);
     height ??= intValue(report['frameHeight']);
   }
@@ -298,7 +298,7 @@ VideoInboundStats? extractVideoInboundStats(String raw) {
       framesReceived = (framesReceived ?? 0) + reportFramesReceived;
     }
 
-    mimeType ??= videoMimeTypeForRtpReport(report, reportsById);
+    mimeType ??= mimeTypeForRtpReport(report, reportsById);
     width ??= intValue(report['frameWidth']);
     height ??= intValue(report['frameHeight']);
   }
@@ -314,6 +314,178 @@ VideoInboundStats? extractVideoInboundStats(String raw) {
     mimeType: mimeType,
     width: width,
     height: height,
+  );
+}
+
+/// audio outbound-rtp の送信統計。
+final class AudioOutboundStats {
+  const AudioOutboundStats({
+    required this.bytesSent,
+    required this.packetsSent,
+    this.mimeType,
+  });
+
+  final int bytesSent;
+  final int packetsSent;
+  final String? mimeType;
+
+  @override
+  String toString() {
+    return 'AudioOutboundStats('
+        'bytesSent=$bytesSent, '
+        'packetsSent=$packetsSent, '
+        'mimeType=$mimeType)';
+  }
+}
+
+/// audio inbound-rtp の受信統計。
+final class AudioInboundStats {
+  const AudioInboundStats({
+    required this.bytesReceived,
+    required this.packetsReceived,
+    this.mimeType,
+  });
+
+  final int bytesReceived;
+  final int packetsReceived;
+  final String? mimeType;
+
+  @override
+  String toString() {
+    return 'AudioInboundStats('
+        'bytesReceived=$bytesReceived, '
+        'packetsReceived=$packetsReceived, '
+        'mimeType=$mimeType)';
+  }
+}
+
+/// [getStats] の JSON 文字列から audio outbound-rtp の送信統計を取り出す。
+AudioOutboundStats? extractAudioOutboundStats(String raw) {
+  final reports = statsReports(raw);
+  final reportsById = statsReportsById(raw);
+  var bytesSent = 0;
+  var packetsSent = 0;
+  String? mimeType;
+  var found = false;
+
+  for (final report in reports) {
+    final type = report['type'];
+    final kind = report['kind'] ?? report['mediaType'];
+    if (type != 'outbound-rtp' || kind != 'audio') {
+      continue;
+    }
+    found = true;
+    bytesSent += intValue(report['bytesSent']) ?? 0;
+    packetsSent += intValue(report['packetsSent']) ?? 0;
+    mimeType ??= mimeTypeForRtpReport(report, reportsById);
+  }
+
+  if (!found) {
+    return null;
+  }
+  return AudioOutboundStats(
+    bytesSent: bytesSent,
+    packetsSent: packetsSent,
+    mimeType: mimeType,
+  );
+}
+
+/// [getStats] の JSON 文字列から audio inbound-rtp の受信統計を取り出す。
+AudioInboundStats? extractAudioInboundStats(String raw) {
+  final reports = statsReports(raw);
+  final reportsById = statsReportsById(raw);
+  var bytesReceived = 0;
+  var packetsReceived = 0;
+  String? mimeType;
+  var found = false;
+
+  for (final report in reports) {
+    final type = report['type'];
+    final kind = report['kind'] ?? report['mediaType'];
+    if (type != 'inbound-rtp' || kind != 'audio') {
+      continue;
+    }
+    found = true;
+    bytesReceived += intValue(report['bytesReceived']) ?? 0;
+    packetsReceived += intValue(report['packetsReceived']) ?? 0;
+    mimeType ??= mimeTypeForRtpReport(report, reportsById);
+  }
+
+  if (!found) {
+    return null;
+  }
+  return AudioInboundStats(
+    bytesReceived: bytesReceived,
+    packetsReceived: packetsReceived,
+    mimeType: mimeType,
+  );
+}
+
+/// audio outbound-rtp の送信量が確認できるまで [getStats] を待ち合わせる。
+Future<AudioOutboundStats> waitForAudioOutboundStats(
+  WidgetTester tester,
+  SoraConnection connection, {
+  AudioOutboundStats? previous,
+}) async {
+  const maxAttempts = 30;
+  const interval = Duration(milliseconds: 500);
+  AudioOutboundStats? lastStats;
+
+  for (var attempt = 0; attempt < maxAttempts; attempt++) {
+    final raw = await connection.getStats();
+    if (raw != null && raw.isNotEmpty) {
+      final stats = extractAudioOutboundStats(raw);
+      if (stats != null) {
+        lastStats = stats;
+        final hasTraffic = stats.bytesSent > 0 && stats.packetsSent > 0;
+        final hasGrowth = previous == null ||
+            (stats.bytesSent > previous.bytesSent &&
+                stats.packetsSent > previous.packetsSent);
+        if (hasTraffic && hasGrowth) {
+          return stats;
+        }
+      }
+    }
+    await tester.pump(interval);
+  }
+
+  throw StateError(
+    'audio outbound-rtp の送信量を確認できませんでした: '
+    'previous=$previous last=$lastStats',
+  );
+}
+
+/// audio inbound-rtp の受信量が確認できるまで [getStats] を待ち合わせる。
+Future<AudioInboundStats> waitForAudioInboundStats(
+  WidgetTester tester,
+  SoraConnection connection, {
+  AudioInboundStats? previous,
+}) async {
+  const maxAttempts = 30;
+  const interval = Duration(milliseconds: 500);
+  AudioInboundStats? lastStats;
+
+  for (var attempt = 0; attempt < maxAttempts; attempt++) {
+    final raw = await connection.getStats();
+    if (raw != null && raw.isNotEmpty) {
+      final stats = extractAudioInboundStats(raw);
+      if (stats != null) {
+        lastStats = stats;
+        final hasTraffic = stats.bytesReceived > 0 && stats.packetsReceived > 0;
+        final hasGrowth = previous == null ||
+            (stats.bytesReceived > previous.bytesReceived &&
+                stats.packetsReceived > previous.packetsReceived);
+        if (hasTraffic && hasGrowth) {
+          return stats;
+        }
+      }
+    }
+    await tester.pump(interval);
+  }
+
+  throw StateError(
+    'audio inbound-rtp の受信量を確認できませんでした: '
+    'previous=$previous last=$lastStats',
   );
 }
 

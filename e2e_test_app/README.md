@@ -96,6 +96,7 @@ flutter test integration_test/track_event_e2e_test.dart -d macos
 flutter test integration_test/two_party_media_e2e_test.dart -d macos
 flutter test integration_test/video_codec_e2e_test.dart -d macos
 flutter test integration_test/notify_metadata_e2e_test.dart -d macos
+flutter test integration_test/custom_data_channel_e2e_test.dart -d macos
 flutter test integration_test/remote_media_stream_e2e_test.dart -d macos
 flutter test integration_test/local_media_toggle_e2e_test.dart -d macos
 flutter test integration_test/bundle_id_isolation_e2e_test.dart -d macos

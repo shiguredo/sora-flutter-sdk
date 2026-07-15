@@ -2,6 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-23
+- Completed: 2026-07-15
 - Model: GPT-5 Codex
 - Branch: feature/add-custom-datachannel-compress-off-e2e
 
@@ -25,3 +26,11 @@
 - `compress: false` の DataChannel open を確認する E2E がある
 - open event の `compress` が `false` であることを確認している
 - バイナリ payload の送受信成功を確認している
+
+## 解決方法
+
+`custom_data_channel_e2e_test.dart` に `compress: true` / `false` の 2 ケースを集約し、共通のテスト処理で検証するようにした。
+
+- sender / receiver の両方で `#test-channel` に `compress: false` を指定した
+- sender / receiver 双方の open event で label と `compress: false` を検証した
+- 双方向のバイナリ payload 送受信と cleanup を検証した

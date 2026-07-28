@@ -47,6 +47,11 @@ android {
             // TODO: release ビルド用の署名設定を追加する。
             // `flutter run --release` を利用できるよう、現在は debug 用の鍵で署名する。
             signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 

@@ -5,6 +5,7 @@
 - Model: DeepSeek V4 Flash
 - Branch: feature/fix-jni-zero-jar
 - Polished: 2026-06-08
+- Updated: 2026-07-29
 
 ## 目的
 
@@ -109,6 +110,18 @@ M149 の AAR を用いた Sora Android SDK quickstart では、 R8 を有効に�
 - `flutter build apk --release --target-platform android-arm64` が成功した。
 - 生成した APK の dex に上記 4 クラスが含まれることを確認した。
 - 修正前の `webrtc.jar` を使用し、 DevTools アプリで minify とリソース縮小を無効にした release APK を Pixel 7 で起動して、 Sora 接続できることを確認した。
+
+## 補足 (2026-07-29)
+
+根本対応 (`webrtc-build` のパッチ) が完了するまでの間、 `devtools/android/app/proguard-rules.pro` に
+`-dontwarn org.jni_zero.**` を設定することで、 R8 の Missing class エラーを抑制している。
+
+この `dontwarn` は devtools アプリの ProGuard 設定にのみ追加されており、
+SDK の `android/consumer-rules.pro` には影響しない。
+SDK 利用者が release build を成功させるには、利用側のアプリで同様の `dontwarn` 設定が必要である。
+
+根本対応 (`webrtc-build` パッチ + `native_deps.json` 更新) が済んだ時点で、
+この `dontwarn` 設定は削除する。
 
 ## 完了条件
 

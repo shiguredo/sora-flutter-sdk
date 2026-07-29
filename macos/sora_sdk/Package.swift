@@ -63,6 +63,7 @@ let package = Package(
         .linkedFramework("Network"),
         .linkedFramework("QuartzCore"),
         .linkedFramework("ScreenCaptureKit"),
+        .linkedFramework("Security"),
         .linkedFramework("VideoToolbox"),
         // -all_load: SPM の binaryTarget では特定アーカイブへの -force_load が
         // 指定できないため全静的ライブラリを強制ロードする。

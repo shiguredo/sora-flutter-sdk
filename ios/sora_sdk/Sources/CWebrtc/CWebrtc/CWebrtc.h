@@ -9,6 +9,9 @@
 #include <webrtc_c/sdk/objc/components/audio/audio_session.h>
 
 // sora_sdk 用の Apple 補助 API
+void sora_apple_set_system_tls_cert_verifier(
+    struct webrtc_PeerConnectionDependencies* dependencies);
+
 extern const int sora_audio_session_error_none;
 extern const int sora_audio_session_error_configuration;
 extern const int sora_audio_session_error_input_initialization;

@@ -17,6 +17,7 @@
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
 #include <jni.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -46,6 +47,158 @@ static jobject g_application_context = NULL;
 // plugin 初期化時に helper class / method を global ref として保持する。
 static jclass g_sora_audio_device_module_class = NULL;
 static jmethodID g_sora_audio_device_module_create_method = NULL;
+// TURN-TLS 証明書チェーンを Android の信頼ストアで検証する helper。
+static jclass g_sora_tls_certificate_verifier_class = NULL;
+static jmethodID g_sora_tls_certificate_verifier_verify_method = NULL;
+
+/*
+ * libwebrtc から渡された証明書チェーンを DER の byte[][] へ変換し、
+ * Android の X509TrustManager を利用する Kotlin helper へ渡す。
+ *
+ * ホスト名検証は libwebrtc 側で別途実行されるため、この callback は
+ * 証明書チェーンの信頼性だけを同期的に返す。
+ */
+static int sora_android_verify_tls_certificate_chain(
+    const struct webrtc_SSLCertChain* chain,
+    void* user_data) {
+  (void)user_data;
+
+  if (chain == NULL || g_sora_tls_certificate_verifier_class == NULL ||
+      g_sora_tls_certificate_verifier_verify_method == NULL) {
+    LOGE("TLS certificate verifier is not initialized");
+    return 0;
+  }
+
+  int chain_size = webrtc_SSLCertChain_GetSize(chain);
+  if (chain_size <= 0) {
+    LOGE("TLS certificate chain is empty");
+    return 0;
+  }
+
+  JNIEnv* env = webrtc_jni_AttachCurrentThreadIfNeeded();
+  if (env == NULL) {
+    LOGE("Failed to attach TLS certificate verification thread");
+    return 0;
+  }
+
+  jclass byte_array_class = (*env)->FindClass(env, "[B");
+  if (byte_array_class == NULL) {
+    LOGE("Failed to resolve byte array class");
+    (*env)->ExceptionClear(env);
+    return 0;
+  }
+
+  jobjectArray java_chain =
+      (*env)->NewObjectArray(env, (jsize)chain_size, byte_array_class, NULL);
+  (*env)->DeleteLocalRef(env, byte_array_class);
+  if (java_chain == NULL) {
+    LOGE("Failed to allocate TLS certificate chain");
+    if ((*env)->ExceptionCheck(env)) {
+      (*env)->ExceptionClear(env);
+    }
+    return 0;
+  }
+
+  int valid = 0;
+  for (int i = 0; i < chain_size; i++) {
+    const struct webrtc_SSLCertificate* certificate =
+        webrtc_SSLCertChain_Get(chain, i);
+    if (certificate == NULL) {
+      LOGE("TLS certificate chain contains a null certificate");
+      goto cleanup;
+    }
+
+    struct std_string_unique* der_unique =
+        webrtc_SSLCertificate_ToDER(certificate);
+    if (der_unique == NULL) {
+      LOGE("Failed to encode TLS certificate");
+      goto cleanup;
+    }
+
+    struct std_string* der = std_string_unique_get(der_unique);
+    size_t der_size = der == NULL ? 0 : std_string_size(der);
+    const char* der_data = der == NULL ? NULL : std_string_c_str(der);
+    if (der_data == NULL || der_size == 0 || der_size > INT_MAX) {
+      LOGE("TLS certificate DER is invalid");
+      std_string_unique_delete(der_unique);
+      goto cleanup;
+    }
+
+    jbyteArray java_certificate = (*env)->NewByteArray(env, (jsize)der_size);
+    if (java_certificate == NULL) {
+      LOGE("Failed to allocate TLS certificate");
+      std_string_unique_delete(der_unique);
+      if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+      }
+      goto cleanup;
+    }
+
+    (*env)->SetByteArrayRegion(env, java_certificate, 0, (jsize)der_size,
+                               (const jbyte*)der_data);
+    std_string_unique_delete(der_unique);
+    if ((*env)->ExceptionCheck(env)) {
+      LOGE("Failed to copy TLS certificate");
+      (*env)->ExceptionClear(env);
+      (*env)->DeleteLocalRef(env, java_certificate);
+      goto cleanup;
+    }
+
+    (*env)->SetObjectArrayElement(env, java_chain, (jsize)i, java_certificate);
+    (*env)->DeleteLocalRef(env, java_certificate);
+    if ((*env)->ExceptionCheck(env)) {
+      LOGE("Failed to append TLS certificate");
+      (*env)->ExceptionClear(env);
+      goto cleanup;
+    }
+  }
+
+  valid = (*env)->CallStaticBooleanMethod(
+      env, g_sora_tls_certificate_verifier_class,
+      g_sora_tls_certificate_verifier_verify_method, java_chain);
+  if ((*env)->ExceptionCheck(env)) {
+    LOGE("TLS certificate verifier helper threw");
+    (*env)->ExceptionClear(env);
+    valid = 0;
+  }
+
+cleanup:
+  (*env)->DeleteLocalRef(env, java_chain);
+  return valid;
+}
+
+// verifier は user_data を保持しないが、libwebrtc-c の callback は必須。
+static void sora_android_destroy_tls_certificate_verifier(void* user_data) {
+  (void)user_data;
+}
+
+/*
+ * Android のシステム信頼ストアを利用する verifier を PeerConnection へ設定する。
+ *
+ * webrtc_PeerConnectionDependencies_set_tls_cert_verifier は verifier の所有権を
+ * PeerConnectionDependencies へ移す。
+ */
+__attribute__((visibility("default"))) void
+sora_android_set_system_tls_cert_verifier(
+    struct webrtc_PeerConnectionDependencies* dependencies) {
+  if (dependencies == NULL) {
+    LOGE("PeerConnection dependencies are null");
+    return;
+  }
+
+  struct webrtc_SSLCertificateVerifier_cbs callbacks = {
+      .VerifyChain = sora_android_verify_tls_certificate_chain,
+      .OnDestroy = sora_android_destroy_tls_certificate_verifier,
+  };
+  struct webrtc_SSLCertificateVerifier_unique* verifier =
+      webrtc_SSLCertificateVerifier_new(&callbacks, NULL);
+  if (verifier == NULL) {
+    LOGE("Failed to create Android TLS certificate verifier");
+    return;
+  }
+  webrtc_PeerConnectionDependencies_set_tls_cert_verifier(dependencies,
+                                                          verifier);
+}
 
 static struct webrtc_I420Buffer* create_rotated_i420_buffer(
     struct webrtc_I420Buffer* source,
@@ -1171,7 +1324,12 @@ Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeInitializeAndroid(
     (*env)->DeleteGlobalRef(env, g_sora_audio_device_module_class);
     g_sora_audio_device_module_class = NULL;
   }
+  if (g_sora_tls_certificate_verifier_class != NULL) {
+    (*env)->DeleteGlobalRef(env, g_sora_tls_certificate_verifier_class);
+    g_sora_tls_certificate_verifier_class = NULL;
+  }
   g_sora_audio_device_module_create_method = NULL;
+  g_sora_tls_certificate_verifier_verify_method = NULL;
   g_application_context = (*env)->NewGlobalRef(env, application_context);
   if (g_application_context == NULL) {
     LOGE(
@@ -1205,6 +1363,34 @@ Java_jp_shiguredo_sora_1sdk_WebrtcC_nativeInitializeAndroid(
     LOGE(
         "nativeInitializeAndroid: failed to find "
         "createNativeAudioDeviceModule");
+    (*env)->ExceptionClear(env);
+    return JNI_FALSE;
+  }
+
+  jclass tls_verifier_class = (*env)->FindClass(
+      env, "jp/shiguredo/sora_sdk/SoraTlsCertificateVerifier");
+  if (tls_verifier_class == NULL) {
+    LOGE("nativeInitializeAndroid: failed to find TLS certificate verifier");
+    (*env)->ExceptionClear(env);
+    return JNI_FALSE;
+  }
+  g_sora_tls_certificate_verifier_class =
+      (jclass)(*env)->NewGlobalRef(env, tls_verifier_class);
+  (*env)->DeleteLocalRef(env, tls_verifier_class);
+  if (g_sora_tls_certificate_verifier_class == NULL) {
+    LOGE(
+        "nativeInitializeAndroid: failed to create TLS certificate verifier "
+        "global ref");
+    return JNI_FALSE;
+  }
+
+  g_sora_tls_certificate_verifier_verify_method =
+      (*env)->GetStaticMethodID(env, g_sora_tls_certificate_verifier_class,
+                                "verifyCertificateChain", "([[B)Z");
+  if (g_sora_tls_certificate_verifier_verify_method == NULL) {
+    LOGE(
+        "nativeInitializeAndroid: failed to find TLS certificate verifier "
+        "method");
     (*env)->ExceptionClear(env);
     return JNI_FALSE;
   }

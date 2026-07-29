@@ -1689,6 +1689,20 @@ class LibWebrtcC {
         void Function(Pointer<WebrtcPeerConnectionDependencies>)
       >('webrtc_PeerConnectionDependencies_delete');
 
+  // Android のシステム信頼ストアを利用する TURN-TLS verifier を設定する。
+  late final androidSetSystemTlsCertVerifier = _lib
+      .lookupFunction<
+        Void Function(Pointer<WebrtcPeerConnectionDependencies>),
+        void Function(Pointer<WebrtcPeerConnectionDependencies>)
+      >('sora_android_set_system_tls_cert_verifier');
+
+  // Apple のシステム信頼ストアを利用する TURN-TLS verifier を設定する。
+  late final appleSetSystemTlsCertVerifier = _lib
+      .lookupFunction<
+        Void Function(Pointer<WebrtcPeerConnectionDependencies>),
+        void Function(Pointer<WebrtcPeerConnectionDependencies>)
+      >('sora_apple_set_system_tls_cert_verifier');
+
   // --- PeerConnection ---
   // PeerConnection 本体生成、SDP/ICE 操作、track 追加、stats 取得の主要 API。
 

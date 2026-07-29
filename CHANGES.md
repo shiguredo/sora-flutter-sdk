@@ -4,6 +4,10 @@
 
 ### sora_sdk
 
+- [ADD] Android / iOS / macOS で TURN-TLS 証明書をシステム信頼ストアで検証する
+  - libwebrtc 組み込みルート CA の検証失敗時に OS の信頼ストアを利用する
+  - @zztkm
+
 - [ADD] Linux リモート映像レンダリングを実装する
   - RenderingSink による I420 フレーム受信・RGBA 変換・Flutter Texture 配信を実装する
   - @zztkm

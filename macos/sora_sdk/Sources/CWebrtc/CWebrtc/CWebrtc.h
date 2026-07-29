@@ -7,6 +7,9 @@
 #include <webrtc_c.h>
 
 // sora_sdk 用の Apple 補助 API
+void sora_apple_set_system_tls_cert_verifier(
+    struct webrtc_PeerConnectionDependencies* dependencies);
+
 struct webrtc_VideoFrame_unique* sora_video_frame_create(
     struct webrtc_I420Buffer_refcounted* buffer,
     int rotation,

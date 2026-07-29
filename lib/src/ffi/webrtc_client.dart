@@ -1421,6 +1421,15 @@ class WebrtcClient {
     }
 
     final pcDeps = _lib.pcDependenciesNew(pcObserver);
+    if (Platform.isAndroid) {
+      // libwebrtc の限定的な組み込みルート CA 一覧ではなく、
+      // Android のシステム信頼ストアで TURN-TLS 証明書を検証する。
+      _lib.androidSetSystemTlsCertVerifier(pcDeps);
+    } else if (Platform.isIOS || Platform.isMacOS) {
+      // Apple の Security framework へ証明書チェーンを渡し、
+      // システム信頼ストアで TURN-TLS 証明書を検証する。
+      _lib.appleSetSystemTlsCertVerifier(pcDeps);
+    }
     final pcRefPtr = calloc<Pointer<WebrtcPeerConnectionInterfaceRefcounted>>();
     final errorPtr = calloc<Pointer<WebrtcRTCErrorUnique>>();
 

@@ -11,6 +11,8 @@ Sora Flutter SDK の接続設定から `audio_streaming_language_code` を指定
 
 [Sora の音声ストリーミング機能](https://sora-doc.shiguredo.jp/AUDIO_STREAMING) では、シグナリング接続時または認証成功時の払い出しで言語コードを指定する必要がある。言語コードが指定されていない接続は音声ストリーミングの対象にならない。
 
+本機能は `README.md` の優先実装一覧に記載されている優先実装が可能な機能である。
+
 ## 現状
 
 - `lib/src/sora_connection_config.dart` の `SoraConnectionConfig` に音声ストリーミングの言語コードを指定するフィールドがない

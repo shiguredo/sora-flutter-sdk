@@ -11,6 +11,8 @@ Sora Flutter SDK の接続設定から Opus の詳細パラメーターを指定
 
 [Sora のシグナリング型定義](https://sora-doc.shiguredo.jp/SIGNALING_TYPE) では、`channels`、`maxplaybackrate`、`maxaveragebitrate`、`minptime`、`ptime`、`stereo`、`sprop_stereo`、`useinbandfec`、`usedtx` を指定できる。
 
+本機能は `README.md` の優先実装一覧に記載されている優先実装が可能な機能である。
+
 ## 現状
 
 - `SoraConnectionConfig` には `audioCodecType` と `audioBitRate` しかなく、Opus 詳細パラメーターの指定経路がない

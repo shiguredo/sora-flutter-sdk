@@ -16,7 +16,9 @@ dependencies:
   meta: ^1.16.0
   web_socket_channel: ^3.0.3
 
-  # Scripts
+  # Build hook / CMake から実行されるスクリプトが参照するため dependencies に置く
+  # (dev_dependencies は SDK 利用者のビルドでは解決されない)
+  archive: ^4.0.2
   crypto: ^3.0.6
   hooks: ^2.0.2
   path: ^1.9.0
@@ -25,7 +27,6 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  archive: ^4.0.2
 
 flutter:
   config:

@@ -15,9 +15,6 @@ abstract final class SoraErrorCode {
   /// シグナリング候補 URL 接続タイムアウト
   static const String signalingCandidateTimeout = 'signaling_candidate_timeout';
 
-  /// 無効な Offer SDP
-  static const String offerInvalid = 'offer_invalid';
-
   /// observer bridge 生成失敗
   static const String observerBridgeCreationFailed =
       'observer_bridge_creation_failed';

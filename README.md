@@ -411,15 +411,6 @@ flutter test integration_test/video_codec_e2e_test.dart -d macos
 
 開発時の動作確認用 Flutter アプリです。
 
-## ドキュメント
-
-- [iOS](docs/IOS.md)
-- [macOS](docs/MACOS.md)
-- [Android](docs/ANDROID.md)
-- [Windows](docs/WINDOWS.md)
-- [Linux](docs/LINUX.md)
-- [WebRTC ビルド](docs/WEBRTC_BUILD.md)
-
 ## ビルド
 
 ### 前提条件
@@ -436,7 +427,7 @@ flutter test integration_test/video_codec_e2e_test.dart -d macos
 `fetchNativeDeps` task から自動取得されます。Android 向け取得対象のバージョン・配布元 URL・SHA-256 は
 [`scripts/native_deps.json`](scripts/native_deps.json) で管理しています。
 
-Windows では CMake ビルド時に `scripts/fetch_native_deps.dart windows_x86_64` が自動実行され、libwebrtc-c / webrtc を `third_party/libwebrtc-c/` にダウンロード・展開します。詳細は [Windows ドキュメント](docs/WINDOWS.md) を参照してください。
+Windows では CMake ビルド時に `scripts/fetch_native_deps.dart windows_x86_64` が自動実行され、libwebrtc-c / webrtc を `third_party/libwebrtc-c/` にダウンロード・展開します。
 
 Linux では cmake configure 時に `scripts/fetch_native_deps.dart linux_ubuntu_24_04_x86_64` が自動実行され、libwebrtc-c / webrtc を `third_party/libwebrtc-c/` にダウンロード・展開します。Ubuntu 24.04 向けのビルドに必要なシステムパッケージは以下の通りです。
 
@@ -500,7 +491,6 @@ Ubuntu 24.04 (x86_64) をサポートします。
 
 **詳細は Discord やメールなどでお気軽にお問い合わせください**
 
-- Linux 対応
 - Opus 詳細パラメータ対応 (`audioOpusParamsChannels` / `audioOpusParamsStereo` / `audioOpusParamsUseinbandfec` 等)
 - `audioStreamingLanguageCode` 対応
 

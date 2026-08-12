@@ -67,6 +67,9 @@
 
 ### misc
 
+- [ADD] macOS のウィンドウキャプチャ E2E テストを追加する
+  - ダミーウィンドウを ScreenCaptureKit でキャプチャし、受信側の stats で映像到達を検証する (macOS ローカル専用)
+  - @zztkm
 - [ADD] CI に Windows ビルドジョブを追加する
   - `ci.yml` に `build-windows` ジョブを追加し、PR で Windows ビルドを実行する
   - @zztkm

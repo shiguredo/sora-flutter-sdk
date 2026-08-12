@@ -101,9 +101,13 @@ private class LocalVideoRenderer {
   }
 
   // ウィンドウキャプチャの開始完了を待つ。
-  // カメラキャプチャは init 内で開始済みのため何もしない。
+  // カメラキャプチャは init 内で開始済みのため、完了を即座に通知する。
   func start(completion: @escaping (Error?) -> Void) {
-    windowCapturer?.start(completion: completion)
+    if let windowCapturer {
+      windowCapturer.start(completion: completion)
+    } else {
+      completion(nil)
+    }
   }
 
   func dispose() {

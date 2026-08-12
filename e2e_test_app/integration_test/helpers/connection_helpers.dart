@@ -82,11 +82,10 @@ final class ObservedConnection {
           StateError(_buildErrorMessage(event, phase: 'connect')),
         );
       }
-      if (!_disconnected.isCompleted) {
-        _disconnected.completeError(
-          StateError(_buildErrorMessage(event, phase: 'disconnect')),
-        );
-      }
+      // 注意: _disconnected は error で complete しない。
+      // window_capture_error のように意図したエラーイベントを受信した後でも
+      // disconnect は正常に完了する必要がある。また、await 前の completeError は
+      // unhandled async error としてテストを失敗させる原因になる。
       return;
     }
 

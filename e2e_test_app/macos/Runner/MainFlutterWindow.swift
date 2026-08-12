@@ -67,6 +67,9 @@ class MainFlutterWindow: NSWindow {
       defer: false
     )
     window.title = Self.dummyWindowTitle
+    // close() で autorelease されると dummyWindow = nil との二重解放になるため、
+    // releasedWhenClosed を無効化して close() がウィンドウを解放しないようにする。
+    window.isReleasedWhenClosed = false
 
     let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 640, height: 360))
     contentView.wantsLayer = true

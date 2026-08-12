@@ -381,8 +381,18 @@ final class SoraWindowCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
     withLock {
       captureState = .stopped
     }
-    self.stream = nil
-    onError?(SoraWindowCaptureError.runtimeError(error))
+    // この delegate は com.screenCaptureKit.streamQueue で呼ばれる。
+    // SCStream はメインスレッドで生成・開始・停止する必要があるため、
+    // streamQueue 上で self.stream を解放してはいけない。
+    // バックグラウンドスレッドで SCStream が dealloc されると
+    // ScreenCaptureKit 内部のセッション状態が壊れ、同じウィンドウ ID の
+    // 再キャプチャが "window not found" で失敗する。
+    // エラー通知もメインスレッドへ移してから行う。
+    let captureError = SoraWindowCaptureError.runtimeError(error)
+    Task { @MainActor in
+      self.stream = nil
+      self.onError?(captureError)
+    }
   }
 
   // MARK: - SCStreamOutput

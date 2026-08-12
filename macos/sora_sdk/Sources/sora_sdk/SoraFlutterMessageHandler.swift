@@ -49,6 +49,11 @@ private class LocalVideoRenderer {
   let cameraCapturer: SoraCameraCapturer?
   let windowCapturer: SoraWindowCapturer?
 
+  // エラー通知の宛先となるクライアント ID。
+  // 接続前 preview では 0 のままとなり、Sora 接続時に後付けで設定される。
+  // `ensureLocalVideoTrackTexture` の再呼び出しでも更新される。
+  var clientId: Int64 = 0
+
   init(
     videoSourcePtr: Int64,
     captureType: String,
@@ -324,12 +329,20 @@ class SoraFlutterMessageHandler {
         return
       }
       if let renderer = localVideoRenderers[videoSourcePtr] {
+        // 接続前 preview で生成済みの renderer にも、
+        // エラー通知の宛先 clientId を後付けで設定する
+        renderer.clientId = clientId
         result(["textureId": renderer.textureId])
         return
       }
-      // キャプチャ中のウィンドウ消失やストリームエラーを Dart 側へ通知する
+      // キャプチャ中のウィンドウ消失やストリームエラーを Dart 側へ通知する。
+      // 通知先の clientId は renderer に後付けで設定されるため、
+      // ensure 時点の clientId (接続前 preview では 0) ではなく
+      // renderer の現在の clientId を参照する。
       let onError: (Error) -> Void = { [weak self] error in
-        self?.clients[clientId]?.eventSink?([
+        guard let self else { return }
+        let clientId = self.localVideoRenderers[videoSourcePtr]?.clientId ?? 0
+        self.clients[clientId]?.eventSink?([
           "type": "window_capture_error",
           "message": error.localizedDescription,
         ])
@@ -346,6 +359,7 @@ class SoraFlutterMessageHandler {
           textureRegistry: textureRegistry,
           onError: onError
         )
+        renderer.clientId = clientId
         localVideoRenderers[videoSourcePtr] = renderer
         // ウィンドウキャプチャは SCStream の開始完了を待ってから返す
         renderer.start { [weak self] error in

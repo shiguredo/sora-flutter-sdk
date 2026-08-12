@@ -1084,6 +1084,11 @@ class SoraConnection {
     if (track.captureType == VideoTrackCaptureType.external) {
       return;
     }
+    // ウィンドウキャプチャエラーの通知先をこの接続のクライアント ID に紐付ける。
+    // 接続前 preview で ensure 済みの renderer がある場合も、
+    // ネイティブ側は renderer の現在の clientId を参照するため、
+    // ここで後付けされた ID 宛にエラーが通知される。
+    track.attachClientId(id);
     try {
       final textureId = await track.textureId;
       _emitLocalVideo(SoraLocalVideoHandle(textureId: textureId));

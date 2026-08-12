@@ -512,10 +512,33 @@ class LocalVideoTrack extends LocalMediaStreamTrack {
   final VideoTrackCaptureType _captureType;
   final VideoCaptureSettings? _captureSettings;
   final Pointer<WebrtcAdaptedVideoTrackSourceRefcounted>? _videoSourceRef;
-  final int? _clientId;
+  int? _clientId;
   Future<int>? _textureIdFuture;
 
   VideoTrackCaptureType get captureType => _captureType;
+
+  /// エラー通知の宛先となる SoraConnection のクライアント ID。
+  ///
+  /// 未設定の場合は null。Sora 接続時に [attachClientId] で設定される。
+  @internal
+  int? get clientIdOrNull => _clientId;
+
+  /// エラー通知の宛先となる SoraConnection のクライアント ID を後付けで設定する。
+  ///
+  /// 接続前 preview ではクライアント ID が未確定のため、
+  /// プラットフォーム側への ensure 時に 0 を送る。Sora 接続時
+  /// (`_applyVideoCaptureBackend()` 経由) に設定されることで、
+  /// キャプチャ中のウィンドウ消失やストリームエラーが
+  /// 正しい SoraConnection へ通知されるようになる。
+  ///
+  /// 接続前 preview で ensure 済みの texture がある場合はキャッシュを破棄し、
+  /// 次回の `textureId` 取得で再 ensure させることで、
+  /// ネイティブ側の renderer に後付けのクライアント ID が反映される。
+  @internal
+  void attachClientId(int clientId) {
+    _clientId = clientId;
+    _textureIdFuture = null;
+  }
 
   /// ローカルプレビュー用の Flutter Texture ID を返す。
   ///

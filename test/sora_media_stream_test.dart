@@ -1,9 +1,59 @@
+import 'dart:ffi';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart' show MissingPluginException;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sora_sdk/src/ffi/bindings.dart';
 import 'package:sora_sdk/src/sora_media_stream.dart';
 
 void main() {
+  // attachClientId 後の再 ensure 検証で MethodChannel を呼ぶため、
+  // プラットフォームチャネルの解決に必要なバインディングを初期化する。
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  group('LocalVideoTrack.attachClientId', () {
+    // ネイティブ参照を伴わない track をダミーポインタで生成する。
+    // attachClientId は状態変更のみでネイティブ API に触れないため、
+    // FFI ライブラリを必要としないユニットテストで検証できる。
+    LocalVideoTrack createWindowTrack() {
+      return LocalVideoTrack.fromNativeMediaTrack(
+        Pointer<WebrtcMediaStreamTrackInterfaceRefcounted>.fromAddress(1),
+        captureType: VideoTrackCaptureType.window,
+      );
+    }
+
+    test('初期状態ではクライアント ID が未設定 (null) である', () {
+      expect(createWindowTrack().clientIdOrNull, isNull);
+    });
+
+    test('attachClientId で設定したクライアント ID を取得できる', () {
+      final track = createWindowTrack();
+      track.attachClientId(42);
+      expect(track.clientIdOrNull, 42);
+    });
+
+    test('attachClientId で後から上書きできる', () {
+      final track = createWindowTrack();
+      track.attachClientId(42);
+      track.attachClientId(7);
+      expect(track.clientIdOrNull, 7);
+    });
+
+    test('attachClientId 後に textureId を再取得すると再 ensure が実行される', () async {
+      // 接続前 preview で ensure 済みの texture キャッシュを破棄し、
+      // ネイティブ側の renderer に後付けの clientId が反映されることを
+      // 再 ensure の実行で検証する。
+      // テスト環境にはプラットフォーム実装が無いため、
+      // ensure は MissingPluginException になる。
+      final track = createWindowTrack();
+      track.attachClientId(42);
+      await expectLater(
+        track.textureId,
+        throwsA(isA<MissingPluginException>()),
+      );
+    });
+  });
+
   group('VideoTrackCaptureType', () {
     test('camera / external / window の 3 種が定義されている', () {
       expect(VideoTrackCaptureType.values, hasLength(3));

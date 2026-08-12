@@ -288,9 +288,158 @@ void main() {
       );
     },
   );
+  testWidgets(
+    'window-capture-error: キャプチャ中のウィンドウが閉じられると '
+    'window_capture_error が通知される',
+    (WidgetTester tester) async {
+      final env = loadE2eEnvironment();
+      final channelId = buildChannelId(
+        env.channelPrefix,
+        suffix: '-windowcapture-error',
+      );
+
+      final senderConfig = SoraConnectionConfig(
+        signalingUrls: env.signalingUrls,
+        channelId: channelId,
+        role: SoraRole.sendonly,
+        video: true,
+        audio: false,
+        useAudioDevice: false,
+        metadata: env.metadata,
+      );
+
+      final senderConnectTimeout = connectionStageTimeout(senderConfig);
+      final senderDisconnectTimeout = connectionStageTimeout(senderConfig);
+
+      ObservedConnection? sender;
+      LocalMediaStream? stream;
+      LocalVideoTrack? videoTrack;
+      Object? bodyError;
+
+      try {
+        // ダミーウィンドウを表示し、SCShareableContent に反映されるまで待つ
+        await _dummyWindowChannel.invokeMethod<void>('show');
+        final source = await _waitForDummyWindowSource(tester);
+        logE2eMessage(
+          'stage=dummy_window_ready channelId=$channelId sourceId=${source.id}',
+        );
+
+        sender = await ObservedConnection.create(
+          name: 'sender',
+          config: senderConfig,
+        );
+        stream = MediaDevices.createMediaStream();
+        videoTrack = MediaDevices.createWindowVideoTrack(source);
+        stream.addTrack(videoTrack);
+
+        logE2eMessage(
+          'stage=sender_connect_start channelId=$channelId '
+          'bundleId=${sender.connection.bundleId}',
+        );
+        await sender.connect(stream);
+        await sender.waitUntilConnected(senderConnectTimeout);
+        sender.throwIfHasErrors();
+        logE2eMessage(
+          'stage=sender_connected channelId=$channelId '
+          'senderConnectionId=${sender.connectionId}',
+        );
+
+        // ウィンドウキャプチャが動いていることを outbound stats で確認する
+        await waitForVideoOutboundStats(tester, sender.connection);
+        logE2eMessage('stage=sender_outbound_ready channelId=$channelId');
+
+        // キャプチャ中のウィンドウを閉じて、SCStream をエラーにさせる
+        await _dummyWindowChannel.invokeMethod<void>('hide');
+        logE2eMessage('stage=dummy_window_hidden channelId=$channelId');
+
+        // window_capture_error イベントが通知されるまで待つ
+        final errorEvent = await _waitForWindowCaptureError(
+          sender,
+          timeout: const Duration(seconds: 30),
+        );
+        logE2eMessage(
+          'stage=window_capture_error_received channelId=$channelId '
+          'code=${errorEvent.code} message=${errorEvent.message}',
+        );
+
+        expect(
+          errorEvent.code,
+          SoraErrorCode.windowCaptureError,
+          reason: 'キャプチャ中のウィンドウ消失が window_capture_error として通知されること。',
+        );
+      } catch (e) {
+        bodyError = e;
+        rethrow;
+      } finally {
+        final cleanupErrors = <String>[];
+
+        Future<void> runCleanupStep(
+          String name,
+          Future<void> Function() action,
+        ) async {
+          try {
+            await action();
+          } catch (e) {
+            cleanupErrors.add('$name: $e');
+            logE2eMessage('stage=cleanup_error step=$name error=$e');
+          }
+        }
+
+        await runCleanupStep('dummyWindow.hide', () async {
+          await _dummyWindowChannel.invokeMethod<void>('hide');
+        });
+        await runCleanupStep('sender.disconnect', () async {
+          if (sender != null) {
+            await sender.disconnect();
+            await sender.waitUntilDisconnected(senderDisconnectTimeout);
+          }
+        });
+        await runCleanupStep(
+            'sender.dispose', () async => await sender?.dispose());
+        await runCleanupStep(
+            'stream.dispose', () async => await stream?.dispose());
+        await runCleanupStep(
+            'videoTrack.dispose', () async => await videoTrack?.dispose());
+
+        if (cleanupErrors.isNotEmpty) {
+          logE2eMessage(
+            'stage=cleanup_finished status=failed '
+            'errors=${cleanupErrors.join(" | ")}',
+          );
+          if (bodyError == null) {
+            throw StateError(
+              'Cleanup failed: ${cleanupErrors.join(" | ")}',
+            );
+          }
+        } else {
+          logE2eMessage('stage=cleanup_finished status=ok');
+        }
+      }
+    },
+  );
 }
 
-/// ダミーウィンドウが SCShareableContent に反映されるまで列挙を待つ。
+/// window_capture_error エラーイベントが通知されるまで待つ。
+///
+/// 通知されない場合は 30 秒でタイムアウトする。
+Future<SoraConnectionErrorEvent> _waitForWindowCaptureError(
+  ObservedConnection connection, {
+  required Duration timeout,
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(deadline)) {
+    for (final error in connection.errors) {
+      if (error.code == SoraErrorCode.windowCaptureError) {
+        return error;
+      }
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+  }
+  throw StateError(
+    'window_capture_error イベントが通知されませんでした。'
+    'キャプチャ中のウィンドウ消失が Dart 側へ通知されること。',
+  );
+}
 Future<WindowCaptureSource> _waitForDummyWindowSource(
   WidgetTester tester,
 ) async {

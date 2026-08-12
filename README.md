@@ -405,7 +405,13 @@ flutter test integration_test/audio_media_e2e_test.dart -d macos
 flutter test integration_test/texture_rendering_e2e_test.dart -d macos
 flutter test integration_test/two_party_media_e2e_test.dart -d macos
 flutter test integration_test/video_codec_e2e_test.dart -d macos
+flutter test integration_test/window_capture_e2e_test.dart -d macos
 ```
+
+ウィンドウキャプチャ E2E (`window_capture_e2e_test.dart`) は macOS ローカル専用です。
+SCStream の開始に画面収録権限が必要なため、CI では実行できません。
+システム設定の「プライバシーとセキュリティ」→「画面収録」で
+e2e_test_app に権限を付与してから実行してください。
 
 ### devtools
 

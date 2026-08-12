@@ -29,6 +29,8 @@ macOS 上で共有対象のウィンドウを選択し、その映像を Sora �
 - `lib/src/sora_media_stream.dart` の `LocalVideoTrack.dispose()` は `captureType == camera` の場合のみ `disposeLocalVideoTrackTexture` を呼ぶ。ウィンドウキャプチャ用のネイティブリソース解放経路（SCStream 停止、テクスチャ破棄）を追加する必要がある
 - `lib/src/sora_connection.dart` の `_applyVideoCaptureBackend()` は `captureType != camera` で早期 return する。ウィンドウキャプチャのトラックも `textureId` 経由でプレビューを開始できるよう変更する必要がある
 - `lib/src/sora_connection.dart` の `replaceVideoTrack()` は catch 節で `captureType == camera` の場合だけ `stopCameraCapturer()` を呼ぶ。ウィンドウキャプチャトラックの replace 失敗時にも SCStream のクリーンアップが必要
+- `lib/src/sora_error_code.dart` にウィンドウキャプチャ用の `windowCaptureError` を追加する
+- `macos/sora_sdk/Sources/sora_sdk/SoraFlutterMessageHandler.swift` にウィンドウキャプチャ用の MethodChannel ハンドラ（`enumerateWindowCaptureSources` / `stopWindowCapturer`）を追加する
 
 ## 設計方針
 
@@ -39,13 +41,13 @@ macOS で共有可能なウィンドウを列挙するため、ウィンドウ�
 `MediaDevices` に次の API を追加する。
 
 - `MediaDevices.enumerateWindowCaptureSources()`: 非同期。`Future<List<WindowCaptureSource>>` を返す。SCShareableContent 経由でウィンドウ一覧を取得する
-- `MediaDevices.createWindowVideoTrack(WindowCaptureSource source, { WindowCaptureOptions? options })`: 同期。指定したウィンドウから `LocalVideoTrack` を作成する。カメラの `createCameraVideoTrack()` と同様、track 生成自体は同期で行い、capture の開始は `_applyVideoCaptureBackend()` 経由で行う
+- `MediaDevices.createWindowVideoTrack(WindowCaptureSource source, { WindowCaptureOptions? options })`: 同期。指定したウィンドウから `LocalVideoTrack` を作成する。カメラの `createCameraVideoTrack()` と同様、track 生成自体は同期で行い、capture の開始は `_applyVideoCaptureBackend()` 経由で行う。同期 API の制約で生成時にネイティブのウィンドウ存在確認は行えず、存在チェックは capture 開始時（`ensureLocalVideoTrackTexture()` 経由）に実施する
 
 キャプチャ設定を指定する値オブジェクト `WindowCaptureOptions` を追加する。保持するフィールドは以下。
 
 - `width` (int?): キャプチャ解像度の幅。省略時はウィンドウの現在のサイズ
 - `height` (int?): キャプチャ解像度の高さ。省略時はウィンドウの現在のサイズ
-- `frameRate` (int?): キャプチャのフレームレート。省略時は 30
+- `frameRate` (int?): キャプチャのフレームレート。省略時は 30。`SCStreamConfiguration.frameRate` へ渡す上限値であり、実際の送出レートはウィンドウの更新頻度やシステム負荷に依存する
 - `showsCursor` (bool): カーソルをキャプチャ映像に含めるか。デフォルトは true
 
 `createWindowVideoTrack()` は内部で `_createVideoTrack(captureType: VideoTrackCaptureType.window, captureSettings: ...)` を呼び、`WindowCaptureOptions` の情報を `VideoCaptureSettings` に変換して保持する。具体的には `WindowCaptureOptions.width` / `height` / `frameRate` を `VideoCaptureSettings` の同名フィールドに、`source.id` を `VideoCaptureSettings.deviceId` にマッピングする。
@@ -64,17 +66,24 @@ ScreenCaptureKit の以下の機能を利用する。
 
 ウィンドウキャプチャの実装クラス（例: `SoraWindowCapturer`）は `SoraCameraCapturer` と同様のパターンで `SoraFlutterMessageHandler` の `LocalVideoRenderer` 相当の管理下に置く。Dart 側の `ensureLocalVideoTrackTexture()` で `videoSourcePtr` を受け取ったネイティブ側が、track の `captureType` に応じてカメラまたはウィンドウキャプチャを起動する分岐を行う。キャプチャ設定（`WindowCaptureOptions` の内容）は MethodChannel 経由でネイティブ側へ伝達する。
 
+`SoraWindowCapturer` は iOS SDK の `ScreenCaptureController` と同様に、開始・停止の状態機械と世代管理で start / stop の競合を排他する。既存の `SoraCameraCapturer` と同じく専用キューで delegate コールバックと直列化し、running フラグによる再入ガードを行う。
+
+SCStream は `SCStreamConfiguration.frameRate` で指示したレートを超えるフレームを送出しないため、iOS SDK の `ScreenCaptureController` が行うような PTS ベースの間引きやセマフォによるフレーム破棄は不要である。
+
 ### ライフサイクル
 
 以下の状態を SDK 側で管理する。
 
-- 画面収録権限の拒否：`enumerateWindowCaptureSources()` が権限拒否を検出した場合は `Future` のエラーとして返す。`createWindowVideoTrack()` 後のキャプチャ開始時の権限エラーは `_applyVideoCaptureBackend()` 経由で `SoraErrorCode` によるエラー通知を行う
-- 選択したウィンドウの消失：キャプチャ開始前にウィンドウが存在しない場合は `createWindowVideoTrack()` がエラーを返す。キャプチャ中のウィンドウ消失は EventChannel または `SoraErrorCode` 経由で通知する
-- ScreenCaptureKit のストリームエラー
-- キャプチャの開始と停止
+- 画面収録権限の拒否：`enumerateWindowCaptureSources()` が権限拒否を検出した場合は `Future` のエラーとして返す。`createWindowVideoTrack()` 後のキャプチャ開始時の権限エラーは `_applyVideoCaptureBackend()` 経由で `SoraErrorCode.windowCaptureError` によるエラー通知を行う
+  - macOS の画面収録権限は ReplayKit と異なりシステム設定での事前付与が必要なため、SDK は `CGRequestScreenCaptureAccess()` による権限リクエストを行わず、`CGPreflightScreenCaptureAccess()` で事前確認して判別可能なエラーを返す。権限付与はアプリ側の責務とし、設定手順をドキュメントに記載する
+- 選択したウィンドウの消失：キャプチャ開始時（`ensureLocalVideoTrackTexture()` 経由）にウィンドウが存在しない場合は `SoraErrorCode.windowCaptureError` によるエラー通知を行う。キャプチャ中のウィンドウ消失は `SCStreamDelegate` の `stream(_:didStopWithError:)` で検出し、EventChannel または `SoraErrorCode.windowCaptureError` 経由で通知する
+- ScreenCaptureKit のストリームエラー：`SoraErrorCode.windowCaptureError` で利用者へ通知する
+- キャプチャの開始と停止：start / stop の競合は専用キューと状態機械で排他し、SCStream の二重起動を防ぐ
 - `LocalVideoTrack.dispose()` 実行時の `SCStream` と関連リソースの解放
 - Sora 接続からトラックを削除した後の安全な終了
-- `replaceVideoTrack()` 失敗時の SCStream クリーンアップ：`sora_connection.dart` の `replaceVideoTrack()` catch 節で `captureType == window` の場合も対応するネイティブ停止経路を追加する
+- `replaceVideoTrack()` 失敗時の SCStream クリーンアップ：`sora_connection.dart` の `replaceVideoTrack()` catch 節で `captureType == window` の場合も対応するネイティブ停止経路（`stopWindowCapturer`）を追加する
+
+`_applyVideoCaptureBackend()` のエラー通知は現在 `cameraOpenError` 固定のため、ウィンドウキャプチャでは権限拒否・ウィンドウ消失・SCStream エラーを判別できる `SoraErrorCode.windowCaptureError` を使い分ける。
 
 開始失敗や実行中のエラーは、既存の SDK エラー通知方式と整合する形で利用者へ通知する。
 
@@ -91,6 +100,7 @@ ScreenCaptureKit の以下の機能を利用する。
 - システム音声の共有
 - iOS、Android、Windows、Linux の画面共有
 - アプリ側のウィンドウ選択 UI
+- 画面収録権限のリクエスト（`CGRequestScreenCaptureAccess()` の呼び出しとシステム設定への誘導）
 - Sora 接続へのトラック追加・削除を行うアプリ固有の制御
 
 ## 完了条件
@@ -107,15 +117,17 @@ ScreenCaptureKit の以下の機能を利用する。
 
 ### エラーとライフサイクル
 
-- 画面収録権限が拒否された場合、利用者が原因を判別できるエラーを返す
-- 選択したウィンドウがキャプチャ開始前に存在しなくなった場合、適切なエラーを返す
-- キャプチャ中にウィンドウが閉じられた場合、アプリへ終了またはエラーが通知される
+- 画面収録権限が拒否された場合、`SoraErrorCode.windowCaptureError` で原因を判別できるエラーを返す
+- 選択したウィンドウがキャプチャ開始時に存在しない場合、`SoraErrorCode.windowCaptureError` で判別可能なエラーを返す
+- キャプチャ中にウィンドウが閉じられた場合、EventChannel または `SoraErrorCode.windowCaptureError` でアプリへ終了またはエラーが通知される
 - `LocalVideoTrack.dispose()` により ScreenCaptureKit のストリームとネイティブリソースが解放される
 - キャプチャの開始と終了を繰り返しても、ストリームや Texture が残存しない
+- start / stop が競合しても、SCStream の二重起動や破棄漏れが発生しない
 
 ### テストと動作確認
 
 - ウィンドウ情報とキャプチャ設定に対する unit test が追加されている
+- キャプチャ開始時の権限拒否・ウィンドウ消失に対して `SoraErrorCode.windowCaptureError` が通知される unit test が追加されている
 - macOS 15 以上でウィンドウ列挙、キャプチャ開始、プレビュー、停止を確認できる
 - 2 クライアント間でウィンドウ映像を Sora 経由で送受信できる
 - 画面収録権限の許可と拒否の両方を手動確認できる

@@ -29,4 +29,7 @@ abstract final class SoraErrorCode {
 
   /// カメラオープン失敗
   static const String cameraOpenError = 'camera_open_error';
+
+  /// ウィンドウキャプチャ失敗
+  static const String windowCaptureError = 'window_capture_error';
 }

@@ -10,6 +10,7 @@ import '../ffi/webrtc_client.dart';
 import '../sora_audio_device.dart';
 import '../sora_method_channels.dart';
 import '../sora_video_device.dart';
+import '../sora_window_capture.dart';
 
 /// 映像入力デバイス一覧をプラットフォーム実装から取得します。
 @internal
@@ -124,20 +125,24 @@ Future<String> getDefaultAudioInputDeviceId() async {
 Future<int> ensureLocalVideoTrackTexture({
   required int videoSourcePtr,
   required int clientId,
+  required String captureType,
   String? videoDeviceId,
   int? videoWidth,
   int? videoHeight,
   int? videoFrameRate,
+  bool showsCursor = true,
 }) async {
   final response = await soraMethodChannel.invokeMethod<Map<Object?, Object?>>(
     'ensureLocalVideoTrackTexture',
     <String, Object?>{
       'videoSourcePtr': videoSourcePtr,
       'clientId': clientId,
+      'captureType': captureType,
       'videoDeviceId': videoDeviceId,
       'videoWidth': videoWidth,
       'videoHeight': videoHeight,
       'videoFrameRate': videoFrameRate,
+      'showsCursor': showsCursor,
     },
   );
   final textureId = response?['textureId'];
@@ -167,12 +172,42 @@ Future<void> stopCameraCapturer({required int videoSourcePtr}) async {
   );
 }
 
+/// macOS で共有可能なウィンドウの一覧をプラットフォーム実装から取得します。
+@internal
+Future<List<WindowCaptureSource>> enumerateWindowCaptureSources() async {
+  final List<Object?>? result = await soraMethodChannel
+      .invokeMethod<List<Object?>>('enumerateWindowCaptureSources');
+  if (result == null) {
+    return <WindowCaptureSource>[];
+  }
+  return result.map(_windowCaptureSourceFromPlatformMap).toList();
+}
+
+/// 実行中のウィンドウキャプチャを停止します。
+@internal
+Future<void> stopWindowCapturer({required int videoSourcePtr}) async {
+  await soraMethodChannel.invokeMethod<void>(
+    'stopWindowCapturer',
+    <String, Object?>{'videoSourcePtr': videoSourcePtr},
+  );
+}
+
 /// MethodChannel から受け取った Map を映像入力デバイスへ変換する。
 VideoInputDevice _videoInputDeviceFromPlatformMap(Object? item) {
   final map = Map<String, Object?>.from(item! as Map);
   return VideoInputDevice(
     deviceId: map['deviceId']! as String,
     label: map['label']! as String,
+  );
+}
+
+/// MethodChannel から受け取った Map をウィンドウキャプチャソースへ変換する。
+WindowCaptureSource _windowCaptureSourceFromPlatformMap(Object? item) {
+  final map = Map<String, Object?>.from(item! as Map);
+  return WindowCaptureSource(
+    id: map['id']! as String,
+    title: map['title']! as String,
+    applicationName: map['applicationName']! as String,
   );
 }
 

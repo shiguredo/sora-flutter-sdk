@@ -4,6 +4,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sora_sdk/src/sora_media_stream.dart';
 
 void main() {
+  group('VideoTrackCaptureType', () {
+    test('camera / external / window の 3 種が定義されている', () {
+      expect(VideoTrackCaptureType.values, hasLength(3));
+      expect(VideoTrackCaptureType.camera.name, 'camera');
+      expect(VideoTrackCaptureType.external.name, 'external');
+      expect(VideoTrackCaptureType.window.name, 'window');
+    });
+  });
+
   group('validateExternalVideoFrame', () {
     // 幅と高さのケースで使いまわす最小限の有効なプレーンデータ。
     Uint8List largeEnoughPlane(int width, int height, int stride) =>

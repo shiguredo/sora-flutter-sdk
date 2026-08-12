@@ -770,6 +770,14 @@ class SoraConnection {
         } catch (_) {
           // ベストエフォート
         }
+      } else if (videoTrack.captureType == VideoTrackCaptureType.window) {
+        try {
+          await media_device_platform
+              .stopWindowCapturer(videoSourcePtr: videoTrack.videoSourceAddress)
+              .timeout(const Duration(seconds: 5));
+        } catch (_) {
+          // ベストエフォート
+        }
       }
       if (previousTrack != null) {
         if (previousTrack.isDisposed) {
@@ -1073,15 +1081,18 @@ class SoraConnection {
 
   /// LocalVideoTrack の capture 種別に応じて映像入力経路を切り替える。
   Future<void> _applyVideoCaptureBackend(LocalVideoTrack track) async {
-    if (track.captureType != VideoTrackCaptureType.camera) {
+    if (track.captureType == VideoTrackCaptureType.external) {
       return;
     }
     try {
       final textureId = await track.textureId;
       _emitLocalVideo(SoraLocalVideoHandle(textureId: textureId));
     } catch (e) {
+      final code = track.captureType == VideoTrackCaptureType.window
+          ? SoraErrorCode.windowCaptureError
+          : SoraErrorCode.cameraOpenError;
       _emitConnectionErrorEvent(
-        code: SoraErrorCode.cameraOpenError,
+        code: code,
         message: 'Failed to apply video capture backend: $e',
         retriable: true,
       );
@@ -1361,6 +1372,15 @@ class SoraConnection {
           attempts: attempts,
           platformError: platformErrorName,
         ),
+      );
+      return;
+    }
+    if (type == 'window_capture_error') {
+      final message = event['message'] as String?;
+      _emitConnectionErrorEvent(
+        code: SoraErrorCode.windowCaptureError,
+        message: message ?? 'Window capture error',
+        retriable: true,
       );
       return;
     }

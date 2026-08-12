@@ -15,6 +15,7 @@ import 'media/sora_media_device_platform.dart' as media_device_platform;
 import 'sora_audio_device.dart';
 import 'sora_media_stream.dart';
 import 'sora_video_device.dart';
+import 'sora_window_capture.dart';
 
 // 接続前に作る local stream の ID を単純増分で払い出す。
 int _nextMediaStreamSequence = 1;
@@ -245,6 +246,36 @@ abstract final class MediaDevices {
     return _createVideoTrack(
       captureType: VideoTrackCaptureType.external,
       captureSettings: null,
+    );
+  }
+
+  /// macOS で共有可能なウィンドウの一覧を取得する。
+  ///
+  /// 画面収録権限が拒否されている場合は `Future` のエラーとして返す。
+  static Future<List<WindowCaptureSource>> enumerateWindowCaptureSources() {
+    return media_device_platform.enumerateWindowCaptureSources();
+  }
+
+  /// ウィンドウキャプチャの local video track を 1 本生成する。
+  ///
+  /// macOS のみで利用できる。
+  /// track 生成自体は同期で行い、capture の開始は Sora 接続時
+  /// (`_applyVideoCaptureBackend()` 経由) に行う。
+  /// ウィンドウの存在確認は capture 開始時に行うため、
+  /// 生成後にウィンドウが閉じられた場合はエラーになる。
+  static LocalVideoTrack createWindowVideoTrack(
+    WindowCaptureSource source, {
+    WindowCaptureOptions options = const WindowCaptureOptions(),
+  }) {
+    return _createVideoTrack(
+      captureType: VideoTrackCaptureType.window,
+      captureSettings: VideoCaptureSettings(
+        deviceId: source.id,
+        width: options.width,
+        height: options.height,
+        frameRate: options.frameRate,
+        showsCursor: options.showsCursor,
+      ),
     );
   }
 

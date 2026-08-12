@@ -27,40 +27,88 @@ private class SoraClientStreamHandler: NSObject, FlutterStreamHandler {
   }
 }
 
-/// dart:ffi 側の VideoSource とカメラキャプチャを紐付ける内部クラス。
+/// ローカルビデオレンダラーの生成エラーです。
+private enum LocalVideoRendererError: LocalizedError {
+  case invalidWindowId(String)
+
+  var errorDescription: String? {
+    switch self {
+    case .invalidWindowId(let value):
+      return "Invalid window id: \(value)"
+    }
+  }
+}
+
+/// dart:ffi 側の VideoSource とローカルキャプチャを紐付ける内部クラス。
 ///
-/// `SoraCameraCapturer` を生成・起動し、video source ポインタを渡して
-/// カメラ映像を dart:ffi へ流し込む。プレビュー用 texture ID も提供する。
+/// `captureType` に応じて `SoraCameraCapturer` または `SoraWindowCapturer` を
+/// 生成・起動し、video source ポインタを渡して映像を dart:ffi へ流し込む。
+/// プレビュー用 texture ID も提供する。
 private class LocalVideoRenderer {
   let videoSourcePtr: Int64
-  let cameraCapturer: SoraCameraCapturer
+  let cameraCapturer: SoraCameraCapturer?
+  let windowCapturer: SoraWindowCapturer?
 
   init(
     videoSourcePtr: Int64,
+    captureType: String,
     deviceId: String?,
     width: Int32,
     height: Int32,
     fps: Int32,
-    textureRegistry: FlutterTextureRegistry
-  ) {
+    showsCursor: Bool,
+    textureRegistry: FlutterTextureRegistry,
+    onError: ((Error) -> Void)?
+  ) throws {
     self.videoSourcePtr = videoSourcePtr
-    self.cameraCapturer = SoraCameraCapturer(
-      deviceId: deviceId,
-      width: width,
-      height: height,
-      fps: fps,
-      textureRegistry: textureRegistry
-    )
-    self.cameraCapturer.setVideoSourcePtr(videoSourcePtr)
-    self.cameraCapturer.start()
+    switch captureType {
+    case "window":
+      guard let deviceId, let windowId = CGWindowID(deviceId) else {
+        throw LocalVideoRendererError.invalidWindowId(deviceId ?? "")
+      }
+      let capturer = SoraWindowCapturer(
+        windowId: windowId,
+        width: width,
+        height: height,
+        frameRate: fps,
+        showsCursor: showsCursor,
+        textureRegistry: textureRegistry
+      )
+      capturer.setVideoSourcePtr(videoSourcePtr)
+      capturer.onError = onError
+      self.windowCapturer = capturer
+      self.cameraCapturer = nil
+    default:
+      let capturer = SoraCameraCapturer(
+        deviceId: deviceId,
+        width: width,
+        height: height,
+        fps: fps,
+        textureRegistry: textureRegistry
+      )
+      capturer.setVideoSourcePtr(videoSourcePtr)
+      capturer.start()
+      self.cameraCapturer = capturer
+      self.windowCapturer = nil
+    }
   }
 
   var textureId: Int64 {
-    cameraCapturer.localPreviewTextureId
+    if let windowCapturer {
+      return windowCapturer.localPreviewTextureId
+    }
+    return cameraCapturer?.localPreviewTextureId ?? -1
+  }
+
+  // ウィンドウキャプチャの開始完了を待つ。
+  // カメラキャプチャは init 内で開始済みのため何もしない。
+  func start(completion: @escaping (Error?) -> Void) {
+    windowCapturer?.start(completion: completion)
   }
 
   func dispose() {
-    cameraCapturer.stop()
+    windowCapturer?.stop()
+    cameraCapturer?.stop()
   }
 }
 
@@ -177,6 +225,22 @@ class SoraFlutterMessageHandler {
       return
     }
 
+    // ウィンドウキャプチャ操作
+    if call.method == "enumerateWindowCaptureSources" {
+      Task {
+        do {
+          result(try await SoraWindowCapturer.enumerateWindows())
+        } catch {
+          result(
+            FlutterError(
+              code: "screen_capture_permission_denied",
+              message: error.localizedDescription,
+              details: nil))
+        }
+      }
+      return
+    }
+
     // 音声入出力デバイス操作
     if call.method == "enumerateAudioInputDevices" {
       result(SoraAudioDevices.enumerateInputs())
@@ -240,10 +304,13 @@ class SoraFlutterMessageHandler {
     // ローカル映像プレビュー用のテクスチャを確保する
     case "ensureLocalVideoTrackTexture":
       let videoSourcePtr = (args["videoSourcePtr"] as? NSNumber)?.int64Value ?? 0
+      let captureType = args["captureType"] as? String ?? "camera"
+      let clientId = (args["clientId"] as? NSNumber)?.int64Value ?? 0
       let videoDeviceId = args["videoDeviceId"] as? String
       let videoWidth = (args["videoWidth"] as? NSNumber)?.int32Value ?? 640
       let videoHeight = (args["videoHeight"] as? NSNumber)?.int32Value ?? 480
       let videoFrameRate = (args["videoFrameRate"] as? NSNumber)?.int32Value ?? 30
+      let showsCursor = (args["showsCursor"] as? NSNumber)?.boolValue ?? true
       guard videoSourcePtr != 0 else {
         result(
           FlutterError(
@@ -256,19 +323,56 @@ class SoraFlutterMessageHandler {
         result(["textureId": renderer.textureId])
         return
       }
-      let renderer = LocalVideoRenderer(
-        videoSourcePtr: videoSourcePtr,
-        deviceId: videoDeviceId,
-        width: videoWidth,
-        height: videoHeight,
-        fps: videoFrameRate,
-        textureRegistry: textureRegistry
-      )
-      localVideoRenderers[videoSourcePtr] = renderer
-      result(["textureId": renderer.textureId])
+      // キャプチャ中のウィンドウ消失やストリームエラーを Dart 側へ通知する
+      let onError: (Error) -> Void = { [weak self] error in
+        self?.clients[clientId]?.eventSink?([
+          "type": "window_capture_error",
+          "message": error.localizedDescription,
+        ])
+      }
+      do {
+        let renderer = try LocalVideoRenderer(
+          videoSourcePtr: videoSourcePtr,
+          captureType: captureType,
+          deviceId: videoDeviceId,
+          width: videoWidth,
+          height: videoHeight,
+          fps: videoFrameRate,
+          showsCursor: showsCursor,
+          textureRegistry: textureRegistry,
+          onError: onError
+        )
+        localVideoRenderers[videoSourcePtr] = renderer
+        // ウィンドウキャプチャは SCStream の開始完了を待ってから返す
+        renderer.start { [weak self] error in
+          guard let self else { return }
+          if let error {
+            self.localVideoRenderers.removeValue(forKey: videoSourcePtr)?.dispose()
+            result(
+              FlutterError(
+                code: "capture_failed",
+                message: error.localizedDescription,
+                details: nil))
+          } else {
+            result(["textureId": renderer.textureId])
+          }
+        }
+      } catch {
+        result(
+          FlutterError(
+            code: "capture_failed",
+            message: error.localizedDescription,
+            details: nil))
+      }
 
     // ローカル映像プレビュー用のテクスチャを破棄する
     case "disposeLocalVideoTrackTexture":
+      let videoSourcePtr = (args["videoSourcePtr"] as? NSNumber)?.int64Value ?? 0
+      localVideoRenderers.removeValue(forKey: videoSourcePtr)?.dispose()
+      result(nil)
+
+    // 実行中のウィンドウキャプチャを停止する
+    case "stopWindowCapturer":
       let videoSourcePtr = (args["videoSourcePtr"] as? NSNumber)?.int64Value ?? 0
       localVideoRenderers.removeValue(forKey: videoSourcePtr)?.dispose()
       result(nil)

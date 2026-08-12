@@ -440,6 +440,9 @@ enum VideoTrackCaptureType {
 
   /// 外部入力(ダミー映像、スクリーンキャスト、外付けカメラ等)
   external,
+
+  /// ウィンドウキャプチャ (macOS)
+  window,
 }
 
 /// external video track へ投入する I420 フレームです。
@@ -540,14 +543,16 @@ class LocalVideoTrack extends LocalMediaStreamTrack {
   @internal
   int get videoSourceAddress => _videoSourceAddress;
 
-  /// カメラ映像トラック用のプレビューテクスチャを確保し、texture ID を返す。
+  /// カメラ映像トラックまたはウィンドウキャプチャ用のプレビューテクスチャを
+  /// 確保し、texture ID を返す。
   ///
   /// プラットフォーム側で video source・デバイス ID・解像度・フレームレートを
   /// 指定してテクスチャを生成する。外部映像トラックの場合はエラー。
   /// 失敗時はキャッシュした Future を破棄し、次回の `textureId` 取得時に再試行させる。
   Future<int> _ensureTextureId() async {
     try {
-      if (_captureType != VideoTrackCaptureType.camera) {
+      if (_captureType != VideoTrackCaptureType.camera &&
+          _captureType != VideoTrackCaptureType.window) {
         throw StateError(
           'textureId is not available for external video track.',
         );
@@ -555,10 +560,12 @@ class LocalVideoTrack extends LocalMediaStreamTrack {
       return await media_device_platform.ensureLocalVideoTrackTexture(
         videoSourcePtr: _videoSourceAddress,
         clientId: _clientId ?? 0,
+        captureType: _captureType.name,
         videoDeviceId: _captureSettings?.deviceId,
         videoWidth: _captureSettings?.width,
         videoHeight: _captureSettings?.height,
         videoFrameRate: _captureSettings?.frameRate,
+        showsCursor: _captureSettings?.showsCursor ?? true,
       );
     } catch (_) {
       _textureIdFuture = null;
@@ -748,7 +755,8 @@ class LocalVideoTrack extends LocalMediaStreamTrack {
         // ensure が失敗した場合も無視して先に進む。
       }
     }
-    if (_captureType == VideoTrackCaptureType.camera &&
+    if ((_captureType == VideoTrackCaptureType.camera ||
+            _captureType == VideoTrackCaptureType.window) &&
         _videoSourceAddress != 0) {
       try {
         await media_device_platform.disposeLocalVideoTrackTexture(
@@ -854,12 +862,17 @@ class VideoCaptureSettings {
     required this.width,
     required this.height,
     required this.frameRate,
+    this.showsCursor = true,
   });
 
   final String? deviceId;
   final int? width;
   final int? height;
   final int? frameRate;
+
+  /// カーソルをキャプチャ映像に含めるかどうか。
+  /// ウィンドウキャプチャで利用する。
+  final bool showsCursor;
 }
 
 /// `LocalVideoTrack` のキャプチャ種別・設定・native source 参照をスナップショットとして保持する内部モデル。

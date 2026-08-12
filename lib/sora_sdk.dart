@@ -26,3 +26,4 @@ export 'src/sora_timeline_event.dart';
 export 'src/sora_timeout_options.dart';
 export 'src/sora_video_device.dart';
 export 'src/sora_video_widget.dart';
+export 'src/sora_window_capture.dart';

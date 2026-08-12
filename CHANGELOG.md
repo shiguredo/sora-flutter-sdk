@@ -67,6 +67,9 @@
 
 ### misc
 
+- [ADD] devtools に macOS のウィンドウキャプチャ検証機能を追加する
+  - Developer Option に Window Capture Track を追加し、ウィンドウ選択と ScreenCaptureKit による映像配信を検証できるようにする
+  - @zztkm
 - [ADD] macOS のウィンドウキャプチャ E2E テストを追加する
   - ダミーウィンドウを ScreenCaptureKit でキャプチャし、受信側の stats で映像到達を検証する (macOS ローカル専用)
   - @zztkm

@@ -134,6 +134,9 @@ class _DevToolsPageState extends State<DevToolsPage>
   // 非同期の camera format 取得結果を最新選択だけに反映するための世代番号。
   int _videoInputFormatGeneration = 0;
 
+  // ウィンドウキャプチャトラックモード用の状態
+  bool _useWindowCaptureTrack = false;
+
   // DataChannel signaling を有効にするかどうか。
   bool _dataChannelSignalingEnabled = false;
   // dataChannels 設定を接続設定へ含めるかどうか。
@@ -261,6 +264,18 @@ class _DevToolsPageState extends State<DevToolsPage>
       _pageNotifier.selectedVideoInputDevice;
   set _selectedVideoInputDevice(VideoInputDevice? value) =>
       _pageNotifier.selectedVideoInputDevice = value;
+
+  // 列挙したウィンドウキャプチャソース一覧を保持する。
+  List<WindowCaptureSource> get _windowCaptureSources =>
+      _pageNotifier.windowCaptureSources;
+  set _windowCaptureSources(List<WindowCaptureSource> value) =>
+      _pageNotifier.windowCaptureSources = value;
+
+  // 現在選択中のウィンドウキャプチャソースを保持する。
+  WindowCaptureSource? get _selectedWindowCaptureSource =>
+      _pageNotifier.selectedWindowCaptureSource;
+  set _selectedWindowCaptureSource(WindowCaptureSource? value) =>
+      _pageNotifier.selectedWindowCaptureSource = value;
 
   // 列挙した音声入力デバイス一覧を保持する。
   List<AudioInputDevice> get _audioInputDevices =>
@@ -681,7 +696,8 @@ class _DevToolsPageState extends State<DevToolsPage>
       _configuredVideo &&
       !_isConnected &&
       !_isConnecting &&
-      !_useExternalVideoTrack;
+      !_useExternalVideoTrack &&
+      !_useWindowCaptureTrack;
 
   // カメラ切り替え操作が可能か（モバイルかつ複数カメラが存在する場合）。
   bool get _canSwitchCamera =>
@@ -691,7 +707,8 @@ class _DevToolsPageState extends State<DevToolsPage>
       _isConnected &&
       _connection != null &&
       _localStream != null &&
-      !_useExternalVideoTrack;
+      !_useExternalVideoTrack &&
+      !_useWindowCaptureTrack;
 
   // simulcast request RID の選択が必要か。
   bool get _usesSimulcastRequestRid =>
@@ -759,6 +776,9 @@ class _DevToolsPageState extends State<DevToolsPage>
   // camera plugin が動作する platform だけ External Video Track をサポートする。
   bool get _supportsExternalVideoTrack => Platform.isAndroid || Platform.isIOS;
 
+  // macOS だけ Window Capture Track をサポートする。
+  bool get _supportsWindowCaptureTrack => Platform.isMacOS;
+
   String get _connectionStateLabel {
     final state = _state;
     return switch (state) {
@@ -800,6 +820,43 @@ class _DevToolsPageState extends State<DevToolsPage>
         _videoInputResolutions,
       );
     });
+  }
+
+  // macOS の共有可能なウィンドウ一覧を列挙し、選択状態を更新する。
+  Future<void> _enumerateWindowCaptureSources() async {
+    if (!_supportsWindowCaptureTrack) {
+      return;
+    }
+    _mutateView(() {
+      _busy = true;
+    });
+    try {
+      final sources = await MediaDevices.enumerateWindowCaptureSources();
+      if (!mounted) {
+        return;
+      }
+      _mutateView(() {
+        _windowCaptureSources = sources;
+        final current = _selectedWindowCaptureSource;
+        if (current != null) {
+          _selectedWindowCaptureSource = sources
+              .where((source) => source.id == current.id)
+              .firstOrNull;
+        }
+        if (_selectedWindowCaptureSource == null && sources.isNotEmpty) {
+          _selectedWindowCaptureSource = sources.first;
+        }
+      });
+      _appendLog('window capture: enumerated ${sources.length} windows');
+    } catch (error) {
+      _appendLog('window capture: enumerate failed error=$error');
+    } finally {
+      if (mounted) {
+        _mutateView(() {
+          _busy = false;
+        });
+      }
+    }
   }
 
   // Audio input / output device 一覧を読み込み、選択状態を同期する。
@@ -1203,6 +1260,8 @@ class _DevToolsPageState extends State<DevToolsPage>
       selectedFrameRate: _selectedFrameRate,
       existingLocalStream: existingLocalStream,
       useExternalVideoTrack: _useExternalVideoTrack && _publishesVideo,
+      useWindowCaptureTrack: _useWindowCaptureTrack && _publishesVideo,
+      selectedWindowCaptureSource: _selectedWindowCaptureSource,
       dataChannels: _buildDataChannelConfigs(),
       dataChannelSignaling: _dataChannelSignalingEnabled,
       ignoreDisconnectWebSocket: _ignoreDisconnectWebSocketEnabled,
@@ -2013,7 +2072,8 @@ class _DevToolsPageState extends State<DevToolsPage>
             const SizedBox(height: 8),
             ExpansionTile(
               title: const Text('Developer Option'),
-              initiallyExpanded: _useExternalVideoTrack,
+              initiallyExpanded:
+                  _useExternalVideoTrack || _useWindowCaptureTrack,
               children: [
                 SwitchListTile(
                   title: const Text('External Video Track'),
@@ -2030,10 +2090,85 @@ class _DevToolsPageState extends State<DevToolsPage>
                       : (value) {
                           _mutateView(() {
                             _useExternalVideoTrack = value;
+                            if (value) {
+                              _useWindowCaptureTrack = false;
+                            }
                           });
+                          unawaited(_clearLocalPreview());
                         },
                   dense: true,
                 ),
+                if (_supportsWindowCaptureTrack) ...[
+                  SwitchListTile(
+                    title: const Text('Window Capture Track'),
+                    subtitle: const Text(
+                      'ScreenCaptureKit でウィンドウ映像を配信する検証用機能です (macOS 専用)',
+                    ),
+                    value: _useWindowCaptureTrack,
+                    onChanged: _busy || _isConnected || !_publishesVideo
+                        ? null
+                        : (value) {
+                            _mutateView(() {
+                              _useWindowCaptureTrack = value;
+                              if (value) {
+                                _useExternalVideoTrack = false;
+                              }
+                            });
+                            if (value) {
+                              unawaited(_enumerateWindowCaptureSources());
+                            }
+                            unawaited(_clearLocalPreview());
+                          },
+                    dense: true,
+                  ),
+                  if (_useWindowCaptureTrack) ...[
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      key: ValueKey<String?>(_selectedWindowCaptureSource?.id),
+                      initialValue: _selectedWindowCaptureSource?.id,
+                      decoration: const InputDecoration(
+                        labelText: 'Window',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: _windowCaptureSources.map((source) {
+                        return DropdownMenuItem(
+                          value: source.id,
+                          child: Text(
+                            '${source.applicationName}: ${source.title}',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: _busy || _isConnected
+                          ? null
+                          : (id) {
+                              if (id == null) {
+                                return;
+                              }
+                              _mutateView(() {
+                                _selectedWindowCaptureSource =
+                                    _windowCaptureSources.firstWhere(
+                                      (source) => source.id == id,
+                                      orElse: () => _windowCaptureSources.first,
+                                    );
+                              });
+                              unawaited(_clearLocalPreview());
+                            },
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: _busy
+                            ? null
+                            : () => unawaited(_enumerateWindowCaptureSources()),
+                        icon: const Icon(Icons.refresh, size: 16),
+                        label: const Text('Refresh Windows'),
+                      ),
+                    ),
+                  ],
+                ],
               ],
             ),
             const SizedBox(height: 8),

@@ -196,6 +196,10 @@ class DevToolsPageNotifier extends ChangeNotifier {
   List<VideoInputDevice> videoInputDevices = <VideoInputDevice>[];
   // 現在選択中の映像入力デバイスを保持する。
   VideoInputDevice? selectedVideoInputDevice;
+  // 列挙したウィンドウキャプチャソース一覧を保持する。
+  List<WindowCaptureSource> windowCaptureSources = <WindowCaptureSource>[];
+  // 現在選択中のウィンドウキャプチャソースを保持する。
+  WindowCaptureSource? selectedWindowCaptureSource;
   // 列挙した音声入力デバイス一覧を保持する。
   List<AudioInputDevice> audioInputDevices = <AudioInputDevice>[];
   // 現在選択中の音声入力デバイスを保持する。

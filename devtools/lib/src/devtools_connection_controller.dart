@@ -55,6 +55,8 @@ class DevToolsConnectRequest {
     this.videoAv1Params,
     this.forwardingFilters,
     this.useExternalVideoTrack = false,
+    this.useWindowCaptureTrack = false,
+    this.selectedWindowCaptureSource,
     this.dataChannels = const <Map<String, Object?>>[],
   });
 
@@ -107,6 +109,10 @@ class DevToolsConnectRequest {
   // 転送フィルタ設定。
   final List<Map<String, Object?>>? forwardingFilters;
   final bool useExternalVideoTrack;
+  // ウィンドウキャプチャトラックを利用するかどうか。
+  final bool useWindowCaptureTrack;
+  // ウィンドウキャプチャで共有するウィンドウ。
+  final WindowCaptureSource? selectedWindowCaptureSource;
   final List<Map<String, Object?>> dataChannels;
 }
 
@@ -733,7 +739,29 @@ class DevToolsConnectionController {
       // 再利用する stream に残った beep track は、先に stream から外して破棄する。
       await disposeBeepAudioTrack(localStream: localStream);
       if (localStream == null) {
-        if (request.useExternalVideoTrack) {
+        if (request.useWindowCaptureTrack) {
+          // ウィンドウキャプチャトラックを生成する。
+          final source = request.selectedWindowCaptureSource;
+          if (source == null) {
+            throw StateError('Window capture source is not selected.');
+          }
+          localStream = MediaDevices.createMediaStream();
+          localStream.addTrack(MediaDevices.createWindowVideoTrack(source));
+          if (request.configuredAudio) {
+            if (request.beepAudioEnabled) {
+              final audioTrack = await MediaDevices.createAudioTrack();
+              _beepAudioTrack = DevToolsBeepAudioTrack.fromTrack(audioTrack);
+              _beepAudioTrack!.start();
+              localStream.addTrack(audioTrack);
+            } else {
+              localStream.addTrack(
+                await MediaDevices.createAudioTrack(
+                  audioDeviceId: request.selectedAudioInputDeviceId,
+                ),
+              );
+            }
+          }
+        } else if (request.useExternalVideoTrack) {
           localStream = MediaDevices.createMediaStream();
           localStream.addTrack(MediaDevices.createExternalVideoTrack());
           if (request.configuredAudio) {
@@ -773,7 +801,18 @@ class DevToolsConnectionController {
           }
         }
       } else {
-        if (request.useExternalVideoTrack) {
+        if (request.useWindowCaptureTrack) {
+          // 再接続時は古い video track を破棄して新しい window track を生成する。
+          final source = request.selectedWindowCaptureSource;
+          if (source == null) {
+            throw StateError('Window capture source is not selected.');
+          }
+          for (final track in localStream.getVideoTracks()) {
+            localStream.removeTrack(track);
+            await track.dispose();
+          }
+          localStream.addTrack(MediaDevices.createWindowVideoTrack(source));
+        } else if (request.useExternalVideoTrack) {
           // 再接続時は古い video track を破棄して新しい external track を生成する。
           for (final track in localStream.getVideoTracks()) {
             localStream.removeTrack(track);

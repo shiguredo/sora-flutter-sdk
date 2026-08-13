@@ -238,9 +238,6 @@ void main() {
           }
         }
 
-        await runCleanupStep('dummyWindow.hide', () async {
-          await _dummyWindowChannel.invokeMethod<void>('hide');
-        });
         await runCleanupStep('sender.disconnect', () async {
           if (sender != null) {
             await sender.disconnect();
@@ -265,6 +262,14 @@ void main() {
           'videoTrack.dispose',
           () async => await videoTrack?.dispose(),
         );
+        // dummyWindow.hide は videoTrack.dispose (SCStream 停止) の後に実行する。
+        // キャプチャ中のウィンドウ消失は didStopWithError 経由で
+        // window_capture_error が通知されるため、正常系テストでは
+        // 先にキャプチャを停止してからウィンドウを閉じる。
+        // エラー通知の検証は window-capture-error テストが担当する。
+        await runCleanupStep('dummyWindow.hide', () async {
+          await _dummyWindowChannel.invokeMethod<void>('hide');
+        });
 
         if (cleanupErrors.isNotEmpty) {
           logE2eMessage(

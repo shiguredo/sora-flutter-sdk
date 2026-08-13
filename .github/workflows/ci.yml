@@ -21,6 +21,7 @@ on:
       - "macos/**"
       - "windows/**"
       - "devtools/**"
+      - "e2e_test_app/**"
       - "lib/**"
       - "prek.toml"
       - "pubspec.yaml"
@@ -145,7 +146,8 @@ jobs:
           path: ~/.pub-cache
           key: ${{ runner.os }}-pub-${{ env.FLUTTER_VERSION }}-${{
             hashFiles('pubspec.yaml', 'pubspec.lock', 'devtools/pubspec.yaml',
-            'devtools/pubspec.lock') }}
+            'devtools/pubspec.lock', 'e2e_test_app/pubspec.yaml',
+            'e2e_test_app/pubspec.lock') }}
           restore-keys: |
             ${{ runner.os }}-pub-${{ env.FLUTTER_VERSION }}-
 
@@ -254,6 +256,26 @@ jobs:
         run: |
           set -euo pipefail
           dart analyze --fatal-infos lib test
+
+      - name: Resolve e2e_test_app dependencies
+        working-directory: e2e_test_app
+        run: |
+          set -euo pipefail
+          flutter pub get
+
+      - name: Run e2e_test_app Dart format check
+        run: |
+          set -euo pipefail
+          # window_capture_e2e_test.dart 等の integration_test は権限が必要で
+          # CI では実行できないため、少なくとも構文と lint を CI で検証する。
+          dart format --output=none --set-exit-if-changed \
+            e2e_test_app/lib e2e_test_app/integration_test e2e_test_app/test
+
+      - name: Run e2e_test_app Dart analyze
+        working-directory: e2e_test_app
+        run: |
+          set -euo pipefail
+          dart analyze --fatal-infos lib integration_test test
 
       - name: Build devtools Android APK
         working-directory: devtools

@@ -25,36 +25,30 @@ void main() {
       // 音声入力デバイスを列挙する
       final inputDevices = await MediaDevices.enumerateAudioInputDevices();
       expect(inputDevices, isNotEmpty,
-          reason:
-              '少なくとも 1 件以上の音声入力デバイス（マイク）が存在すること。'
+          reason: '少なくとも 1 件以上の音声入力デバイス（マイク）が存在すること。'
               'Windows 実機にマイクが接続されていることを確認してください。');
 
       for (final device in inputDevices) {
         expect(device.deviceId, isNotEmpty,
-            reason:
-                '各音声入力デバイスは空でない deviceId を持つこと。'
+            reason: '各音声入力デバイスは空でない deviceId を持つこと。'
                 'device.label=${device.label}');
         expect(device.label, isNotEmpty,
-            reason:
-                '各音声入力デバイスは空でない label を持つこと。'
+            reason: '各音声入力デバイスは空でない label を持つこと。'
                 'device.deviceId=${device.deviceId}');
       }
 
       // 音声出力デバイスを列挙する
       final outputDevices = await MediaDevices.enumerateAudioOutputDevices();
       expect(outputDevices, isNotEmpty,
-          reason:
-              '少なくとも 1 件以上の音声出力デバイス（スピーカー）が存在すること。'
+          reason: '少なくとも 1 件以上の音声出力デバイス（スピーカー）が存在すること。'
               'Windows 実機にスピーカーが接続されていることを確認してください。');
 
       for (final device in outputDevices) {
         expect(device.deviceId, isNotEmpty,
-            reason:
-                '各音声出力デバイスは空でない deviceId を持つこと。'
+            reason: '各音声出力デバイスは空でない deviceId を持つこと。'
                 'device.label=${device.label}');
         expect(device.label, isNotEmpty,
-            reason:
-                '各音声出力デバイスは空でない label を持つこと。'
+            reason: '各音声出力デバイスは空でない label を持つこと。'
                 'device.deviceId=${device.deviceId}');
       }
     },

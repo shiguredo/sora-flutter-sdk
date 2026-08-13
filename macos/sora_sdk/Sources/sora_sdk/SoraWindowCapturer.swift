@@ -289,8 +289,11 @@ final class SoraWindowCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
       // フレームレートはフレーム更新間隔の最小値として指定する。
       // SCStream はこの間隔を下回る頻度ではフレームを送出しないため、
       // 指定レートは上限値として働く。
+      // 0 以下の値では timescale が 0 になり不正な CMTime が生成されるため、
+      // 既定値の 30 にフォールバックする。
+      let frameRate = self.requestedFrameRate > 0 ? self.requestedFrameRate : 30
       config.minimumFrameInterval = CMTime(
-        value: 1, timescale: CMTimeScale(self.requestedFrameRate))
+        value: 1, timescale: CMTimeScale(frameRate))
       config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
 
       let filter = SCContentFilter(desktopIndependentWindow: window)

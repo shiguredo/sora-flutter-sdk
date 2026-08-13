@@ -49,7 +49,7 @@ class WindowCaptureOptions {
   ///
   /// `SCStreamConfiguration.frameRate` へ渡す上限値であり、
   /// 実際の送出レートはウィンドウの更新頻度やシステム負荷に依存します。
-  /// 省略時は 30 を使います。
+  /// 省略時は 30 を使います。0 以下の値は指定できず、30 として扱います。
   final int? frameRate;
 
   /// カーソルをキャプチャ映像に含めるかどうか。

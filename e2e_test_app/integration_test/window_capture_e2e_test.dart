@@ -5,6 +5,8 @@
 // CI では実行できない。ローカルでシステム設定から画面収録権限を
 // 付与してから実行する。
 
+import 'dart:io';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -417,6 +419,82 @@ void main() {
       }
     },
   );
+  testWidgets(
+    'window-capture-preview-uaf-stress: プレビューの開始と停止を繰り返して '
+    'UAF クラッシュしないことを検証する',
+    (WidgetTester tester) async {
+      // Sora 接続を伴わないプレビューだけのパターンで、キャプチャ動作中に
+      // track を dispose する。track は stream にも PeerConnection にも
+      // 追加されないため、dispose で video source の参照が確実に 0 になる。
+      // ネイティブ側が stopCapture 完了を待たずに MethodChannel へ応答すると、
+      // frameQueue 上の in-flight フレームが解放済み source を参照して
+      // use-after-free クラッシュを引き起こすため、反復実行でクラッシュ
+      // しないことを検証する (UAF レースの回帰テスト)。
+      // macOS ローカル専用。SCStream の開始には画面収録権限が必要なため、
+      // CI では実行できない。
+      final rounds = _windowCaptureStressRoundsFromEnvironment();
+      logE2eMessage(
+        'stage=preview_uaf_stress_config '
+        'platform=${Platform.operatingSystem} rounds=$rounds',
+      );
+
+      expect(
+        Platform.isMacOS,
+        isTrue,
+        reason: 'このテストは macOS のウィンドウキャプチャを検証するため macOS 専用です。',
+      );
+
+      // ダミーウィンドウを表示し、SCShareableContent に反映されるまで待つ
+      await _dummyWindowChannel.invokeMethod<void>('show');
+      final source = await _waitForDummyWindowSource(tester);
+      logE2eMessage(
+        'stage=dummy_window_ready sourceId=${source.id}',
+      );
+
+      for (var round = 1; round <= rounds; round++) {
+        logE2eMessage('stage=preview_round_start round=$round/$rounds');
+        final track = MediaDevices.createWindowVideoTrack(source);
+        // textureId の取得でネイティブ側のキャプチャを開始する
+        await track.textureId;
+        // フレームが frameQueue に流れている状態を作る
+        await tester.pump(const Duration(milliseconds: 300));
+        // キャプチャ動作中に dispose する。disposeLocalVideoTrackTexture は
+        // stopCapture 完了 (frameQueue のフレーム処理完了を含む) を待ってから
+        // 応答する必要がある。応答を待たずに video source を解放すると、
+        // in-flight フレームが解放済み source を参照して UAF クラッシュを
+        // 引き起こすため、クラッシュしないことを検証する。
+        await track.dispose();
+        logE2eMessage('stage=preview_round_finished round=$round/$rounds');
+      }
+
+      // ダミーウィンドウを閉じる
+      await _dummyWindowChannel.invokeMethod<void>('hide');
+    },
+    timeout: const Timeout(Duration(minutes: 30)),
+  );
+}
+
+/// ストレスラウンド数を環境変数から取得する。
+///
+/// 未指定の場合は 10 回実行する。UAF レースはタイミング依存のため、
+/// 強めに確認する場合は 50 回以上を指定する。
+int _windowCaptureStressRoundsFromEnvironment() {
+  final raw = Platform.environment['TEST_WINDOW_CAPTURE_STRESS_ROUNDS']?.trim();
+  if (raw == null || raw.isEmpty) {
+    return 10;
+  }
+  final parsed = int.tryParse(raw);
+  expect(
+    parsed,
+    isNotNull,
+    reason: 'TEST_WINDOW_CAPTURE_STRESS_ROUNDS は整数で指定してください。',
+  );
+  expect(
+    parsed!,
+    greaterThan(0),
+    reason: 'TEST_WINDOW_CAPTURE_STRESS_ROUNDS は 1 以上で指定してください。',
+  );
+  return parsed;
 }
 
 /// window_capture_error エラーイベントが通知されるまで待つ。
@@ -440,6 +518,7 @@ Future<SoraConnectionErrorEvent> _waitForWindowCaptureError(
     'キャプチャ中のウィンドウ消失が Dart 側へ通知されること。',
   );
 }
+
 Future<WindowCaptureSource> _waitForDummyWindowSource(
   WidgetTester tester,
 ) async {

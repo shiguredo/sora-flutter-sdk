@@ -115,9 +115,18 @@ private class LocalVideoRenderer {
     }
   }
 
-  func dispose() {
-    windowCapturer?.stop()
-    cameraCapturer?.stop()
+  /// キャプチャを停止する。
+  ///
+  /// ウィンドウキャプチャは stopCapture 完了 (frameQueue のフレーム処理完了
+  /// を含む) を待ってから completion を呼ぶ。カメラキャプチャは同期で停止が
+  /// 完了するため即座に completion を呼ぶ。
+  func dispose(completion: @escaping () -> Void) {
+    if let windowCapturer {
+      windowCapturer.stop(completion: completion)
+    } else {
+      cameraCapturer?.stop()
+      completion()
+    }
   }
 }
 
@@ -365,12 +374,14 @@ class SoraFlutterMessageHandler {
         renderer.start { [weak self] error in
           guard let self else { return }
           if let error {
-            self.localVideoRenderers.removeValue(forKey: videoSourcePtr)?.dispose()
-            result(
-              FlutterError(
-                code: "capture_failed",
-                message: error.localizedDescription,
-                details: nil))
+            // 開始失敗時もフレーム処理の完了を待ってから応答する
+            self.localVideoRenderers.removeValue(forKey: videoSourcePtr)?.dispose {
+              result(
+                FlutterError(
+                  code: "capture_failed",
+                  message: error.localizedDescription,
+                  details: nil))
+            }
           } else {
             result(["textureId": renderer.textureId])
           }
@@ -386,14 +397,32 @@ class SoraFlutterMessageHandler {
     // ローカル映像プレビュー用のテクスチャを破棄する
     case "disposeLocalVideoTrackTexture":
       let videoSourcePtr = (args["videoSourcePtr"] as? NSNumber)?.int64Value ?? 0
-      localVideoRenderers.removeValue(forKey: videoSourcePtr)?.dispose()
-      result(nil)
+      guard let renderer = localVideoRenderers.removeValue(forKey: videoSourcePtr) else {
+        result(nil)
+        break
+      }
+      // キャプチャ停止の完了 (stopCapture 完了と frameQueue 上の
+      // フレーム処理完了) を待ってから応答する。
+      // Dart 側は応答後に video source を解放するため、
+      // 応答前にフレーム処理を完了させることで解放済み source への
+      // アクセス (UAF) を防ぐ。
+      renderer.dispose {
+        result(nil)
+      }
 
     // 実行中のウィンドウキャプチャを停止する
     case "stopWindowCapturer":
       let videoSourcePtr = (args["videoSourcePtr"] as? NSNumber)?.int64Value ?? 0
-      localVideoRenderers.removeValue(forKey: videoSourcePtr)?.dispose()
-      result(nil)
+      guard let renderer = localVideoRenderers.removeValue(forKey: videoSourcePtr) else {
+        result(nil)
+        break
+      }
+      // disposeLocalVideoTrackTexture と同様に停止完了を待ってから応答する。
+      // 呼び出し側 (replaceVideoTrack の失敗時など) が video source を
+      // 解放する前に、frameQueue 上のフレーム処理を完了させる。
+      renderer.dispose {
+        result(nil)
+      }
 
     // リモートビデオレンダラーを作成する
     case "createRemoteVideoRenderer":

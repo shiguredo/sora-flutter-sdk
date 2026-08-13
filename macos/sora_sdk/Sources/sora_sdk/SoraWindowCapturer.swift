@@ -293,25 +293,61 @@ final class SoraWindowCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
   /// SCStream の停止はメインスレッドで行います。
   /// stopCapture が完了するまで自身を保持し、完了後に解放されます。
   /// これによりキャプチャ実行中の SCStream が dealloc されるのを防ぎます。
-  func stop() {
-    guard beginStopCapture() else { return }
+  ///
+  /// 完了条件は stopCapture 完了に加えて frameQueue 上のフレーム処理が
+  /// すべて完了することです。Dart 側は `disposeLocalVideoTrackTexture` の
+  /// 応答後に video source を解放するため、応答前にフレーム処理を
+  /// 完了させることで解放済み source へのアクセス (UAF) を防ぎます。
+  func stop(completion: (() -> Void)? = nil) {
+    guard beginStopCapture() else {
+      // 停止不要 (stopped / stopping) の場合は即座に完了を通知する
+      completion?()
+      return
+    }
+    // stop 開始時点で videoSourcePtr を同期的に nil 化する。
+    // SoraCameraCapturer.stop() と対称の構造にし、
+    // 以後のフレーム処理が source を参照しないことを保証する。
+    videoSourcePtr = nil
     // SCStream の stopCapture 完了まで自身を保持する。
     // deinit から呼ばれた場合も、dealloc は stopCapture 完了まで遅延される。
     selfRetain = self
     Task { @MainActor [weak self] in
-      guard let self else { return }
+      guard let self else {
+        completion?()
+        return
+      }
       guard let stream = self.stream else {
         // stream 未生成 (starting 中のキャンセル等) は状態を戻す
         self.withLock { self.captureState = .stopped }
         self.selfRetain = nil
+        completion?()
         return
       }
       self.stream = nil
       stream.stopCapture { [weak self] _ in
-        self?.withLock {
-          self?.captureState = .stopped
+        guard let self else {
+          completion?()
+          return
         }
-        self?.selfRetain = nil
+        // stopCapture の completion は任意のスレッドで呼ばれるため、
+        // メインスレッドへ移してから frameQueue の完了を待つ。
+        Task { @MainActor [weak self] in
+          guard let self else {
+            completion?()
+            return
+          }
+          // frameQueue に残っている in-flight フレーム処理の完了を待つ。
+          // stopCapture 完了後は新しいフレームが来ないため、
+          // ここで待てば処理中のフレームもすべて完了している。
+          // フレーム処理はメインキューを同期的に待たないため、
+          // デッドロックしない。
+          self.frameQueue.sync {}
+          self.withLock {
+            self.captureState = .stopped
+          }
+          self.selfRetain = nil
+          completion?()
+        }
       }
     }
   }
@@ -381,6 +417,9 @@ final class SoraWindowCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
     withLock {
       captureState = .stopped
     }
+    // エラー後は Dart 側が dispose を呼ぶまでに source を解放しうるため、
+    // 以後のフレーム処理が source を参照しないよう nil 化しておく。
+    videoSourcePtr = nil
     // この delegate は com.screenCaptureKit.streamQueue で呼ばれる。
     // SCStream はメインスレッドで生成・開始・停止する必要があるため、
     // streamQueue 上で self.stream を解放してはいけない。

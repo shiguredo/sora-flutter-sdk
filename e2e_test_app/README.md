@@ -23,6 +23,7 @@ Sora Flutter SDK の recvonly / sendonly / sendrecv 接続と、2 クライア�
 | `TEST_CHANNEL_ID_PREFIX` | チャンネル ID のプレフィックス。CI では `GITHUB_RUN_ID` と OS 名を連結し、ローカルでは時刻でユニーク化する |
 | `TEST_SEND_DURATION` | （任意）sendonly / sendrecv テストの送信継続秒数（例: `60`） |
 | `TEST_MACOS_CAMERA_STRESS_ROUNDS` | （任意）macOS 実カメラストレス E2E の反復回数。未指定時は `10` |
+| `TEST_WINDOW_CAPTURE_STRESS_ROUNDS` | （任意）macOS ウィンドウキャプチャ UAF ストレス E2E の反復回数。未指定時は `10` |
 | `TEST_PUSH_EXPECTED_TYPE` | （任意）notify metadata テストで push 受信を確認する場合、期待する `event_type` 値を設定する |
 | `TEST_ENABLE_CAMERA_TEXTURE_E2E` | （任意）`true` の場合、実カメラを使う local Texture E2E を実行する |
 
@@ -81,6 +82,13 @@ macOS 実カメラストレス E2E（`macos_camera_runtime_stress_e2e_test.dart`
 - 初回実行時に macOS のカメラ権限ダイアログが表示される場合がある
 - `removeVideoTrack` 後に camera track を dispose し、`replaceVideoTrack` で camera track を再追加し、最後に disconnect / dispose する操作を反復する
 - デッドロック検出用に各 camera 操作へ timeout を設定している。強めに確認する場合は `TEST_MACOS_CAMERA_STRESS_ROUNDS=50` 以上を指定する
+
+macOS ウィンドウキャプチャ UAF ストレス E2E（`window_capture_e2e_test.dart` の `window-capture-preview-uaf-stress`）の前提:
+
+- このテストはローカル実機専用。CI では実行しない
+- 画面収録権限と Sora サーバーが必要
+- ダミーウィンドウのキャプチャを開始し、キャプチャ動作中に track を dispose する操作を反復する
+- ウィンドウキャプチャの停止完了を待たずに video source が解放されることで発生しうる UAF クラッシュを検出する。強めに確認する場合は `TEST_WINDOW_CAPTURE_STRESS_ROUNDS=50` 以上を指定する
 
 `TEST_SECRET_KEY` の扱い:
 

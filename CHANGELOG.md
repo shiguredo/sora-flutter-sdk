@@ -128,3 +128,7 @@
   - @zztkm
 - [FIX] re-offer 受信経路に応じて re-answer の送信先を切り替えるよう修正する
   - @zztkm
+- [FIX] macOS のウィンドウキャプチャ停止時に video source 解放との UAF レースを修正する
+  - `SoraWindowCapturer.stop()` で `videoSourcePtr` を同期 nil 化し、stopCapture 完了と frameQueue 上のフレーム処理完了を待ってから MethodChannel へ応答することで、Dart 側の video source 解放と frameQueue 上のフレーム処理が競合しないようにする
+  - ウィンドウキャプチャの開始と停止を繰り返す UAF レース検出 E2E テストを追加する
+  - @zztkm

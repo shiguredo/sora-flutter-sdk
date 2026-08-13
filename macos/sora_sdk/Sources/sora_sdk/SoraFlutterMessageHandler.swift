@@ -105,6 +105,17 @@ private class LocalVideoRenderer {
     return cameraCapturer?.localPreviewTextureId ?? -1
   }
 
+  /// キャプチャが有効な状態かどうかを返します。
+  ///
+  /// ウィンドウキャプチャは SCStream がエラーで停止した場合に false になる。
+  /// カメラキャプチャはエラーによる停止経路がないため常に true。
+  var isActive: Bool {
+    if let windowCapturer {
+      return windowCapturer.isCapturing
+    }
+    return true
+  }
+
   // ウィンドウキャプチャの開始完了を待つ。
   // カメラキャプチャは init 内で開始済みのため、完了を即座に通知する。
   func start(completion: @escaping (Error?) -> Void) {
@@ -341,8 +352,14 @@ class SoraFlutterMessageHandler {
         // 接続前 preview で生成済みの renderer にも、
         // エラー通知の宛先 clientId を後付けで設定する
         renderer.clientId = clientId
-        result(["textureId": renderer.textureId])
-        return
+        if renderer.isActive {
+          result(["textureId": renderer.textureId])
+          return
+        }
+        // ウィンドウ消失などのエラーでキャプチャが停止済みの renderer は
+        // 破棄して作り直す。そのまま textureId を返すと、再接続時に
+        // SCStream が再起動されず映像ゼロのまま成功してしまう。
+        localVideoRenderers.removeValue(forKey: videoSourcePtr)?.dispose {}
       }
       // キャプチャ中のウィンドウ消失やストリームエラーを Dart 側へ通知する。
       // 通知先の clientId は renderer に後付けで設定されるため、

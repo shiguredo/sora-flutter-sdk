@@ -5,8 +5,10 @@
 // CI では実行できない。ローカルでシステム設定から画面収録権限を
 // 付与してから実行する。
 
+import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show FlutterError, FlutterErrorDetails;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -407,6 +409,215 @@ void main() {
           logE2eMessage(
             'stage=cleanup_finished status=failed '
             'errors=${cleanupErrors.join(" | ")}',
+          );
+          if (bodyError == null) {
+            throw StateError(
+              'Cleanup failed: ${cleanupErrors.join(" | ")}',
+            );
+          }
+        } else {
+          logE2eMessage('stage=cleanup_finished status=ok');
+        }
+      }
+    },
+  );
+  testWidgets(
+    'window-capture-reconnect: ウィンドウ消失後の同じ track での再接続は映像ゼロのまま成功しない',
+    (WidgetTester tester) async {
+      // ウィンドウ消失 (didStopWithError) 後に同じ track で再接続する。
+      // 停止済み renderer がキャッシュされて再利用されると、
+      // ensureLocalVideoTrackTexture の early-return が死んだ textureId を
+      // 返し、SCStream が再起動されず映像ゼロのまま「成功」してしまう。
+      // 修正後は停止済み renderer が破棄されて作り直され、新しい
+      // SCStream の開始はウィンドウ不在 (破棄されたウィンドウの ID は
+      // 新しいウィンドウで再利用されない) で失敗し、再接続は
+      // windowCaptureError 通知付きで失敗する。
+      // 「映像ゼロのまま成功しない」ことを検証する (回帰テスト)。
+      final env = loadE2eEnvironment();
+      final channelId = buildChannelId(
+        env.channelPrefix,
+        suffix: '-windowcapture-reconnect',
+      );
+
+      final senderConfig = SoraConnectionConfig(
+        signalingUrls: env.signalingUrls,
+        channelId: channelId,
+        role: SoraRole.sendonly,
+        video: true,
+        audio: false,
+        useAudioDevice: false,
+        metadata: env.metadata,
+      );
+
+      final senderConnectTimeout = connectionStageTimeout(senderConfig);
+      final senderDisconnectTimeout = connectionStageTimeout(senderConfig);
+
+      ObservedConnection? sender;
+      LocalMediaStream? stream;
+      LocalVideoTrack? videoTrack;
+      VideoOutboundStats? firstOutbound;
+      VideoOutboundStats? secondOutbound;
+      Object? bodyError;
+
+      try {
+        // ダミーウィンドウを表示し、SCShareableContent に反映されるまで待つ
+        await _dummyWindowChannel.invokeMethod<void>('show');
+        final source = await _waitForDummyWindowSource(tester);
+        logE2eMessage(
+          'stage=dummy_window_ready channelId=$channelId sourceId=${source.id}',
+        );
+
+        sender = await ObservedConnection.create(
+          name: 'sender',
+          config: senderConfig,
+        );
+
+        stream = MediaDevices.createMediaStream();
+        videoTrack = MediaDevices.createWindowVideoTrack(source);
+        stream.addTrack(videoTrack);
+
+        logE2eMessage(
+          'stage=sender_connect_start channelId=$channelId',
+        );
+        await sender.connect(stream);
+        await sender.waitUntilConnected(senderConnectTimeout);
+        sender.throwIfHasErrors();
+        logE2eMessage('stage=sender_connected channelId=$channelId');
+
+        // 1 回目の接続で映像が流れていることを確認する
+        firstOutbound =
+            await waitForVideoOutboundStats(tester, sender.connection);
+        secondOutbound = await waitForVideoOutboundStats(
+          tester,
+          sender.connection,
+          previous: firstOutbound,
+        );
+        sender.throwIfHasErrors();
+        logE2eMessage(
+          'stage=sender_outbound_ready channelId=$channelId '
+          'first=$firstOutbound second=$secondOutbound',
+        );
+
+        // キャプチャ中のウィンドウを閉じて SCStream をエラーにする
+        await _dummyWindowChannel.invokeMethod<void>('hide');
+        logE2eMessage('stage=dummy_window_hidden channelId=$channelId');
+
+        // window_capture_error イベントが通知されるまで待つ
+        await _waitForWindowCaptureError(
+          sender,
+          timeout: const Duration(seconds: 30),
+        );
+        logE2eMessage(
+          'stage=window_capture_error_received channelId=$channelId',
+        );
+
+        // ウィンドウを表示し直す。閉じられたウィンドウは破棄されているため、
+        // 新しい CGWindowID が割り当てられる。
+        await _dummyWindowChannel.invokeMethod<void>('show');
+        logE2eMessage('stage=dummy_window_reshown channelId=$channelId');
+
+        // 一旦切断して、同じ track で再接続する
+        await sender.disconnect();
+        await sender.waitUntilDisconnected(senderDisconnectTimeout);
+        logE2eMessage('stage=sender_disconnected channelId=$channelId');
+
+        // 再接続前のエラーイベント件数を記録しておく
+        final errorsBeforeReconnect = sender.errors.length;
+        final reconnectTarget = sender;
+
+        // 停止済み renderer が再利用されると connect は「成功」してしまう。
+        // 修正後は新しい renderer の SCStream 開始がウィンドウ不在で失敗し、
+        // connect が失敗するため、「映像ゼロのまま成功しない」ことを検証する。
+        // connect() の失敗時に SDK 内部の _connectReadyCompleter が
+        // エラー完了し、await されない future の unhandled async error として
+        // zone へ届く。該当エラーは connect() の戻り値側で検証済みのため
+        // ここでは無視し、それ以外は通常どおり報告する。
+        final reconnectError = await runZonedGuarded(
+          () async {
+            try {
+              await reconnectTarget.connect(stream);
+              return null;
+            } catch (e) {
+              return e;
+            }
+          },
+          (error, stackTrace) {
+            final message = error.toString();
+            if (error is StateError &&
+                message.contains('Failed to apply video capture backend')) {
+              logE2eMessage('stage=swallowed_unhandled_error message=$message');
+              return;
+            }
+            FlutterError.reportError(
+              FlutterErrorDetails(exception: error, stack: stackTrace),
+            );
+          },
+        );
+        expect(
+          reconnectError,
+          isA<StateError>(),
+          reason: '再接続は映像ゼロのまま成功せず、失敗すること。',
+        );
+        logE2eMessage('stage=sender_reconnect_failed channelId=$channelId');
+
+        // エラーイベントの配信は非同期のため、件数が増えるまで待つ
+        final errorEventDeadline =
+            DateTime.now().add(const Duration(seconds: 10));
+        while (sender.errors.length <= errorsBeforeReconnect &&
+            DateTime.now().isBefore(errorEventDeadline)) {
+          await tester.pump(const Duration(milliseconds: 100));
+        }
+
+        // windowCaptureError のエラーイベントが通知されていること
+        expect(
+          sender.errors.length,
+          greaterThan(errorsBeforeReconnect),
+          reason: '再接続の失敗がエラーイベントとして通知されること。',
+        );
+        expect(
+          sender.errors.last.code,
+          SoraErrorCode.windowCaptureError,
+          reason: '再接続の失敗が window_capture_error として通知されること。',
+        );
+      } catch (e) {
+        bodyError = e;
+        rethrow;
+      } finally {
+        final cleanupErrors = <String>[];
+
+        Future<void> runCleanupStep(
+          String name,
+          Future<void> Function() action,
+        ) async {
+          try {
+            await action();
+          } catch (e) {
+            cleanupErrors.add('$name: $e');
+            logE2eMessage('stage=cleanup_error step=$name error=$e');
+          }
+        }
+
+        await runCleanupStep('dummyWindow.hide', () async {
+          await _dummyWindowChannel.invokeMethod<void>('hide');
+        });
+        await runCleanupStep('sender.disconnect', () async {
+          if (sender != null) {
+            await sender.disconnect();
+            await sender.waitUntilDisconnected(senderDisconnectTimeout);
+          }
+        });
+        await runCleanupStep(
+            'sender.dispose', () async => await sender?.dispose());
+        await runCleanupStep(
+            'stream.dispose', () async => await stream?.dispose());
+        await runCleanupStep(
+          'videoTrack.dispose',
+          () async => await videoTrack?.dispose(),
+        );
+
+        if (cleanupErrors.isNotEmpty) {
+          logE2eMessage(
+            'stage=cleanup_finished status=failed errors=${cleanupErrors.join(" | ")}',
           );
           if (bodyError == null) {
             throw StateError(

@@ -186,6 +186,21 @@ final class SoraWindowCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
     return previewTextureId
   }
 
+  /// キャプチャが有効かどうかを返します。
+  ///
+  /// ウィンドウ消失などのエラーで SCStream が停止した場合は false になる。
+  /// `ensureLocalVideoTrackTexture` の早期 return 判定で使用する。
+  var isCapturing: Bool {
+    withLock {
+      switch captureState {
+      case .starting, .running:
+        return true
+      case .stopped, .stopping:
+        return false
+      }
+    }
+  }
+
   // MARK: - ビデオソースポインタ
 
   /// dart:ffi 側の AdaptedVideoTrackSource ポインタを設定する。

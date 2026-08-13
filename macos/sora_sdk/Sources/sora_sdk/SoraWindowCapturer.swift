@@ -39,6 +39,12 @@ enum SoraWindowCaptureError: LocalizedError {
     case .startFailed(let error):
       return "Failed to start window capture: \(error.localizedDescription)"
     case .runtimeError(let error):
+      // SCStreamError の code をメッセージに含め、Dart 側で原因を判別できるようにする
+      if let streamError = error as? SCStreamError {
+        return
+          "Window capture runtime error (SCStreamError code: \(streamError.code.rawValue)): "
+          + error.localizedDescription
+      }
       return "Window capture runtime error: \(error.localizedDescription)"
     }
   }
@@ -200,14 +206,19 @@ final class SoraWindowCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
   deinit {
     // stop() は stopCapture 完了まで selfRetain で自身を保持するため、
     // キャプチャ実行中の SCStream が不正なタイミングで解放されることはない。
-    stop()
-    if previewTextureId >= 0 {
-      textureRegistry.unregisterTexture(previewTextureId)
-      previewTextureId = -1
+    // unregisterTexture は stopCapture 完了後に実行し、停止完了前に
+    // テクスチャが解放されないようにする。completion は self を強参照して
+    // stopCapture 完了までオブジェクトを生かし続ける。
+    // (カメラは同期停止なので deinit 内で解放しても問題ない非対称)
+    stop { [self] in
+      if self.previewTextureId >= 0 {
+        self.textureRegistry.unregisterTexture(self.previewTextureId)
+        self.previewTextureId = -1
+      }
+      self.previewLock.lock()
+      self.previewPixelBuffer = nil
+      self.previewLock.unlock()
     }
-    previewLock.lock()
-    previewPixelBuffer = nil
-    previewLock.unlock()
   }
 
   // MARK: - 公開プロパティ
@@ -494,6 +505,10 @@ final class SoraWindowCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
     let captureError = SoraWindowCaptureError.runtimeError(error)
     Task { @MainActor in
       self.stream = nil
+      // 正常停止 (stopCapture による userStopped) はエラーとして通知しない
+      if (error as? SCStreamError)?.code == .userStopped {
+        return
+      }
       self.onError?(captureError)
     }
   }
@@ -515,19 +530,32 @@ final class SoraWindowCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
     let height = Int32(CVPixelBufferGetHeight(pixelBuffer))
 
     // I420 バッファを作成する
-    guard let i420Ref = webrtc_I420Buffer_Create(width, height),
-      let i420 = webrtc_I420Buffer_refcounted_get(i420Ref)
+    guard let i420Ref = webrtc_I420Buffer_Create(width, height) else {
+      return
+    }
+    guard let i420 = webrtc_I420Buffer_refcounted_get(i420Ref) else {
+      // refcounted_get に失敗しても Create が確保した参照をリークしないよう解放する
+      webrtc_I420Buffer_Release(i420Ref)
+      return
+    }
+    defer { webrtc_I420Buffer_Release(i420) }
+
+    // NV12 -> I420 変換
+    let lockResult = CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+    guard lockResult == kCVReturnSuccess else {
+      return
+    }
+    // ロックに成功した場合のみ unlock する
+    defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+    guard
+      let srcY = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0)?
+        .assumingMemoryBound(to: UInt8.self),
+      let srcUV = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 1)?
+        .assumingMemoryBound(to: UInt8.self)
     else {
       return
     }
-
-    // NV12 -> I420 変換
-    CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
-    let srcY = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0)!
-      .assumingMemoryBound(to: UInt8.self)
     let srcStrideY = Int32(CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0))
-    let srcUV = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 1)!
-      .assumingMemoryBound(to: UInt8.self)
     let srcStrideUV = Int32(CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 1))
 
     libyuv_NV12ToI420(
@@ -538,7 +566,6 @@ final class SoraWindowCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
       webrtc_I420Buffer_MutableDataV(i420), webrtc_I420Buffer_StrideV(i420),
       width, height
     )
-    CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly)
 
     // ローカルプレビュー用に BGRA の CVPixelBuffer を作成する
     previewLock.lock()
@@ -584,7 +611,6 @@ final class SoraWindowCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
         webrtc_VideoFrame_unique_get(frame))
       webrtc_VideoFrame_unique_delete(frame)
     }
-    webrtc_I420Buffer_Release(i420)
 
     // メインスレッドでテクスチャ更新を通知する
     let textureId = previewTextureId

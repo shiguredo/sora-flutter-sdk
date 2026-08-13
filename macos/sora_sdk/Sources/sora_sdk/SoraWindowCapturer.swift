@@ -239,9 +239,24 @@ final class SoraWindowCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
       do {
         content = try await SCShareableContent.current
       } catch {
-        self.completeStartCapture(
+        // completeStartCapture が .cancelled を返した場合は
+        // await 中に stop() が実行されたため、キャンセルとして報告する
+        let result = self.completeStartCapture(
           captureID: captureID, error: SoraWindowCaptureError.permissionDenied)
-        completion(SoraWindowCaptureError.permissionDenied)
+        if case .cancelled = result {
+          completion(SoraWindowCaptureError.startCancelled)
+        } else {
+          completion(SoraWindowCaptureError.permissionDenied)
+        }
+        return
+      }
+
+      // await 中に stop() または didStopWithError が実行された場合は
+      // SCStream を生成しない。stop() 側は stream 未生成パスで
+      // captureState を .stopped に戻して完了しているため、
+      // ここで追加の停止処理は不要である。
+      guard self.withLock({ self.activeCaptureID == captureID }) else {
+        completion(SoraWindowCaptureError.startCancelled)
         return
       }
 
@@ -389,9 +404,10 @@ final class SoraWindowCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
   // startCapture のコールバックが返ってきた後に state 更新等を行います
   private func completeStartCapture(captureID: UInt64, error: Error?) -> StartCaptureResult {
     withLock {
-      // startCapture 終了前に stopCapture が実行された場合はキャンセルします
-      // この時 activeCaptureID は nil となっています
-      guard activeCaptureID == captureID else {
+      // startCapture 終了前に stop() または didStopWithError が実行された場合は
+      // キャンセルします。この時 captureState は .stopping / .stopped であり、
+      // activeCaptureID は nil となっています。
+      guard captureState == .starting && activeCaptureID == captureID else {
         return .cancelled
       }
 
@@ -427,6 +443,10 @@ final class SoraWindowCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
   func stream(_ stream: SCStream, didStopWithError error: Error) {
     withLock {
       captureState = .stopped
+      // 開始中 (startCapture 完了待ち) にこの delegate が発火した場合、
+      // 後から完了する startCapture が captureState を .running へ戻さないよう
+      // 世代管理 ID をクリアする。
+      activeCaptureID = nil
     }
     // エラー後は Dart 側が dispose を呼ぶまでに source を解放しうるため、
     // 以後のフレーム処理が source を参照しないよう nil 化しておく。

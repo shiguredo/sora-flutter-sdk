@@ -83,7 +83,17 @@ final class SoraWindowCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
   // start / stop が前後したときに、古い start 完了コールバックを無効化します。
   private var captureID: UInt64 = 0
   private var activeCaptureID: UInt64?
-  private var stream: SCStream?
+  // SCStream の参照。startCapture 完了コールバックや didStopWithError など
+  // 複数のスレッドから読み書きされるため、lock で保護する。
+  private var _stream: SCStream?
+  private var stream: SCStream? {
+    get {
+      withLock { _stream }
+    }
+    set {
+      withLock { _stream = newValue }
+    }
+  }
 
   // dart:ffi 側の AdaptedVideoTrackSource ポインタ。
   // frameQueue (delegate) / stop (main) / 呼出スレッド (setter) の

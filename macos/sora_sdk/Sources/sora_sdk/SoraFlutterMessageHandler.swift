@@ -84,10 +84,13 @@ private class LocalVideoRenderer {
       self.windowCapturer = capturer
       self.cameraCapturer = nil
     default:
+      // カメラは未指定 (0) のときに 640x480 を使う。
+      // ウィンドウキャプチャは SoraWindowCapturer 側で
+      // 未指定 (0) のときウィンドウの現在のサイズを使う。
       let capturer = SoraCameraCapturer(
         deviceId: deviceId,
-        width: width,
-        height: height,
+        width: width > 0 ? width : 640,
+        height: height > 0 ? height : 480,
         fps: fps,
         textureRegistry: textureRegistry
       )
@@ -336,8 +339,10 @@ class SoraFlutterMessageHandler {
       let captureType = args["captureType"] as? String ?? "camera"
       let clientId = (args["clientId"] as? NSNumber)?.int64Value ?? 0
       let videoDeviceId = args["videoDeviceId"] as? String
-      let videoWidth = (args["videoWidth"] as? NSNumber)?.int32Value ?? 640
-      let videoHeight = (args["videoHeight"] as? NSNumber)?.int32Value ?? 480
+      // 未指定 (nil) は 0 として扱う。0 のときは captureType ごとの
+      // デフォルト (カメラは 640x480、ウィンドウはウィンドウの現在のサイズ) を使う。
+      let videoWidth = (args["videoWidth"] as? NSNumber)?.int32Value ?? 0
+      let videoHeight = (args["videoHeight"] as? NSNumber)?.int32Value ?? 0
       let videoFrameRate = (args["videoFrameRate"] as? NSNumber)?.int32Value ?? 30
       let showsCursor = (args["showsCursor"] as? NSNumber)?.boolValue ?? true
       guard videoSourcePtr != 0 else {

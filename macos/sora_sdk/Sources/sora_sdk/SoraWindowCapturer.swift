@@ -257,14 +257,10 @@ final class SoraWindowCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
       let config = SCStreamConfiguration()
       config.capturesAudio = false
       config.showsCursor = self.showsCursor
-      if self.requestedWidth > 0 && self.requestedHeight > 0 {
-        config.width = Int(self.requestedWidth)
-        config.height = Int(self.requestedHeight)
-      } else {
-        // 未指定の場合はウィンドウの現在のサイズを使う
-        config.width = Int(window.frame.width)
-        config.height = Int(window.frame.height)
-      }
+      // 未指定 (0) のフィールドはウィンドウの現在のサイズを使う
+      config.width = self.requestedWidth > 0 ? Int(self.requestedWidth) : Int(window.frame.width)
+      config.height =
+        self.requestedHeight > 0 ? Int(self.requestedHeight) : Int(window.frame.height)
       // フレームレートはフレーム更新間隔の最小値として指定する。
       // SCStream はこの間隔を下回る頻度ではフレームを送出しないため、
       // 指定レートは上限値として働く。

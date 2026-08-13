@@ -64,6 +64,9 @@
   - @zztkm
 - [FIX] PushAudio の PCM 注入時に native 関数へ渡す引数順を修正する
   - @zztkm
+- [FIX] LocalVideoTrack.dispose() が texture ensure の未解決時に永久ハングする問題を修正する
+  - ensure 完了待ちにタイムアウトを設け、ネイティブが応答しない場合 (カメラ回帰や window キャプチャの権限プロンプト待ち) でも dispose が完了するようにする
+  - @zztkm
 
 ### misc
 

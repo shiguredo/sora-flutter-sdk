@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ffi';
 import 'dart:typed_data';
 
@@ -5,6 +6,7 @@ import 'package:flutter/services.dart' show MissingPluginException;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sora_sdk/src/ffi/bindings.dart';
 import 'package:sora_sdk/src/sora_media_stream.dart';
+import 'package:sora_sdk/src/sora_method_channels.dart';
 
 void main() {
   // attachClientId 後の再 ensure 検証で MethodChannel を呼ぶため、
@@ -51,6 +53,48 @@ void main() {
         track.textureId,
         throwsA(isA<MissingPluginException>()),
       );
+    });
+  });
+
+  group('LocalVideoTrack.dispose の texture ensure タイムアウト', () {
+    test('ensure が未解決のままでも dispose はタイムアウト内に完了する', () async {
+      // ネイティブ側が ensureLocalVideoTrackTexture に応答しない状態を模擬する。
+      // カメラ回帰や window キャプチャの権限プロンプト待ちで発生しうる。
+      // ハンドラが返す Future は決して完了しないため、ensure は未解決のまま残る。
+      final neverCompleter = Completer<Object?>();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(soraMethodChannel, (call) {
+            if (call.method == 'ensureLocalVideoTrackTexture') {
+              return neverCompleter.future;
+            }
+            return null;
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(soraMethodChannel, null);
+      });
+
+      // テスト実行を速くするため、dispose の ensure 待ちタイムアウトを短くする。
+      final track = LocalVideoTrack.fromNativeMediaTrack(
+        Pointer<WebrtcMediaStreamTrackInterfaceRefcounted>.fromAddress(1),
+        captureType: VideoTrackCaptureType.window,
+        textureEnsureTimeout: const Duration(milliseconds: 100),
+      );
+      // ensure を開始して _textureIdFuture をキャッシュさせる。
+      // 未解決のまま dispose を呼ぶ状況を再現する。
+      unawaited(track.textureId);
+
+      final disposeFuture = track.dispose();
+      try {
+        await disposeFuture.timeout(const Duration(seconds: 5));
+        // タイムアウト内に dispose が完了した。
+      } on TimeoutException {
+        fail('dispose() は ensure が未解決のまま永久ハングした');
+      } catch (_) {
+        // FFI 未ロードのホストテスト環境では _releaseNativeTrack() が
+        // シンボル解決エラーになる。ここでは「ハングせず dispose が
+        // 完了する」ことだけを検証する。
+      }
     });
   });
 

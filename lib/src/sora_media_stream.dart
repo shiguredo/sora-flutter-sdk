@@ -503,17 +503,24 @@ class LocalVideoTrack extends LocalMediaStreamTrack {
     VideoCaptureSettings? captureSettings,
     Pointer<WebrtcAdaptedVideoTrackSourceRefcounted>? videoSourceRef,
     int? clientId,
+    Duration textureEnsureTimeout = const Duration(seconds: 10),
   }) : _captureType = captureType,
        _captureSettings = captureSettings,
        _videoSourceRef = videoSourceRef,
        _clientId = clientId,
+       _textureEnsureTimeout = textureEnsureTimeout,
        super._();
-
   final VideoTrackCaptureType _captureType;
   final VideoCaptureSettings? _captureSettings;
   final Pointer<WebrtcAdaptedVideoTrackSourceRefcounted>? _videoSourceRef;
   int? _clientId;
   Future<int>? _textureIdFuture;
+
+  /// [textureId] の ensure 完了待ちのタイムアウト。
+  ///
+  /// ネイティブ側が応答しない場合に [dispose] が永久ハングしないための
+  /// 制限時間。テストでは短縮して使用する。
+  final Duration _textureEnsureTimeout;
 
   VideoTrackCaptureType get captureType => _captureType;
 
@@ -761,6 +768,8 @@ class LocalVideoTrack extends LocalMediaStreamTrack {
   ///
   /// camera track では platform preview texture の解放も含むため非同期。
   /// 通常は `await track.dispose()` を推奨する。
+  /// texture の ensure がネイティブ側の応答待ちで未解決の場合は、
+  /// タイムアウト (既定 10 秒) 後に待たずに後始末を進める。
   @override
   Future<void> dispose() async {
     if (_disposed) {
@@ -770,12 +779,16 @@ class LocalVideoTrack extends LocalMediaStreamTrack {
     // ensure 中の textureId Future があれば完了を待つ。
     // 待たずに native release すると、platform 側が ensure 中の
     // videoSourcePtr で解放済み source を参照し UAF になる。
+    // ただしネイティブが応答しない場合 (カメラ回帰や window キャプチャの
+    // 権限プロンプト待ち) はタイムアウトで打ち切る。タイムアウト後に
+    // native release すると UAF の可能性は残るが、dispose が永久ハングして
+    // UI 全体が操作不能になることを防ぐことを優先する。
     final textureFuture = _textureIdFuture;
     if (textureFuture != null) {
       try {
-        await textureFuture;
+        await textureFuture.timeout(_textureEnsureTimeout);
       } catch (_) {
-        // ensure が失敗した場合も無視して先に進む。
+        // ensure が失敗・タイムアウトした場合も無視して先に進む。
       }
     }
     if ((_captureType == VideoTrackCaptureType.camera ||

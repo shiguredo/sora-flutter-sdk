@@ -11,6 +11,26 @@ void main() {
         isNot(SoraErrorCode.cameraOpenError),
       );
     });
+
+    test('原因種別ごとのエラーコードが定義されている', () {
+      // ネイティブ側の FlutterError code と一致させる。
+      expect(
+        SoraErrorCode.windowCapturePermissionDenied,
+        'screen_capture_permission_denied',
+      );
+      expect(
+        SoraErrorCode.windowCaptureWindowNotFound,
+        'window_capture_window_not_found',
+      );
+      expect(
+        SoraErrorCode.windowCaptureStartFailed,
+        'window_capture_start_failed',
+      );
+      expect(
+        SoraErrorCode.windowCaptureStartCancelled,
+        'window_capture_start_cancelled',
+      );
+    });
   });
 
   group('WindowCaptureSource', () {

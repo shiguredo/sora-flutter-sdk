@@ -42,6 +42,26 @@ enum SoraWindowCaptureError: LocalizedError {
       return "Window capture runtime error: \(error.localizedDescription)"
     }
   }
+
+  /// MethodChannel の FlutterError code として利用する原因種別識別子です。
+  ///
+  /// Dart 側で SoraErrorCode の定数値と照合し、エラー原因を判別できる。
+  var channelCode: String {
+    switch self {
+    case .permissionDenied:
+      return "screen_capture_permission_denied"
+    case .windowNotFound:
+      return "window_capture_window_not_found"
+    case .alreadyRunning:
+      return "window_capture_already_running"
+    case .startCancelled:
+      return "window_capture_start_cancelled"
+    case .startFailed:
+      return "window_capture_start_failed"
+    case .runtimeError:
+      return "window_capture_runtime_error"
+    }
+  }
 }
 
 /// ScreenCaptureKit によるウィンドウキャプチャと dart:ffi へのフレーム送出を担当するクラス。

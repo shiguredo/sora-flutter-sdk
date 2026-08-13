@@ -1094,7 +1094,7 @@ class SoraConnection {
       _emitLocalVideo(SoraLocalVideoHandle(textureId: textureId));
     } catch (e) {
       final code = track.captureType == VideoTrackCaptureType.window
-          ? SoraErrorCode.windowCaptureError
+          ? _windowCaptureErrorCodeFromError(e)
           : SoraErrorCode.cameraOpenError;
       _emitConnectionErrorEvent(
         code: code,
@@ -1103,6 +1103,24 @@ class SoraConnection {
       );
       throw StateError('Failed to apply video capture backend: $e');
     }
+  }
+
+  /// ウィンドウキャプチャ開始失敗の [PlatformException] から原因種別を判別する。
+  ///
+  /// ネイティブ側は FlutterError の code に原因種別を埋め込むため、
+  /// `PlatformException.code` を [SoraErrorCode] の定数値へ変換できる。
+  /// 判別できない場合は [SoraErrorCode.windowCaptureError] を返す。
+  static String _windowCaptureErrorCodeFromError(Object error) {
+    if (error is PlatformException) {
+      switch (error.code) {
+        case SoraErrorCode.windowCapturePermissionDenied:
+        case SoraErrorCode.windowCaptureWindowNotFound:
+        case SoraErrorCode.windowCaptureStartFailed:
+        case SoraErrorCode.windowCaptureStartCancelled:
+          return error.code;
+      }
+    }
+    return SoraErrorCode.windowCaptureError;
   }
 
   /// stream が指定 audio track を含んでいるかを返す。

@@ -32,4 +32,22 @@ abstract final class SoraErrorCode {
 
   /// ウィンドウキャプチャ失敗
   static const String windowCaptureError = 'window_capture_error';
+
+  /// ウィンドウキャプチャ開始時の画面収録権限拒否
+  ///
+  /// `MediaDevices.enumerateWindowCaptureSources()` の失敗時は
+  /// `PlatformException.code` にこの値が入る。
+  static const String windowCapturePermissionDenied =
+      'screen_capture_permission_denied';
+
+  /// ウィンドウキャプチャ開始時のウィンドウ消失
+  static const String windowCaptureWindowNotFound =
+      'window_capture_window_not_found';
+
+  /// ウィンドウキャプチャ開始失敗
+  static const String windowCaptureStartFailed = 'window_capture_start_failed';
+
+  /// ウィンドウキャプチャ開始キャンセル
+  static const String windowCaptureStartCancelled =
+      'window_capture_start_cancelled';
 }

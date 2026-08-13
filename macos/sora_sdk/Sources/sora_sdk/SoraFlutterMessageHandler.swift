@@ -37,6 +37,14 @@ private enum LocalVideoRendererError: LocalizedError {
       return "Invalid window id: \(value)"
     }
   }
+
+  /// MethodChannel の FlutterError code として利用する原因種別識別子です。
+  var channelCode: String {
+    switch self {
+    case .invalidWindowId:
+      return "window_capture_invalid_window_id"
+    }
+  }
 }
 
 /// dart:ffi 側の VideoSource とローカルキャプチャを紐付ける内部クラス。
@@ -236,6 +244,18 @@ class SoraFlutterMessageHandler {
     self.textureRegistry = textureRegistry
   }
 
+  // ウィンドウキャプチャ系エラーの原因種別を FlutterError code として返す。
+  // Dart 側で SoraErrorCode の定数値と照合して原因を判別する。
+  private func windowCaptureChannelCode(for error: Error) -> String {
+    if let error = error as? SoraWindowCaptureError {
+      return error.channelCode
+    }
+    if let error = error as? LocalVideoRendererError {
+      return error.channelCode
+    }
+    return "window_capture_error"
+  }
+
   func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     // 映像入力デバイス操作
     if call.method == "enumerateVideoInputDevices" {
@@ -400,7 +420,7 @@ class SoraFlutterMessageHandler {
             self.localVideoRenderers.removeValue(forKey: videoSourcePtr)?.dispose {
               result(
                 FlutterError(
-                  code: "capture_failed",
+                  code: self.windowCaptureChannelCode(for: error),
                   message: error.localizedDescription,
                   details: nil))
             }
@@ -411,7 +431,7 @@ class SoraFlutterMessageHandler {
       } catch {
         result(
           FlutterError(
-            code: "capture_failed",
+            code: windowCaptureChannelCode(for: error),
             message: error.localizedDescription,
             details: nil))
       }

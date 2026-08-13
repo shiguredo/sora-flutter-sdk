@@ -252,6 +252,9 @@ abstract final class MediaDevices {
   /// macOS で共有可能なウィンドウの一覧を取得する。
   ///
   /// 画面収録権限が拒否されている場合は `Future` のエラーとして返す。
+  /// エラー時の `PlatformException.code` は
+  /// [SoraErrorCode.windowCapturePermissionDenied]
+  /// (`screen_capture_permission_denied`) になる。
   static Future<List<WindowCaptureSource>> enumerateWindowCaptureSources() {
     return media_device_platform.enumerateWindowCaptureSources();
   }

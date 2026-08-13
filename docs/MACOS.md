@@ -30,3 +30,18 @@ SDK は権限リクエスト（`CGRequestScreenCaptureAccess()` の呼び出し�
 
 画面収録権限の付与中にウィンドウキャプチャを開始すると、
 `SoraErrorCode.windowCaptureError` のエラーイベントが通知されます。
+
+### エラーコードの判別
+
+ウィンドウキャプチャのエラーは `SoraErrorCode` の定数値で原因を判別できます。
+
+- `MediaDevices.enumerateWindowCaptureSources()` の失敗:
+  `PlatformException.code` が `SoraErrorCode.windowCapturePermissionDenied`
+  (`screen_capture_permission_denied`) になる
+- キャプチャ開始時の失敗 (`SoraConnectionErrorEvent.code`):
+  - `SoraErrorCode.windowCapturePermissionDenied`: 画面収録権限の拒否
+  - `SoraErrorCode.windowCaptureWindowNotFound`: 選択したウィンドウが存在しない
+  - `SoraErrorCode.windowCaptureStartFailed`: SCStream の開始失敗
+  - `SoraErrorCode.windowCaptureStartCancelled`: 開始がキャンセルされた
+  - `SoraErrorCode.windowCaptureError`: 上記以外の失敗
+- キャプチャ中のエラー (ウィンドウ消失など): `SoraErrorCode.windowCaptureError`

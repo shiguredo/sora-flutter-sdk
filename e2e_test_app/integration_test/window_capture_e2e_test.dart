@@ -436,7 +436,7 @@ void main() {
       // 修正後は停止済み renderer が破棄されて作り直され、新しい
       // SCStream の開始はウィンドウ不在 (破棄されたウィンドウの ID は
       // 新しいウィンドウで再利用されない) で失敗し、再接続は
-      // windowCaptureError 通知付きで失敗する。
+      // windowCaptureWindowNotFound 通知付きで失敗する。
       // 「映像ゼロのまま成功しない」ことを検証する (回帰テスト)。
       final env = loadE2eEnvironment();
       final channelId = buildChannelId(
@@ -581,8 +581,8 @@ void main() {
         );
         expect(
           sender.errors.last.code,
-          SoraErrorCode.windowCaptureError,
-          reason: '再接続の失敗が window_capture_error として通知されること。',
+          SoraErrorCode.windowCaptureWindowNotFound,
+          reason: '再接続の失敗がウィンドウ不在として通知されること。',
         );
       } catch (e) {
         bodyError = e;

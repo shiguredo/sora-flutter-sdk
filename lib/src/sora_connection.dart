@@ -1096,6 +1096,9 @@ class SoraConnection {
       final code = track.captureType == VideoTrackCaptureType.window
           ? _windowCaptureErrorCodeFromError(e)
           : SoraErrorCode.cameraOpenError;
+      // 開始失敗は接続の再試行で回復できるため retriable は true にする。
+      // 実行中のウィンドウ消失などは window_capture_error イベント経由で
+      // retriable: false として通知される。
       _emitConnectionErrorEvent(
         code: code,
         message: 'Failed to apply video capture backend: $e',
@@ -1400,10 +1403,13 @@ class SoraConnection {
     }
     if (type == 'window_capture_error') {
       final message = event['message'] as String?;
+      // 実行中のウィンドウ消失や SCStream エラーは、再接続しても回復しない
+      // ため retriable は false にする。開始失敗 (capture backend 適用時) は
+      // 別経路で retriable: true として通知される。
       _emitConnectionErrorEvent(
         code: SoraErrorCode.windowCaptureError,
         message: message ?? 'Window capture error',
-        retriable: true,
+        retriable: false,
       );
       return;
     }

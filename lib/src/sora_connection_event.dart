@@ -41,6 +41,10 @@ final class SoraConnectionErrorEvent extends SoraConnectionEvent {
   final String? message;
 
   /// リトライ可能かどうか。
+  ///
+  /// 接続の再試行で回復できるエラー (capture backend の開始失敗など) は
+  /// true、再接続しても回復しないエラー (キャプチャ実行中のウィンドウ消失
+  /// など) は false になる。
   final bool? retriable;
 
   /// エラーの詳細情報。

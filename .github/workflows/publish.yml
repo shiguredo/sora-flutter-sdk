@@ -1,30 +1,61 @@
-# 一時停止中。pub.dev の公開先が整うまで自動公開を行わない。
+# バージョンタグの push で pub.dev に公開する。
+# canary 版のみ CHANGELOG 未記載の警告を無視する。安定版では警告をエラー扱いにする。
 name: pub.dev に公開
 
 on:
-  # 自動公開を停止している間も workflow の定義を有効に保つため、手動起動だけを残す。
-  workflow_dispatch:
-  # pub.dev の公開先が整ったら、以下の push フックだけを有効にする。
-  #   push:
-  #     tags:
-  #       # pub.dev 側の tag pattern は {{version}} に合わせる。
-  #       # 安定版: 2026.0.0 / canary: 2026.1.0-canary.0 形式。
-  #       # GitHub 側ではこの形式のタグを保護し、作成権限を制限する。
-  #       - "[0-9]+.[0-9]+.[0-9]+"
-  #       - "[0-9]+.[0-9]+.[0-9]+-canary.[0-9]+"
+  push:
+    tags:
+      # pub.dev 側の tag pattern は {{version}} に合わせる。
+      # 安定版: 2026.0.0 / canary: 2026.1.0-canary.0 形式。
+      # GitHub 側ではこの形式のタグを保護し、作成権限を制限する。
+      - "[0-9]+.[0-9]+.[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+-canary.[0-9]+"
 
 permissions:
   contents: read
 
 jobs:
   publish:
-    # 手動起動ではタグがないため、公開処理を実行しない。
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
-    # pub.dev の OIDC 認証とリポジトリ checkout に必要な権限。
+    name: Publish to pub.dev
+    # pub.dev の OIDC 認証と環境保護ルール用。
+    environment: pub.dev
     permissions:
       contents: read
       id-token: write
-    uses: dart-lang/setup-dart/.github/workflows/publish.yml@v1
-    with:
-      # 必要なレビュアーを GitHub 側の環境保護ルールで指定できるようにする。
-      environment: pub.dev
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # OIDC トークン取得に必要。dart-lang/setup-dart の publish workflow と同じ pin を使う。
+      - uses: dart-lang/setup-dart@7654d458321ee25acccccfdb86cd48bd95768ff1
+
+      # Flutter パッケージの公開に必要。dart-lang/setup-dart の publish workflow と同じ pin を使う。
+      - uses: flutter-actions/setup-flutter@6e2468fd827c4a7337cd4b835a6049b78bc0bd1f
+
+      - name: canary 版か判定する
+        id: release
+        run: |
+          if [[ "${{ github.ref_name }}" =~ -canary\.[0-9]+$ ]]; then
+            echo "ignore_warnings=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ignore_warnings=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Publish - dry run
+        run: |
+          args=(pub publish --dry-run)
+          if [[ "${{ steps.release.outputs.ignore_warnings }}" == "true" ]]; then
+            args+=(--ignore-warnings)
+          fi
+          dart "${args[@]}"
+
+      - name: Publish to pub.dev
+        run: |
+          args=(pub publish --force)
+          if [[ "${{ steps.release.outputs.ignore_warnings }}" == "true" ]]; then
+            args+=(--ignore-warnings)
+          fi
+          dart "${args[@]}"

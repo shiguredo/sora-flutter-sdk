@@ -1,6 +1,6 @@
 name: sora_sdk
 description: Flutter plugin for Sora powered by libwebrtc-c.
-version: 2026.0.0
+version: 2026.1.0-canary.0
 repository: https://github.com/shiguredo/sora-flutter-sdk
 homepage: https://sora-flutter-sdk.shiguredo.jp/
 topics:

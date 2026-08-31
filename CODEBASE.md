@@ -12,10 +12,15 @@
 - 形式は `shiguredo-changelog` スキルの記法（`[CHANGE]` / `[ADD]` / `[UPDATE]` / `[FIX]`、`## develop` など）に従う
 - pub.dev 公開時は、`pubspec.yaml` の `version` と **同じ文字列** が `CHANGELOG.md` 内に含まれている必要がある
 
+## pub.dev 公開
+
+タグ push で `.github/workflows/publish.yml` が pub.dev に公開する。canary 版タグ（`-canary.N` 付き）のみ CHANGELOG 未記載の警告を無視する。
+
+- canary 版: `canary.py` でバージョン更新とタグ push
+- 安定版: git flow release でバージョン確定とタグ push
+
 ## 正式リリース前
 
 **正式リリース前**
 
 - 正式リリース前は変更履歴を `CHANGELOG.md` に残さないこと
-- 正式リリース前は Pull-Request を作らずブランチ作成から CI が通ったら develop にコミットしていくこと
-  - 1 Issue 1 コミット 1 プッシュ

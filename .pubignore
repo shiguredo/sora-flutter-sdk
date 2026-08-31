@@ -1,0 +1,30 @@
+# 検証用アプリ
+devtools/
+
+# E2E テスト用アプリ
+e2e_test_app/
+
+# issue 管理ファイル
+issues/
+
+# LLM 用スキル
+skills/
+
+# 開発者向けドキュメント
+docs/
+
+# 開発用ツール設定
+prek.toml
+
+# リリース作業用ファイル
+AGENTS.md
+canary.py
+sora-sdk-release-schedule.md
+__pycache__/
+*.py[cod]
+
+# ローカルの Dart / Flutter 生成物
+build/
+
+# ローカルのネイティブビルド生成物
+third_party/

@@ -1,0 +1,123 @@
+exclude = { glob = [
+  "build/**",
+  "devtools/build/**",
+  ".dart_tool/**",
+  ".artifacts/**",
+  "android/.cxx/**",
+  "third_party/**",
+] }
+
+[[repos]]
+repo = "builtin"
+hooks = [
+  { id = "trailing-whitespace" },
+  { id = "end-of-file-fixer" },
+  { id = "check-yaml", args = ["--allow-multiple-documents"] },
+  { id = "check-toml" },
+]
+
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "dart-format"
+name = "dart format"
+language = "system"
+entry = "dart format"
+files = "^(lib|test)/.*\\.dart$"
+
+[[repos.hooks]]
+id = "flutter-analyze"
+name = "flutter analyze"
+language = "system"
+entry = "env -u GIT_DIR -u GIT_INDEX_FILE flutter analyze --fatal-infos lib test"
+pass_filenames = false
+files = "^(lib|test)/.*\\.dart$"
+
+[[repos.hooks]]
+id = "dart-format-scripts"
+name = "dart format (scripts)"
+language = "system"
+entry = "dart format"
+files = "^scripts/.*\\.dart$"
+
+[[repos.hooks]]
+id = "flutter-analyze-scripts"
+name = "flutter analyze (scripts)"
+language = "system"
+entry = "flutter analyze --fatal-infos scripts"
+pass_filenames = false
+files = "^scripts/.*\\.dart$"
+
+[[repos.hooks]]
+id = "dart-format-devtools"
+name = "dart format (devtools)"
+language = "system"
+entry = "dart format"
+files = "^devtools/(lib|test)/.*\\.dart$"
+
+[[repos.hooks]]
+id = "flutter-analyze-devtools"
+name = "flutter analyze (devtools)"
+language = "system"
+entry = "dart run scripts/copy_env_and_analyze_devtools.dart"
+pass_filenames = false
+files = "^devtools/(lib|test)/.*\\.dart$"
+
+[[repos.hooks]]
+id = "swift-format"
+name = "swift format"
+language = "system"
+entry = "swift format --in-place"
+files = "\\.swift$"
+exclude = { glob = [
+  "devtools/macos/Flutter/**",
+  "**/GeneratedPluginRegistrant.swift",
+] }
+
+[[repos.hooks]]
+id = "swift-format-lint"
+name = "swift format lint"
+language = "system"
+entry = "swift format lint --strict"
+files = "\\.swift$"
+exclude = { glob = [
+  "devtools/macos/Flutter/**",
+  "**/GeneratedPluginRegistrant.swift",
+] }
+
+[[repos.hooks]]
+id = "swiftlint"
+name = "swiftlint"
+language = "system"
+entry = "swiftlint lint --strict --config .swiftlint.yml"
+pass_filenames = false
+files = "\\.swift$"
+
+[[repos.hooks]]
+id = "ktlint-format"
+name = "ktlint format"
+language = "system"
+entry = "ktlint --relative --format"
+files = "\\.(kt|kts)$"
+
+[[repos.hooks]]
+id = "ktlint-check"
+name = "ktlint check"
+language = "system"
+entry = "ktlint --relative"
+files = "\\.(kt|kts)$"
+
+[[repos.hooks]]
+id = "clang-format"
+name = "clang format"
+language = "system"
+entry = "clang-format -i -style=file -fallback-style=none"
+files = "\\.(c|cc|h)$"
+
+[[repos.hooks]]
+id = "clang-format-check"
+name = "clang format check"
+language = "system"
+entry = "clang-format --dry-run --Werror -style=file -fallback-style=none"
+files = "\\.(c|cc|h)$"

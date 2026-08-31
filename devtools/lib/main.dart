@@ -1,0 +1,2534 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:sora_sdk/sora_sdk.dart';
+import 'configs/environment.dart';
+import 'src/devtools_connection_controller.dart';
+import 'src/devtools_connection_subscription_controller.dart';
+import 'src/devtools_constants.dart';
+import 'src/devtools_external_camera_manager.dart';
+import 'src/devtools_event_handler.dart';
+import 'src/devtools_input_validation.dart';
+import 'src/devtools_local_preview_policy.dart';
+import 'src/devtools_log_panel.dart';
+import 'src/devtools_logging_support.dart';
+import 'src/devtools_media_devices_support.dart';
+import 'src/devtools_message_panel.dart';
+import 'src/devtools_message_send_policy.dart';
+import 'src/devtools_models.dart';
+import 'src/devtools_settings_sections.dart';
+import 'src/devtools_track_state.dart';
+import 'src/devtools_video_panel.dart';
+
+/// Sora SDK DevTools アプリのエントリポイント。
+///
+/// 接続設定、media device 選択、RPC 実行、ログ表示を 1 画面で扱う
+
+/// 開発用 UI を起動する。
+void main() {
+  runApp(const DevToolsApp());
+}
+
+/// DevTools アプリ全体の theme と home 画面を定義する。
+class DevToolsApp extends StatelessWidget {
+  const DevToolsApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Sora SDK DevTools',
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueGrey),
+      ),
+      home: const DevToolsPage(),
+    );
+  }
+}
+
+/// DevTools の単一画面を表す root widget。
+class DevToolsPage extends StatefulWidget {
+  const DevToolsPage({super.key});
+
+  @override
+  State<DevToolsPage> createState() => _DevToolsPageState();
+}
+
+// DevTools 画面の状態と接続制御を保持する。
+//
+// UI 部品自体は `src/` 配下へ分割し、この state では接続ライフサイクル、
+// media device 選択、ログ蓄積、各 section への値受け渡しを担当する。
+class _DevToolsPageState extends State<DevToolsPage>
+    with TickerProviderStateMixin {
+  // SDK 内部呼び出し用の MethodChannel。
+  static const MethodChannel _sdkMethodChannel = MethodChannel(
+    'sora_sdk/method',
+  );
+  // 権限要求用の MethodChannel。
+  static const MethodChannel _permissionChannel = MethodChannel(
+    'devtools/permissions',
+  );
+  // signaling URL 入力欄の TextEditingController。
+  late final TextEditingController _signalingUrlController;
+  // channel ID 入力欄の TextEditingController。
+  late final TextEditingController _channelIdController;
+  // client ID 入力欄の TextEditingController。
+  late final TextEditingController _clientIdController;
+  // bundle ID 入力欄の TextEditingController。
+  late final TextEditingController _bundleIdController;
+  // connect metadata 入力欄の TextEditingController。
+  late final TextEditingController _metadataController;
+  // signaling notify metadata 入力欄の TextEditingController。
+  late final TextEditingController _signalingNotifyMetadataController;
+  // 音声ビットレート (kbps) 入力欄の TextEditingController。
+  late final TextEditingController _audioBitRateController;
+  // VP9 追加パラメータ入力欄の TextEditingController。
+  late final TextEditingController _videoVp9ParamsController;
+  // H.264 追加パラメータ入力欄の TextEditingController。
+  late final TextEditingController _videoH264ParamsController;
+  // H.265 追加パラメータ入力欄の TextEditingController。
+  late final TextEditingController _videoH265ParamsController;
+  // AV1 追加パラメータ入力欄の TextEditingController。
+  late final TextEditingController _videoAv1ParamsController;
+  // forwarding filters 入力欄の TextEditingController。
+  late final TextEditingController _forwardingFiltersController;
+  // 接続確立タイムアウト入力欄の TextEditingController。
+  late final TextEditingController _connectionTimeoutController;
+  // 切断待機タイムアウト入力欄の TextEditingController。
+  late final TextEditingController _disconnectWaitTimeoutController;
+  // signaling candidate タイムアウト入力欄の TextEditingController。
+  late final TextEditingController _signalingCandidateTimeoutController;
+  // RPC params 入力欄の TextEditingController。
+  late final TextEditingController _rpcParamsController;
+  // RPC timeout 入力欄の TextEditingController。
+  late final TextEditingController _rpcTimeoutController;
+  // ログ検索欄の TextEditingController。
+  late final TextEditingController _logSearchController;
+  late final ScrollController _logScrollController;
+  final GlobalKey<FormState> _connectionFormKey = GlobalKey<FormState>();
+  bool _followLatestLogs = true;
+  // 画面状態の SSOT (ChangeNotifier)。
+  late final DevToolsPageNotifier _pageNotifier;
+  // 接続イベント購読の bind / unbind を管理する。
+  late final DevToolsConnectionSubscriptionController
+  _connectionSubscriptionController;
+  // 接続生成・切断・RPC・preview 等の SDK 呼び出しを担当する。
+  late final DevToolsConnectionController _connectionController;
+  // 接続イベント・debug イベントを画面状態とログへ反映する。
+  late final DevToolsEventHandler _eventHandler;
+
+  // 現在の SoraConnection。接続中のみ非 null。
+  SoraConnection? _connection;
+  // 現在の LocalMediaStream。接続中または preview 表示中のみ非 null。
+  LocalMediaStream? _localStream;
+  // タブ切り替え用の TabController。
+  late final TabController _tabController;
+
+  // external video track モード用の状態
+  bool _useExternalVideoTrack = false;
+  // external camera のライフサイクル管理。
+  late final DevToolsExternalCameraManager _cameraManager;
+  // 非同期の camera format 取得結果を最新選択だけに反映するための世代番号。
+  int _videoInputFormatGeneration = 0;
+
+  // DataChannel signaling を有効にするかどうか。
+  bool _dataChannelSignalingEnabled = false;
+  // dataChannels 設定を接続設定へ含めるかどうか。
+  bool _dataChannelsEnabled = false;
+  // WebSocket 切断通知を無視するかどうか。
+  bool _ignoreDisconnectWebSocketEnabled = false;
+  // Beep Audio の既存挙動を保つため、未選択時は Beep Audio 設定から音声デバイス
+  // の利用可否を導出する。明示選択後は Beep Audio と独立してその値を利用する。
+  bool? _useAudioDeviceOverride;
+  // 共有 PeerConnectionFactory を初期化した後は音声デバイス設定を変更できない。
+  bool _useAudioDeviceSettingLocked = false;
+  // 現在選択中の音声コーデックを保持する。
+  String? _selectedAudioCodecType;
+  // Video Codec 選択肢。起動時に Sora.supportedVideoCodecTypes から動的に取得する。
+  List<String> _videoCodecTypeOptions = DevToolsConstants.videoCodecTypeOptions;
+  // DataChannel label 入力欄の TextEditingController。
+  late final TextEditingController _dataChannelLabelController;
+  // DataChannel の送受信方向 (sendrecv / sendonly / recvonly)。
+  String _dataChannelDirection = 'sendrecv';
+  // 順序保証の有無。
+  bool _dataChannelOrdered = true;
+  // メッセージ圧縮の有無。
+  bool _dataChannelCompress = false;
+  // max_packet_life_time (ms)。順序保証なしの場合のみ使用。
+  int _dataChannelMaxPacketLifeTime = 10;
+  // max_packet_life_time 入力欄の TextEditingController。
+  late final TextEditingController _dataChannelMaxPacketLifeTimeController;
+
+  // SoraConnection の状態を表す。接続状態、remote track 一覧、local preview の
+  // texture ID などの画面状態は notifier 側へ保持する。
+  SoraConnectionState get _state => _pageNotifier.state;
+  set _state(SoraConnectionState value) => _pageNotifier.state = value;
+
+  // 切断時に受け取った close code / reason を保持する。
+  SoraDisconnectCloseInfo? get _disconnectCloseInfo =>
+      _pageNotifier.disconnectCloseInfo;
+  set _disconnectCloseInfo(SoraDisconnectCloseInfo? value) =>
+      _pageNotifier.disconnectCloseInfo = value;
+
+  // 接続エラーコードを保持する。
+  String? get _connectionErrorCode => _pageNotifier.connectionErrorCode;
+
+  // 接続エラーメッセージを保持する。
+  String? get _connectionErrorMessage => _pageNotifier.connectionErrorMessage;
+
+  // 受信中のリモート映像トラック一覧を保持する。
+  List<RemoteMediaStreamTrack> get _remoteVideos => _pageNotifier.remoteVideos;
+  // 受信中のリモート音声トラック一覧を保持する。
+  List<RemoteMediaStreamTrack> get _remoteAudios => _pageNotifier.remoteAudios;
+  // リモート接続先の補助情報を保持する。
+  List<DevToolsRemoteClientInfo> get _remoteClients =>
+      _pageNotifier.remoteClients;
+
+  // ローカルプレビューに使う texture ID を保持する。
+  int? get _localTextureId => _pageNotifier.localTextureId;
+  set _localTextureId(int? value) => _pageNotifier.localTextureId = value;
+
+  // 接続・切断・切り替えなどの進行中フラグを保持する。
+  bool get _busy => _pageNotifier.busy;
+  set _busy(bool value) => _pageNotifier.busy = value;
+
+  // アプリログを保持する。
+  List<String> get _logs => _pageNotifier.logs;
+  // イベントログを保持する。
+  List<String> get _eventLogs => _pageNotifier.eventLogs;
+  // timeline ログを保持する。
+  List<String> get _timelineLogs => _pageNotifier.timelineLogs;
+  // stats ログを保持する。
+  List<String> get _statsLogs => _pageNotifier.statsLogs;
+
+  // PeerConnection state の表示文字列を保持する。
+  String get _peerConnectionStateLabel =>
+      _pageNotifier.peerConnectionStateLabel;
+  set _peerConnectionStateLabel(String value) =>
+      _pageNotifier.peerConnectionStateLabel = value;
+
+  // ICE state の表示文字列を保持する。
+  String get _iceStateLabel => _pageNotifier.iceStateLabel;
+  set _iceStateLabel(String value) => _pageNotifier.iceStateLabel = value;
+
+  // DTLS state の表示文字列を保持する。
+  String get _dtlsStateLabel => _pageNotifier.dtlsStateLabel;
+  set _dtlsStateLabel(String value) => _pageNotifier.dtlsStateLabel = value;
+
+  // ログ画面で選択中のタブを保持する。
+  DevToolsLogTab get _selectedLogTab => _pageNotifier.selectedLogTab;
+  set _selectedLogTab(DevToolsLogTab value) =>
+      _pageNotifier.selectedLogTab = value;
+
+  // ローカルプレビューの水平反転設定。
+  bool get _localPreviewMirror => _pageNotifier.localPreviewMirror;
+  set _localPreviewMirror(bool value) =>
+      _pageNotifier.localPreviewMirror = value;
+
+  // 接続中 audio track の enabled 状態を保持する。
+  bool get _audioEnabled => _pageNotifier.audioEnabled;
+  set _audioEnabled(bool value) => _pageNotifier.audioEnabled = value;
+
+  // 接続中 video track の enabled 状態を保持する。
+  bool get _videoEnabled => _pageNotifier.videoEnabled;
+  set _videoEnabled(bool value) => _pageNotifier.videoEnabled = value;
+
+  // connect 時に audio を送るかどうかを保持する。
+  bool get _connectAudio => _pageNotifier.connectAudio;
+
+  // connect 時に video を送るかどうかを保持する。
+  bool get _connectVideo => _pageNotifier.connectVideo;
+
+  // beep 音声送信が有効かどうかを保持する。
+  bool get _beepAudioEnabled => _pageNotifier.beepAudioEnabled;
+  set _beepAudioEnabled(bool value) => _pageNotifier.beepAudioEnabled = value;
+
+  // 現在選択中の role を保持する。
+  SoraRole get _selectedRole => _pageNotifier.selectedRole;
+  set _selectedRole(SoraRole value) => _pageNotifier.selectedRole = value;
+
+  // 列挙した映像入力デバイス一覧を保持する。
+  List<VideoInputDevice> get _videoInputDevices =>
+      _pageNotifier.videoInputDevices;
+  set _videoInputDevices(List<VideoInputDevice> value) =>
+      _pageNotifier.videoInputDevices = value;
+
+  // 現在選択中の映像入力デバイスを保持する。
+  VideoInputDevice? get _selectedVideoInputDevice =>
+      _pageNotifier.selectedVideoInputDevice;
+  set _selectedVideoInputDevice(VideoInputDevice? value) =>
+      _pageNotifier.selectedVideoInputDevice = value;
+
+  // 列挙した音声入力デバイス一覧を保持する。
+  List<AudioInputDevice> get _audioInputDevices =>
+      _pageNotifier.audioInputDevices;
+  set _audioInputDevices(List<AudioInputDevice> value) =>
+      _pageNotifier.audioInputDevices = value;
+
+  // 現在選択中の音声入力デバイスを保持する。
+  AudioInputDevice? get _selectedAudioInputDevice =>
+      _pageNotifier.selectedAudioInputDevice;
+  set _selectedAudioInputDevice(AudioInputDevice? value) =>
+      _pageNotifier.selectedAudioInputDevice = value;
+
+  // 列挙した音声出力デバイス一覧を保持する。
+  List<AudioOutputDevice> get _audioOutputDevices =>
+      _pageNotifier.audioOutputDevices;
+  set _audioOutputDevices(List<AudioOutputDevice> value) =>
+      _pageNotifier.audioOutputDevices = value;
+
+  // 現在選択中の音声出力デバイスを保持する。
+  AudioOutputDevice? get _selectedAudioOutputDevice =>
+      _pageNotifier.selectedAudioOutputDevice;
+  set _selectedAudioOutputDevice(AudioOutputDevice? value) =>
+      _pageNotifier.selectedAudioOutputDevice = value;
+
+  // 選択可能な映像入力解像度一覧を保持する。
+  List<DevToolsVideoInputResolutionOption> get _videoInputResolutions =>
+      _pageNotifier.videoInputResolutions;
+  set _videoInputResolutions(List<DevToolsVideoInputResolutionOption> value) =>
+      _pageNotifier.videoInputResolutions = value;
+
+  // 現在選択中の映像入力解像度を保持する。
+  DevToolsVideoInputResolutionOption? get _selectedResolution =>
+      _pageNotifier.selectedResolution;
+  set _selectedResolution(DevToolsVideoInputResolutionOption? value) =>
+      _pageNotifier.selectedResolution = value;
+
+  // 現在選択中のフレームレートを保持する。
+  int? get _selectedFrameRate => _pageNotifier.selectedFrameRate;
+  set _selectedFrameRate(int? value) => _pageNotifier.selectedFrameRate = value;
+
+  // 現在選択中の映像コーデックを保持する。
+  String? get _selectedVideoCodecType => _pageNotifier.selectedVideoCodecType;
+  set _selectedVideoCodecType(String? value) =>
+      _pageNotifier.selectedVideoCodecType = value;
+
+  // 現在選択中の映像ビットレート (kbps) を保持する。
+  int? get _selectedVideoBitRate => _pageNotifier.selectedVideoBitRate;
+  set _selectedVideoBitRate(int? value) =>
+      _pageNotifier.selectedVideoBitRate = value;
+
+  // simulcast の有効状態を保持する。
+  bool get _simulcastEnabled => _pageNotifier.simulcastEnabled;
+  set _simulcastEnabled(bool value) => _pageNotifier.simulcastEnabled = value;
+
+  // 現在選択中の simulcast request RID を保持する。
+  String? get _selectedSimulcastRid => _pageNotifier.selectedSimulcastRid;
+  set _selectedSimulcastRid(String? value) =>
+      _pageNotifier.selectedSimulcastRid = value;
+
+  // spotlight の有効状態を保持する。
+  bool get _spotlightEnabled => _pageNotifier.spotlightEnabled;
+  set _spotlightEnabled(bool value) => _pageNotifier.spotlightEnabled = value;
+
+  // 現在選択中の spotlight focus RID を保持する。
+  String? get _selectedSpotlightFocusRid =>
+      _pageNotifier.selectedSpotlightFocusRid;
+  set _selectedSpotlightFocusRid(String? value) =>
+      _pageNotifier.selectedSpotlightFocusRid = value;
+
+  // 現在選択中の spotlight unfocus RID を保持する。
+  String? get _selectedSpotlightUnfocusRid =>
+      _pageNotifier.selectedSpotlightUnfocusRid;
+  set _selectedSpotlightUnfocusRid(String? value) =>
+      _pageNotifier.selectedSpotlightUnfocusRid = value;
+
+  // 現在選択中の RPC method を保持する。
+  String? get _selectedRpcMethod => _pageNotifier.selectedRpcMethod;
+  set _selectedRpcMethod(String? value) =>
+      _pageNotifier.selectedRpcMethod = value;
+
+  // RPC を notification として送るかどうかを保持する。
+  bool get _rpcNotification => _pageNotifier.rpcNotification;
+  set _rpcNotification(bool value) => _pageNotifier.rpcNotification = value;
+
+  // signaling URL 入力欄の現在値を返す。
+  String get _signalingUrl => _signalingUrlController.text.trim();
+
+  // 改行区切りで入力された signaling URL 一覧を返す。
+  List<String> get _signalingUrls => parseSignalingUrls(_signalingUrl);
+
+  // client ID 入力欄の現在値を返す。空欄は未指定として扱う。
+  String? get _clientId => _optionalText(_clientIdController);
+
+  // bundle ID 入力欄の現在値を返す。空欄は未指定として扱う。
+  String? get _bundleId => _optionalText(_bundleIdController);
+
+  // Beep Audio との後方互換用既定値またはユーザー選択値を返す。
+  // Android は SDK が常に実音声デバイスを利用するため true を返す。
+  bool get _useAudioDevice =>
+      Platform.isAndroid ? true : _useAudioDeviceOverride ?? !_beepAudioEnabled;
+
+  // channel ID 入力欄の現在値を返す。
+  String get _channelId => _channelIdController.text.trim();
+
+  // RPC params 入力欄の現在値を返す。
+  String get _rpcParamsText => _rpcParamsController.text;
+
+  // RPC timeout 入力欄の現在値を返す。
+  String get _rpcTimeoutText => _rpcTimeoutController.text;
+
+  // 空欄を null として TextEditingController の値を返す。
+  String? _optionalText(TextEditingController controller) {
+    final value = controller.text.trim();
+    return value.isEmpty ? null : value;
+  }
+
+  // 確認ダイアログでは metadata の実値を露出させず、設定有無と JSON 型だけを表示する。
+  String _jsonSettingSummary(String value) {
+    final text = value.trim();
+    if (text.isEmpty) {
+      return '未指定';
+    }
+    final decoded = jsonDecode(text);
+    return switch (decoded) {
+      Map() => 'JSON object',
+      List() => 'JSON array',
+      String() => 'JSON string',
+      num() => 'JSON number',
+      bool() => 'JSON boolean',
+      null => 'JSON null',
+      _ => 'JSON value',
+    };
+  }
+
+  // 入力欄の timeout 値を SDK へ渡す実効値へ変換する。
+  SoraTimeoutOptions get _timeoutOptions {
+    return SoraTimeoutOptions(
+      connectionTimeout: Duration(
+        seconds: int.tryParse(_connectionTimeoutController.text.trim()) ?? 30,
+      ),
+      disconnectWaitTimeout: Duration(
+        seconds:
+            int.tryParse(_disconnectWaitTimeoutController.text.trim()) ?? 10,
+      ),
+      signalingCandidateTimeout: Duration(
+        seconds:
+            int.tryParse(_signalingCandidateTimeoutController.text.trim()) ?? 5,
+      ),
+    );
+  }
+
+  // 共有 PeerConnectionFactory の初期化前に音声デバイス設定を固定する。
+  //
+  // 初期化後に異なる値を SDK へ渡すと StateError になるため、Beep Audio の変更で
+  // 既定値が変わらないよう明示値として保存する。
+  void _lockUseAudioDeviceSetting() {
+    if (_useAudioDeviceSettingLocked) {
+      return;
+    }
+    final useAudioDevice = _useAudioDevice;
+    _mutateView(() {
+      _useAudioDeviceOverride = useAudioDevice;
+      _useAudioDeviceSettingLocked = true;
+    });
+  }
+
+  // データチャネルメッセージング関連。
+  List<DevToolsMessageEntry> get _messages => _pageNotifier.messages;
+
+  // dataChannels の label まで設定済みかどうか。
+  bool get _hasDataChannelConfig =>
+      _dataChannelsEnabled &&
+      _dataChannelLabelController.text.trim().isNotEmpty;
+
+  // open 済み custom DataChannel にだけメッセージを送信する。
+  bool get _canSendMessage => canSendDataChannelMessage(
+    isConnected: _isConnected,
+    hasConnection: _connection != null,
+    dataChannelsEnabled: _dataChannelsEnabled,
+    hasDataChannelConfig: _hasDataChannelConfig,
+    label: _dataChannelLabelController.text.trim(),
+    openedDataChannelLabels: _pageNotifier.openedDataChannelLabels,
+  );
+
+  // メッセージを送信できない場合に表示する次の操作。
+  String? get _messageSendGuidance => buildDataChannelMessageSendGuidance(
+    isConnected: _isConnected,
+    dataChannelsEnabled: _dataChannelsEnabled,
+    hasDataChannelConfig: _hasDataChannelConfig,
+    label: _dataChannelLabelController.text.trim(),
+    openedDataChannelLabels: _pageNotifier.openedDataChannelLabels,
+  );
+
+  // DataChannel 設定が有効な場合、接続用の Map リストを生成する。
+  List<Map<String, Object?>> _buildDataChannelConfigs() {
+    final label = _dataChannelLabelController.text.trim();
+    if (!_dataChannelsEnabled || label.isEmpty) {
+      return const <Map<String, Object?>>[];
+    }
+    return <Map<String, Object?>>[
+      <String, Object?>{
+        'label': label,
+        'direction': _dataChannelDirection,
+        'ordered': _dataChannelOrdered,
+        if (!_dataChannelOrdered)
+          'max_packet_life_time':
+              int.tryParse(_dataChannelMaxPacketLifeTimeController.text) ??
+              _dataChannelMaxPacketLifeTime,
+        'compress': _dataChannelCompress,
+      },
+    ];
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // タブ切り替えのアニメーション制御。
+    _tabController = TabController(length: _tabs.length, vsync: this);
+    // 画面状態の ChangeNotifier。全 UI はこれを listen する。
+    _pageNotifier = DevToolsPageNotifier();
+    // 接続イベント購読の bind / unbind を管理する。
+    // callback は _eventHandler.handleEvent / handleDebugEvent へ転送する。
+    _connectionSubscriptionController =
+        DevToolsConnectionSubscriptionController(
+          isMounted: () => mounted,
+          onEvent: (event) => _eventHandler.handleEvent(event),
+          onDebugEvent: (event) => _eventHandler.handleDebugEvent(event),
+          onLocalVideo: (video) {
+            _appendEventLog('local_video_ready: textureId=${video.textureId}');
+            _mutateView(() {
+              _localTextureId = video.textureId;
+            });
+          },
+          onDebugMessage: (message) {
+            _consumeDebugState(message);
+            _appendLog(message);
+          },
+        );
+    // 接続生成・切断・RPC・preview 等の SDK 呼び出しを担当する。
+    _connectionController = DevToolsConnectionController(
+      pageNotifier: _pageNotifier,
+      sdkMethodChannel: _sdkMethodChannel,
+      permissionChannel: _permissionChannel,
+      subscriptionController: _connectionSubscriptionController,
+      appendLog: _appendLog,
+      appendEventLog: _appendEventLog,
+      disposeLocalStream: _disposeLocalStream,
+    );
+    // プラットフォームがサポートする Video Codec 一覧を動的に取得する。
+    try {
+      final codecTypes = Sora.supportedVideoCodecTypes;
+      _videoCodecTypeOptions = codecTypes
+          .map((e) => e.value)
+          .toList(growable: false);
+    } catch (_) {
+      // 取得失敗時は DevToolsConstants.videoCodecTypeOptions を fallback として使う。
+    }
+
+    // SDK イベントを画面状態とログへ反映する。
+    _eventHandler = DevToolsEventHandler(
+      pageNotifier: _pageNotifier,
+      mutateView: _mutateView,
+      appendEventLog: _appendEventLog,
+      appendTimelineLog: _appendTimelineLog,
+      updateRemoteClients: _updateRemoteClients,
+      connectionController: _connectionController,
+      buildRpcTemplateRequest: _buildRpcTemplateRequest,
+      setRpcParamsText: (text) {
+        _rpcParamsController.text = text;
+      },
+      onDataChannelOpen: (label) {
+        _mutateView(() {
+          _pageNotifier.markDataChannelOpen(label);
+        });
+      },
+      onDataChannelMessage: (entry) {
+        _mutateView(() {
+          _pageNotifier.addReceivedMessage(entry);
+        });
+      },
+    );
+    // external video track 用のカメラ管理。
+    _cameraManager = DevToolsExternalCameraManager(onLog: _appendLog);
+    // camera plugin を利用できない platform では External Video Track を無効化する。
+    if (!_supportsExternalVideoTrack) {
+      _useExternalVideoTrack = false;
+    }
+    // シグナリング URL は改行区切りで全候補を初期表示する。
+    _signalingUrlController = TextEditingController(
+      text: Environment.urls.join('\n'),
+    );
+    // チャネル ID 入力欄の TextEditingController。
+    _channelIdController = TextEditingController(text: Environment.channelId);
+    _clientIdController = TextEditingController();
+    _bundleIdController = TextEditingController();
+    _metadataController = TextEditingController();
+    _signalingNotifyMetadataController = TextEditingController();
+    _audioBitRateController = TextEditingController();
+    _videoVp9ParamsController = TextEditingController();
+    _videoH264ParamsController = TextEditingController();
+    _videoH265ParamsController = TextEditingController();
+    _videoAv1ParamsController = TextEditingController();
+    _forwardingFiltersController = TextEditingController();
+    _connectionTimeoutController = TextEditingController(text: '30');
+    _disconnectWaitTimeoutController = TextEditingController(text: '10');
+    _signalingCandidateTimeoutController = TextEditingController(text: '5');
+    // RPC リクエストパラメータ入力欄の TextEditingController。
+    _rpcParamsController = TextEditingController(text: '{}');
+    // RPC リクエスト時のタイムアウト入力欄の TextEditingController。
+    _rpcTimeoutController = TextEditingController(text: '5000');
+    _logSearchController = TextEditingController();
+    _logScrollController = ScrollController();
+    // DataChannel リアルタイムメッセージングのラベル入力欄の TextEditingController。
+    _dataChannelLabelController = TextEditingController(text: '#chat');
+    // DataChannel リアルタイムメッセージングの max_packet_life_time 入力欄の TextEditingController。
+    _dataChannelMaxPacketLifeTimeController = TextEditingController(text: '10');
+    // デバイス一覧を読み込む。
+    _loadVideoInputDevices();
+    _loadAudioDevices();
+  }
+
+  @override
+  void dispose() {
+    final connection = _connection;
+    _connection = null;
+    final localStream = _localStream;
+    _localStream = null;
+    // State.dispose は await できないため、購読を先に無効化してから cleanup を開始する。
+    unawaited(_disposeAfterUnmount(connection, localStream));
+    _signalingUrlController.dispose();
+    _channelIdController.dispose();
+    _clientIdController.dispose();
+    _bundleIdController.dispose();
+    _metadataController.dispose();
+    _signalingNotifyMetadataController.dispose();
+    _audioBitRateController.dispose();
+    _videoVp9ParamsController.dispose();
+    _videoH264ParamsController.dispose();
+    _videoH265ParamsController.dispose();
+    _videoAv1ParamsController.dispose();
+    _forwardingFiltersController.dispose();
+    _connectionTimeoutController.dispose();
+    _disconnectWaitTimeoutController.dispose();
+    _signalingCandidateTimeoutController.dispose();
+    _rpcParamsController.dispose();
+    _rpcTimeoutController.dispose();
+    _logSearchController.dispose();
+    _logScrollController.dispose();
+    _dataChannelLabelController.dispose();
+    _dataChannelMaxPacketLifeTimeController.dispose();
+    _tabController.dispose();
+    _pageNotifier.dispose();
+    super.dispose();
+  }
+
+  // unmount 後に connection と media を順序付きで解放する。
+  Future<void> _disposeAfterUnmount(
+    SoraConnection? connection,
+    LocalMediaStream? localStream,
+  ) async {
+    try {
+      await _cameraManager.stop();
+    } catch (error) {
+      _appendLog('connection cleanup: camera stop failed error=$error');
+    }
+    try {
+      await _connectionController.disposeConnectionResources(
+        connection: connection,
+        localStream: localStream,
+      );
+    } catch (error) {
+      _appendLog('connection cleanup: resources dispose failed error=$error');
+    } finally {
+      try {
+        await _cameraManager.dispose();
+      } catch (error) {
+        _appendLog('connection cleanup: camera dispose failed error=$error');
+      } finally {
+        try {
+          await _connectionSubscriptionController.dispose();
+        } catch (error) {
+          _appendLog(
+            'connection cleanup: subscription dispose failed error=$error',
+          );
+        }
+      }
+    }
+  }
+
+  // sendonly | sendrecv ロールを送信用ロールとする
+  bool get _isSendingRole =>
+      _selectedRole == SoraRole.sendonly || _selectedRole == SoraRole.sendrecv;
+
+  // connect 時に指定された audio 設定。
+  bool get _configuredAudio => _connectAudio;
+
+  // connect 時に指定された video 設定。
+  bool get _configuredVideo => _connectVideo;
+
+  // 映像を送信するか（送信ロールかつ video 有効）。
+  bool get _publishesVideo => _isSendingRole && _connectVideo;
+
+  // カメラが必要か。
+  bool get _needsCamera => _publishesVideo;
+
+  // リモート映像を表示するか（受信ロール）。
+  bool get _showsRemoteVideo =>
+      _selectedRole == SoraRole.recvonly || _selectedRole == SoraRole.sendrecv;
+
+  // ローカルプレビューが表示可能な状態か。
+  bool get _showsLocalPreview => _publishesVideo && _localTextureId != null;
+
+  // ローカルプレビューの取得操作が可能か。
+  bool get _canShowLocalPreview =>
+      !_busy &&
+      _selectedRole != SoraRole.recvonly &&
+      _configuredVideo &&
+      !_isConnected &&
+      !_isConnecting &&
+      !_useExternalVideoTrack;
+
+  // カメラ切り替え操作が可能か（モバイルかつ複数カメラが存在する場合）。
+  bool get _canSwitchCamera =>
+      (Platform.isIOS || Platform.isAndroid) &&
+      _videoInputDevices.length >= 2 &&
+      _needsCamera &&
+      _isConnected &&
+      _connection != null &&
+      _localStream != null &&
+      !_useExternalVideoTrack;
+
+  // simulcast request RID の選択が必要か。
+  bool get _usesSimulcastRequestRid =>
+      _simulcastEnabled && _selectedRole != SoraRole.sendonly;
+
+  // spotlight RID の選択が必要か。
+  bool get _usesSpotlightRid =>
+      _spotlightEnabled &&
+      _simulcastEnabled &&
+      _selectedRole != SoraRole.sendonly;
+
+  // simulcast request RID を編集可能か。
+  bool get _canEditSimulcastRequestRid => _simulcastEnabled;
+
+  // spotlight RID を編集可能か。
+  bool get _canEditSpotlightRid => _spotlightEnabled;
+
+  // RPC 送信が可能か（接続済みかつ method 選択済み）。
+  bool get _canSendRpc =>
+      !_pageNotifier.rpcBusy &&
+      _isConnected &&
+      _connection != null &&
+      _selectedRpcMethod != null;
+
+  // stats 取得が可能か。
+  bool get _canFetchStats => !_busy && _isConnected && _connection != null;
+
+  // `ChangeNotifier` 経由で画面状態を更新する。
+  void _mutateView(VoidCallback update) {
+    if (!mounted) {
+      update();
+      return;
+    }
+    _pageNotifier.mutate(update);
+  }
+
+  // RPC テンプレート生成に必要な入力値をまとめる。
+  DevToolsRpcTemplateRequest _buildRpcTemplateRequest() {
+    return DevToolsRpcTemplateRequest(
+      connectionId: _connection?.connectionId ?? '',
+      channelId: _channelId,
+      selectedSimulcastRid: _selectedSimulcastRid,
+      selectedSpotlightFocusRid: _selectedSpotlightFocusRid,
+      selectedSpotlightUnfocusRid: _selectedSpotlightUnfocusRid,
+    );
+  }
+
+  // 接続前は次回 connect 時の audio/video 設定として扱い、接続中は送信中 track の
+  // enabled 切り替えとして扱うため、非同期処理中でなければ操作を許可する。
+  bool get _canToggleAudioEnabled => !_busy;
+
+  bool get _canToggleVideoEnabled => !_busy;
+
+  bool get _isConnecting => _state is SoraConnectingState;
+
+  bool get _isConnected => _state is SoraConnectedState;
+
+  // 接続確立パラメータは接続中・接続処理中に変更させない。
+  bool get _canEditConnectionParameters =>
+      !_busy && !_isConnecting && !_isConnected;
+
+  // Android の Audio Route は接続中にも native routing へ即時反映できる。
+  bool get _canChangeAudioOutput => !_busy && !_isConnecting;
+
+  // camera plugin が動作する platform だけ External Video Track をサポートする。
+  bool get _supportsExternalVideoTrack => Platform.isAndroid || Platform.isIOS;
+
+  // 接続確認ダイアログへ表示する映像入力種別を返す。
+  String get _videoSourceLabel {
+    if (!_publishesVideo) {
+      return 'none';
+    }
+    if (_useExternalVideoTrack) {
+      return 'external';
+    }
+    return 'camera';
+  }
+
+  String get _connectionStateLabel {
+    final state = _state;
+    return switch (state) {
+      SoraConnectingState() => 'connecting',
+      SoraConnectedState() => 'connected',
+      SoraDisconnectedState() => 'disconnected',
+    };
+  }
+
+  // 利用可能な video input device を読み込み、既定選択を反映する。
+  Future<void> _loadVideoInputDevices() async {
+    final snapshot =
+        await DevToolsMediaDevicesSupport.loadInitialVideoDevices();
+    if (!mounted) {
+      return;
+    }
+    _mutateView(() {
+      _videoInputDevices = snapshot.devices;
+      _selectedVideoInputDevice = snapshot.selectedDevice;
+      _videoInputResolutions = snapshot.resolutions;
+      _selectedResolution = snapshot.selectedResolution;
+    });
+  }
+
+  // 選択中 video input device の対応解像度一覧を読み込む。
+  Future<void> _loadVideoInputFormats(VideoInputDevice device) async {
+    final generation = ++_videoInputFormatGeneration;
+    final resolutions = await DevToolsMediaDevicesSupport.loadVideoInputFormats(
+      device,
+    );
+    if (!mounted ||
+        generation != _videoInputFormatGeneration ||
+        _selectedVideoInputDevice?.deviceId != device.deviceId) {
+      return;
+    }
+    _mutateView(() {
+      _videoInputResolutions = resolutions;
+      _selectedResolution = DevToolsMediaDevicesSupport.findDefaultResolution(
+        _videoInputResolutions,
+      );
+    });
+  }
+
+  // Audio input / output device 一覧を読み込み、選択状態を同期する。
+  Future<void> _loadAudioDevices() async {
+    final snapshot = await DevToolsMediaDevicesSupport.loadAudioDevices(
+      isAndroid: Platform.isAndroid,
+      selectedAudioInputDeviceId: _selectedAudioInputDevice?.deviceId,
+      selectedAudioOutputDeviceId: _selectedAudioOutputDevice?.deviceId,
+    );
+    if (!mounted) {
+      return;
+    }
+    _mutateView(() {
+      _audioInputDevices = snapshot.inputDevices;
+      _selectedAudioInputDevice = snapshot.selectedInputDevice;
+      _audioOutputDevices = snapshot.outputDevices;
+      _selectedAudioOutputDevice = snapshot.selectedOutputDevice;
+    });
+  }
+
+  // 権限付与後に platform 依存の audio device 一覧を再同期する。
+  Future<void> _refreshAudioDevicesAfterPermission() async {
+    final snapshot = await _connectionController
+        .reloadAudioDevicesAfterPermission(
+          selectedAudioInputDeviceId: _selectedAudioInputDevice?.deviceId,
+          selectedAudioOutputDeviceId: _selectedAudioOutputDevice?.deviceId,
+        );
+    if (snapshot == null || !mounted) {
+      return;
+    }
+    _mutateView(() {
+      _audioInputDevices = snapshot.inputDevices;
+      _selectedAudioInputDevice = snapshot.selectedInputDevice;
+      _audioOutputDevices = snapshot.outputDevices;
+      _selectedAudioOutputDevice = snapshot.selectedOutputDevice;
+    });
+  }
+
+  // Device Id を指定して映像入力デバイスを選択する。
+  // 見つからなかった場合は _videoInputDevices の先頭を返すフォールバックを行う。
+  Future<void> _selectVideoInputDevice(String deviceId) async {
+    if (!_canEditConnectionParameters || _videoInputDevices.isEmpty) {
+      return;
+    }
+    final device = _videoInputDevices.firstWhere(
+      (d) => d.deviceId == deviceId,
+      orElse: () => _videoInputDevices.first,
+    );
+    _mutateView(() {
+      _selectedVideoInputDevice = device;
+    });
+    // 接続前 preview だけを破棄し、接続中 stream の track は決して破棄しない。
+    await _clearLocalPreview();
+    await _loadVideoInputFormats(device);
+  }
+
+  // DataChannel 経由でメッセージを送信する。
+  // 送信先 label は Connect タブの DataChannel 設定で指定したものを常に使う。
+  void _handleSendMessage(String text) {
+    final conn = _connection;
+    final label = _dataChannelLabelController.text.trim();
+    if (conn == null || label.isEmpty || !_canSendMessage) {
+      return;
+    }
+    try {
+      conn.sendDataChannelMessage(label, Uint8List.fromList(utf8.encode(text)));
+      _mutateView(() {
+        _pageNotifier.addSentMessage(
+          DevToolsMessageEntry(
+            timestamp: DateTime.now(),
+            label: label,
+            text: text,
+            isSent: true,
+          ),
+        );
+      });
+      _appendLog('message: sent label=$label text=$text');
+    } catch (error) {
+      _appendLog('message: send failed label=$label error=$error');
+    }
+  }
+
+  // 入力欄の値を検証し、接続中の peer へ RPC を送信する。
+  Future<void> _sendRpcRequest() async {
+    final conn = _connection;
+    final method = _selectedRpcMethod;
+    if (conn == null || method == null || !_isConnected) {
+      return;
+    }
+
+    final message = await _connectionController.sendRpc(
+      DevToolsRpcRequest(
+        connection: conn,
+        method: method,
+        paramsText: _rpcParamsText,
+        timeoutText: _rpcTimeoutText,
+        notification: _rpcNotification,
+      ),
+    );
+    if (message != null) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
+  // 現在の接続設定を確認するダイアログを表示して接続可否を決める。
+  Future<void> _handleConnectPressed() async {
+    if (_busy) {
+      return;
+    }
+    final validationErrors = <String?>[
+      validateSignalingUrls(_signalingUrl),
+      validateChannelId(_channelId),
+      validateOptionalJsonValue(_metadataController.text),
+      validateOptionalJsonValue(_signalingNotifyMetadataController.text),
+      validateOptionalAudioBitRate(_audioBitRateController.text),
+      validateOptionalJsonObject(_videoVp9ParamsController.text),
+      validateOptionalJsonObject(_videoH264ParamsController.text),
+      validateOptionalJsonObject(_videoH265ParamsController.text),
+      validateOptionalJsonObject(_videoAv1ParamsController.text),
+      validateOptionalJsonObjectArray(_forwardingFiltersController.text),
+      validateOptionalNonNegativeInt(_connectionTimeoutController.text),
+      validateOptionalNonNegativeInt(_disconnectWaitTimeoutController.text),
+      validateOptionalNonNegativeInt(_signalingCandidateTimeoutController.text),
+      if (_dataChannelsEnabled)
+        validateDataChannelLabel(_dataChannelLabelController.text),
+      if (_dataChannelsEnabled && !_dataChannelOrdered)
+        validateMaxPacketLifeTime(_dataChannelMaxPacketLifeTimeController.text),
+    ].whereType<String>().toList(growable: false);
+    // Connect タブが未マウントの場合も、上の直接検証だけで接続操作を継続できる。
+    final formIsValid = _connectionFormKey.currentState?.validate() ?? true;
+    if (!formIsValid || validationErrors.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            validationErrors.isEmpty
+                ? '接続設定の入力エラーを修正してください'
+                : validationErrors.join('\n'),
+          ),
+        ),
+      );
+      _tabController.animateTo(0);
+      return;
+    }
+    final dataChannels = _buildDataChannelConfigs();
+    final timeoutOptions = _timeoutOptions;
+    final dataChannel = dataChannels.isEmpty ? null : dataChannels.first;
+    final shouldConnect = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Connect Settings'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('signaling_urls: ${_signalingUrls.join(', ')}'),
+                Text('channel_id: $_channelId'),
+                Text('role: ${_selectedRole.value}'),
+                Text('audio: $_configuredAudio'),
+                Text('video: $_configuredVideo'),
+                Text('video_source: $_videoSourceLabel'),
+                Text('use_audio_device: $_useAudioDevice'),
+                Text('client_id: ${_clientId ?? '未指定'}'),
+                Text('bundle_id: ${_bundleId ?? '未指定'}'),
+                Text(
+                  'metadata: ${_jsonSettingSummary(_metadataController.text)}',
+                ),
+                Text(
+                  'signaling_notify_metadata: ${_jsonSettingSummary(_signalingNotifyMetadataController.text)}',
+                ),
+                Text('audio_codec: ${_selectedAudioCodecType ?? '未指定'}'),
+                Text(
+                  'audio_bit_rate: ${_optionalText(_audioBitRateController) ?? '未指定'} kbps',
+                ),
+                Text('video_codec: ${_selectedVideoCodecType ?? '未指定'}'),
+                Text(
+                  'video_vp9_params: ${_jsonSettingSummary(_videoVp9ParamsController.text)}',
+                ),
+                Text(
+                  'video_h264_params: ${_jsonSettingSummary(_videoH264ParamsController.text)}',
+                ),
+                Text(
+                  'video_h265_params: ${_jsonSettingSummary(_videoH265ParamsController.text)}',
+                ),
+                Text(
+                  'video_av1_params: ${_jsonSettingSummary(_videoAv1ParamsController.text)}',
+                ),
+                Text(
+                  'video_bit_rate: ${_selectedVideoBitRate != null ? '$_selectedVideoBitRate kbps' : '未指定'}',
+                ),
+                Text('resolution: ${_selectedResolution ?? '未指定'}'),
+                Text(
+                  'frame_rate: ${_selectedFrameRate != null ? '$_selectedFrameRate fps' : '未指定'}',
+                ),
+                Text(
+                  'simulcast: ${_simulcastEnabled ? 'Enabled' : 'Disabled'}',
+                ),
+                Text(
+                  'simulcast_request_rid: ${_selectedSimulcastRid ?? '未指定'}',
+                ),
+                Text(
+                  'spotlight: ${_spotlightEnabled ? 'Enabled' : 'Disabled'}',
+                ),
+                Text(
+                  'spotlight_focus_rid: ${_selectedSpotlightFocusRid ?? '未指定'}',
+                ),
+                Text(
+                  'spotlight_unfocus_rid: ${_selectedSpotlightUnfocusRid ?? '未指定'}',
+                ),
+                Text(
+                  'data_channels: ${_dataChannelsEnabled ? 'Enabled' : 'Disabled'}',
+                ),
+                if (_dataChannelsEnabled) ...[
+                  Text('data_channel_label: ${dataChannel?['label'] ?? '未指定'}'),
+                  Text(
+                    'data_channel_direction: ${dataChannel?['direction'] ?? '未指定'}',
+                  ),
+                  Text(
+                    'data_channel_ordered: ${dataChannel?['ordered'] ?? '未指定'}',
+                  ),
+                  Text(
+                    'data_channel_compress: ${dataChannel?['compress'] ?? '未指定'}',
+                  ),
+                  Text(
+                    'data_channel_max_packet_life_time: ${dataChannel?['max_packet_life_time'] ?? '未指定'}',
+                  ),
+                ],
+                Text(
+                  'data_channel_signaling: ${_dataChannelSignalingEnabled ? 'Enabled' : 'Disabled'}',
+                ),
+                Text(
+                  'ignore_disconnect_websocket: $_ignoreDisconnectWebSocketEnabled',
+                ),
+                Text(
+                  'forwarding_filters: ${_jsonSettingSummary(_forwardingFiltersController.text)}',
+                ),
+                Text(
+                  'timeouts (s): connection=${timeoutOptions.connectionTimeout.inSeconds}, disconnect_wait=${timeoutOptions.disconnectWaitTimeout.inSeconds}, signaling_candidate=${timeoutOptions.signalingCandidateTimeout.inSeconds}',
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(false);
+              },
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(context).pop(true);
+              },
+              child: const Text('Connect'),
+            ),
+          ],
+        );
+      },
+    );
+    if (shouldConnect != true) {
+      return;
+    }
+    await _connect();
+  }
+
+  // 現在の UI 設定から `SoraConnection` を生成して接続を開始する。
+  Future<void> _connect() async {
+    if (_busy) {
+      return;
+    }
+    _mutateView(() {
+      _pageNotifier.prepareForConnect(
+        audioEnabledValue: _configuredAudio,
+        videoEnabledValue: _configuredVideo,
+      );
+    });
+    try {
+      await _disposeClient(preserveLocalStream: true);
+      final granted = await _ensureMediaPermissions();
+      if (!granted) {
+        _appendLog('connect: required media permissions are not granted');
+        if (!mounted) {
+          return;
+        }
+        _mutateView(() {
+          _busy = false;
+        });
+        return;
+      }
+      await _refreshAudioDevicesAfterPermission();
+      if (!mounted) {
+        return;
+      }
+      if (_useExternalVideoTrack && _publishesVideo) {
+        await _cameraManager.initialize();
+      }
+      _lockUseAudioDeviceSetting();
+      _appendLog('connect: start role=${_selectedRole.value}');
+      // preview stream の所有権を接続 transaction へ渡す。
+      // 失敗時は controller が確実に解放するため、画面側には残さない。
+      final retainedLocalStream = _localStream;
+      _localStream = null;
+      final result = await _connectionController.createAndConnect(
+        request: _buildConnectRequest(existingLocalStream: retainedLocalStream),
+        onLocalTextureReady: (textureId) {
+          if (!mounted) {
+            return;
+          }
+          _mutateView(() {
+            _localTextureId = textureId;
+          });
+        },
+      );
+      final conn = result.connection;
+      final localStream = result.localStream;
+      if (!mounted) {
+        await _connectionController.disposeConnectionResources(
+          connection: conn,
+          localStream: localStream,
+        );
+        return;
+      }
+      _connection = conn;
+      _localStream = localStream;
+      if (_useExternalVideoTrack && _publishesVideo && localStream != null) {
+        // `_useExternalVideoTrack` と `_publishesVideo` が両方 true のとき、
+        // `_prepareLocalStream` は `_createExternalVideoTrack()` で生成した
+        // external video track のみを `addTrack` する経路をとる。ここでは
+        // capture type を再判定せずに先頭 track を external video track として
+        // 扱ってよい。
+        final videoTracks = localStream.getVideoTracks();
+        if (videoTracks.isNotEmpty) {
+          await _cameraManager.start(videoTracks.first);
+        }
+      }
+      _mutateView(() {
+        _audioEnabled = currentAudioTrackEnabled(
+          localStream,
+          fallback: _configuredAudio,
+        );
+        _videoEnabled = currentVideoTrackEnabled(
+          localStream,
+          fallback: _configuredVideo,
+        );
+      });
+      _appendLog('connect: request sent');
+      _tabController.animateTo(1);
+    } catch (error) {
+      _appendLog('connect: exception=$error');
+      await _disposeClient();
+      if (mounted) {
+        _mutateView(() {
+          _state = const SoraDisconnectedState();
+          _disconnectCloseInfo = null;
+          _peerConnectionStateLabel = 'disconnected';
+          _iceStateLabel = 'unknown';
+          _dtlsStateLabel = 'unknown';
+        });
+      } else {
+        _state = const SoraDisconnectedState();
+        _disconnectCloseInfo = null;
+        _peerConnectionStateLabel = 'disconnected';
+        _iceStateLabel = 'unknown';
+        _dtlsStateLabel = 'unknown';
+      }
+    } finally {
+      if (mounted) {
+        _mutateView(() {
+          _busy = false;
+        });
+      }
+    }
+  }
+
+  // 現在の UI 設定から接続要求を組み立てる。
+  DevToolsConnectRequest _buildConnectRequest({
+    LocalMediaStream? existingLocalStream,
+  }) {
+    return DevToolsConnectRequest(
+      signalingUrls: _signalingUrls.isEmpty ? Environment.urls : _signalingUrls,
+      channelId: _channelId,
+      role: _selectedRole,
+      configuredAudio: _configuredAudio,
+      configuredVideo: _configuredVideo,
+      beepAudioEnabled: _beepAudioEnabled,
+      useAudioDevice: _useAudioDevice,
+      selectedVideoCodecType: _selectedVideoCodecType,
+      selectedVideoBitRate: _selectedVideoBitRate,
+      simulcastEnabled: _simulcastEnabled,
+      selectedSimulcastRid: _selectedSimulcastRid,
+      spotlightEnabled: _spotlightEnabled,
+      selectedSpotlightFocusRid: _selectedSpotlightFocusRid,
+      selectedSpotlightUnfocusRid: _selectedSpotlightUnfocusRid,
+      usesSimulcastRequestRid: _usesSimulcastRequestRid,
+      usesSpotlightRid: _usesSpotlightRid,
+      selectedAudioOutputDeviceId: _selectedAudioOutputDevice?.deviceId,
+      selectedAudioInputDeviceId: _selectedAudioInputDevice?.deviceId,
+      selectedVideoInputDeviceId: _selectedVideoInputDevice?.deviceId,
+      selectedResolution: _selectedResolution,
+      selectedFrameRate: _selectedFrameRate,
+      existingLocalStream: existingLocalStream,
+      useExternalVideoTrack: _useExternalVideoTrack && _publishesVideo,
+      dataChannels: _buildDataChannelConfigs(),
+      dataChannelSignaling: _dataChannelSignalingEnabled,
+      ignoreDisconnectWebSocket: _ignoreDisconnectWebSocketEnabled,
+      clientId: _clientId,
+      bundleId: _bundleId,
+      metadata: parseOptionalJsonValue(_metadataController.text),
+      signalingNotifyMetadata: parseOptionalJsonValue(
+        _signalingNotifyMetadataController.text,
+      ),
+      selectedAudioCodecType: _selectedAudioCodecType,
+      selectedAudioBitRate: int.tryParse(_audioBitRateController.text.trim()),
+      videoVp9Params: parseOptionalJsonObject(_videoVp9ParamsController.text),
+      videoH264Params: parseOptionalJsonObject(_videoH264ParamsController.text),
+      videoH265Params: parseOptionalJsonObject(_videoH265ParamsController.text),
+      videoAv1Params: parseOptionalJsonObject(_videoAv1ParamsController.text),
+      forwardingFilters: parseOptionalJsonObjectArray(
+        _forwardingFiltersController.text,
+      ),
+      timeoutOptions: _timeoutOptions,
+    );
+  }
+
+  // 接続前でも確認できる local video preview を取得して表示する。
+  Future<void> _showLocalPreview() async {
+    if (!_canShowLocalPreview) {
+      return;
+    }
+    _mutateView(() {
+      _busy = true;
+    });
+    try {
+      if (Platform.isIOS || Platform.isAndroid) {
+        final granted =
+            await _permissionChannel.invokeMethod<bool>(
+              'ensureMediaPermissions',
+              <String, Object?>{'camera': true, 'microphone': false},
+            ) ??
+            false;
+        if (!granted) {
+          _appendLog('preview: required camera permission is not granted');
+          return;
+        }
+      }
+      await _refreshAudioDevicesAfterPermission();
+      await _clearLocalPreview();
+      _lockUseAudioDeviceSetting();
+      final result = await _connectionController.createLocalPreview(
+        DevToolsPreviewRequest(
+          useAudioDevice: _useAudioDevice,
+          selectedVideoInputDeviceId: _selectedVideoInputDevice?.deviceId,
+          selectedResolution: _selectedResolution,
+          selectedFrameRate: _selectedFrameRate,
+        ),
+      );
+      if (!mounted) {
+        await _disposeLocalStream(result.previewStream);
+        return;
+      }
+      _mutateView(() {
+        _localStream = result.previewStream;
+        _localTextureId = result.textureId;
+      });
+      _appendLog('preview: local texture ready textureId=${result.textureId}');
+    } catch (error) {
+      _appendLog('preview: exception=$error');
+    } finally {
+      if (mounted) {
+        _mutateView(() {
+          _busy = false;
+        });
+      }
+    }
+  }
+
+  // 現在の role と publish 設定に必要な media 権限を確認する。
+  Future<bool> _ensureMediaPermissions() async {
+    return _connectionController.ensureMediaPermissions(
+      DevToolsPermissionRequest(
+        needsCamera: _needsCamera,
+        needsMicrophone: _isSendingRole && _configuredAudio,
+      ),
+    );
+  }
+
+  // 接続中 peer を切断し、表示状態を初期値へ戻す。
+  Future<void> _disconnect() async {
+    if (_busy) {
+      return;
+    }
+    _mutateView(() {
+      _busy = true;
+    });
+    try {
+      _appendLog('disconnect: start');
+      final conn = _connection;
+      if (conn != null) {
+        await _connectionController.disconnect(conn);
+      }
+      _appendLog('disconnect: done');
+    } catch (error) {
+      _appendLog('disconnect: failed error=$error');
+    } finally {
+      try {
+        await _disposeClient();
+      } catch (error) {
+        _appendLog('disconnect: cleanup failed error=$error');
+      }
+      _pageNotifier.resetAfterDisconnect(
+        audioEnabledValue: _configuredAudio,
+        videoEnabledValue: _configuredVideo,
+        notify: mounted,
+      );
+      if (mounted) {
+        _mutateView(() {
+          _busy = false;
+        });
+      }
+    }
+  }
+
+  // 接続状態に応じて connect / disconnect のどちらかを実行する。
+  Future<void> _handleConnectionButtonPressed() async {
+    switch (_state) {
+      case SoraDisconnectedState():
+        await _handleConnectPressed();
+      case SoraConnectedState():
+        await _disconnect();
+      case SoraConnectingState():
+        // connecting 状態ではボタンは無効化されるため処理不要
+        break;
+    }
+  }
+
+  // 送信中の video track を別カメラへ差し替える。
+  Future<void> _switchCamera() async {
+    if (_busy || !_canSwitchCamera) {
+      return;
+    }
+    final conn = _connection;
+    final localStream = _localStream;
+    if (conn == null || localStream == null) {
+      return;
+    }
+    _mutateView(() {
+      _busy = true;
+    });
+    try {
+      _appendLog('switch_camera: start');
+      final result = await _connectionController.switchCamera(
+        DevToolsSwitchCameraRequest(
+          connection: conn,
+          localStream: localStream,
+          videoInputDevices: _videoInputDevices,
+          selectedVideoInputDevice: _selectedVideoInputDevice,
+          selectedResolution: _selectedResolution,
+          selectedFrameRate: _selectedFrameRate,
+        ),
+      );
+      if (!mounted) {
+        return;
+      }
+      _mutateView(() {
+        _selectedVideoInputDevice = result.selectedVideoInputDevice;
+        _videoInputResolutions = result.resolutions;
+        _selectedResolution = result.selectedResolution;
+      });
+      _appendLog(
+        'switch_camera: deviceId=${result.selectedVideoInputDevice.deviceId} label=${result.selectedVideoInputDevice.label}',
+      );
+    } catch (error) {
+      _appendLog('switch_camera: exception=$error');
+    } finally {
+      if (mounted) {
+        _mutateView(() {
+          _busy = false;
+        });
+      }
+    }
+  }
+
+  // 接続購読と保持中 client をまとめて破棄し、状態を初期化する。
+  Future<void> _disposeClient({bool preserveLocalStream = false}) async {
+    _pageNotifier.resetDisposedClientState(
+      audioEnabledValue: _configuredAudio,
+      videoEnabledValue: _configuredVideo,
+    );
+    final conn = _connection;
+    _connection = null;
+    final localStream = preserveLocalStream ? null : _localStream;
+    if (!preserveLocalStream) {
+      _localStream = null;
+    }
+    // track が生きているうちに frame source を停止してから接続を解放する。
+    try {
+      await _cameraManager.stop();
+    } catch (error) {
+      _appendLog('connection cleanup: camera stop failed error=$error');
+    }
+    try {
+      await _connectionController.disposeConnectionResources(
+        connection: conn,
+        localStream: localStream,
+      );
+    } catch (error) {
+      _appendLog('connection cleanup: resources dispose failed error=$error');
+    } finally {
+      if (!preserveLocalStream) {
+        try {
+          await _cameraManager.dispose();
+        } catch (error) {
+          _appendLog('connection cleanup: camera dispose failed error=$error');
+        }
+      }
+    }
+  }
+
+  // 画面内だけで保持している local preview を破棄する。
+  Future<void> _clearLocalPreview() async {
+    final stream = _localStream;
+    _localStream = null;
+    if (mounted) {
+      _mutateView(() {
+        _localTextureId = null;
+      });
+    } else {
+      _localTextureId = null;
+    }
+    if (stream != null) {
+      await _connectionController.disposeLocalStream(stream);
+    }
+  }
+
+  // devtools が保持している local stream と track をまとめて破棄する。
+  Future<void> _disposeLocalStream(LocalMediaStream stream) async {
+    final tracks = stream.getTracks();
+    for (final track in tracks) {
+      await track.dispose();
+    }
+    await stream.dispose();
+  }
+
+  // 送信 audio の有効 / 無効を切り替えてログへ反映する。
+  void _toggleAudioEnabled() {
+    if (!_canToggleAudioEnabled) {
+      return;
+    }
+    final enabled = !_audioEnabled;
+    final conn = _connection;
+    if (conn != null) {
+      final actualEnabled = _setTrackEnabledOrNull(
+        connection: conn,
+        enabled: enabled,
+        isAudio: true,
+      );
+      if (actualEnabled != enabled) {
+        _appendLog(
+          'audio_enabled: sync failed requested=$enabled actual=$actualEnabled',
+        );
+        return;
+      }
+    }
+    _mutateView(() {
+      _pageNotifier.applyToggleAudio(enabled, isConnected: conn != null);
+    });
+    if (mounted) {
+      if (conn == null && !enabled && !_connectVideo) {
+        unawaited(_clearLocalPreview());
+      }
+      _appendLog('audio_enabled: enabled=${_audioEnabled ? 'true' : 'false'}');
+    }
+  }
+
+  // 送信 video の有効 / 無効を切り替えてログへ反映する。
+  void _toggleVideoEnabled() {
+    if (!_canToggleVideoEnabled) {
+      return;
+    }
+    final enabled = !_videoEnabled;
+    final conn = _connection;
+    if (conn != null) {
+      final actualEnabled = _setTrackEnabledOrNull(
+        connection: conn,
+        enabled: enabled,
+        isAudio: false,
+      );
+      if (actualEnabled != enabled) {
+        _appendLog(
+          'video_enabled: sync failed requested=$enabled actual=$actualEnabled',
+        );
+        return;
+      }
+    }
+    _mutateView(() {
+      _pageNotifier.applyToggleVideo(enabled, isConnected: conn != null);
+    });
+    if (mounted) {
+      if (conn == null) {
+        unawaited(_clearLocalPreview());
+      }
+      _appendLog('video_enabled: enabled=${_videoEnabled ? 'true' : 'false'}');
+    }
+  }
+
+  // beep 音声トラックにビープ音の再生を指示する。
+  void _handleTriggerBeep() {
+    final beepTrack = _connectionController.beepAudioTrack;
+    if (beepTrack == null) {
+      _appendLog('beep: no active BeepAudioTrack');
+      return;
+    }
+    beepTrack.triggerBeep();
+    _appendLog('beep: triggered');
+  }
+
+  // トラックの有効・無効を設定する
+  bool? _setTrackEnabledOrNull({
+    required SoraConnection connection,
+    required bool enabled,
+    required bool isAudio,
+  }) {
+    try {
+      return _connectionController.setTrackEnabled(
+        DevToolsSetTrackEnabledRequest(
+          connection: connection,
+          enabled: enabled,
+          isAudio: isAudio,
+        ),
+      );
+    } on StateError catch (error) {
+      _appendLog('track_enabled: failed error=$error');
+      return null;
+    }
+  }
+
+  // 接続前の audio 設定と表示状態を同期する。
+  void _changeConnectAudio(bool value) {
+    _mutateView(() {
+      _pageNotifier.setConnectAudio(value);
+    });
+    if (shouldClearLocalPreviewForConnectAudioChange(
+      hasRetainedConnection: _connection != null,
+      nextConnectAudio: value,
+      connectVideo: _connectVideo,
+    )) {
+      unawaited(_clearLocalPreview());
+    }
+  }
+
+  // 接続前の video 設定と表示状態を同期する。
+  void _changeConnectVideo(bool value) {
+    _mutateView(() {
+      _pageNotifier.setConnectVideo(value);
+    });
+    if (shouldClearLocalPreviewForConnectVideoChange(
+      hasRetainedConnection: _connection != null,
+    )) {
+      unawaited(_clearLocalPreview());
+    }
+  }
+
+  // 接続中 peer から統計情報を取得して stats ログへ追記する。
+  Future<void> _fetchStats() async {
+    final conn = _connection;
+    if (conn == null || !_canFetchStats) {
+      return;
+    }
+    _mutateView(() {
+      _busy = true;
+    });
+    try {
+      _appendStatsLog('get_stats: start');
+      final formatted = await _connectionController.fetchStats(
+        DevToolsStatsRequest(connection: conn),
+      );
+      if (formatted == null) {
+        _appendStatsLog('get_stats: empty');
+        return;
+      }
+      _appendStatsLog('get_stats: success\n$formatted');
+    } catch (error) {
+      _appendStatsLog('get_stats: error=$error');
+    } finally {
+      if (mounted) {
+        _mutateView(() {
+          _busy = false;
+        });
+      }
+    }
+  }
+
+  // 操作ログ・デバッグログを出力
+  void _appendLog(String line) {
+    _appendEntry(_logs, line);
+  }
+
+  // イベントログを出力
+  void _appendEventLog(String line) {
+    _appendEntry(_eventLogs, line);
+  }
+
+  // タイムラインログを出力
+  void _appendTimelineLog(String line) {
+    _appendEntry(_timelineLogs, line);
+  }
+
+  // 統計情報を出力
+  void _appendStatsLog(String line) {
+    _appendEntry(_statsLogs, line);
+  }
+
+  // 指定ログ配列へ timestamp 付き 1 行を追記する。
+  void _appendEntry(List<String> target, String line) {
+    DevToolsLoggingSupport.appendEntry(
+      target: target,
+      line: line,
+      mounted: mounted,
+      addWhenUnmounted: () {
+        final entry = '[${DateTime.now().toIso8601String()}] $line';
+        if (identical(target, _logs)) {
+          _pageNotifier.addLog(entry);
+          return;
+        }
+        if (identical(target, _eventLogs)) {
+          _pageNotifier.addEventLog(entry);
+          return;
+        }
+        if (identical(target, _timelineLogs)) {
+          _pageNotifier.addTimelineLog(entry);
+          return;
+        }
+        if (identical(target, _statsLogs)) {
+          _pageNotifier.addStatsLog(entry);
+          return;
+        }
+        target.add(entry);
+      },
+      mutateView: _mutateView,
+    );
+  }
+
+  // notify event 由来の remote client 一覧を画面状態へ同期する。
+  void _updateRemoteClients(Map<String, Object?> message) {
+    final eventType = message['event_type'] as String?;
+    final connectionId = message['connection_id'] as String?;
+    final clientId = message['client_id'] as String?;
+    final nestedClients = DevToolsLoggingSupport.extractRemoteClients(message);
+    if (eventType == null) {
+      return;
+    }
+    List<DevToolsRemoteClientInfo> buildCandidates() {
+      return nestedClients.isNotEmpty
+          ? DevToolsLoggingSupport.filterRemoteClients(
+              clients: nestedClients,
+              selfConnectionId: _connection?.connectionId,
+            )
+          : DevToolsLoggingSupport.filterRemoteClients(
+              clients: <DevToolsRemoteClientInfo?>[
+                if (connectionId != null && connectionId.isNotEmpty)
+                  DevToolsRemoteClientInfo(
+                    connectionId: connectionId,
+                    clientId: clientId,
+                  ),
+              ],
+              selfConnectionId: _connection?.connectionId,
+            );
+    }
+
+    if (eventType == 'connection.created') {
+      final candidates = buildCandidates();
+      if (candidates.isEmpty) {
+        return;
+      }
+      _mutateView(() {
+        _pageNotifier.upsertRemoteClients(candidates);
+      });
+      return;
+    }
+    if (eventType == 'connection.destroyed') {
+      final candidates = buildCandidates();
+      if (candidates.isEmpty) {
+        return;
+      }
+      final candidateIds = candidates
+          .map((client) => client.connectionId)
+          .toSet();
+      _mutateView(() {
+        _pageNotifier.removeRemoteClientsByConnectionIds(candidateIds);
+      });
+    }
+  }
+
+  // 自分の Sora ClientId を取得
+  String? get _selfClientId {
+    final clientId = _connection?.serverClientId;
+    if (clientId == null || clientId.isEmpty) {
+      return null;
+    }
+    return clientId;
+  }
+
+  // 現在表示中のログをクリップボードへコピーする。
+  Future<void> _copyLogs() async {
+    await DevToolsLogPanel.copyLogs(_selectedLogs);
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Copied logs')));
+  }
+
+  // 表示中のログ種別だけを消去する。
+  void _clearLogs() {
+    _mutateView(_pageNotifier.clearSelectedLogs);
+  }
+
+  // 表示選択中のログ種類
+  List<String> get _selectedLogs => _pageNotifier.filteredSelectedLogs;
+
+  // ログ画面の検索語句。
+  set _logSearchQuery(String value) => _pageNotifier.logSearchQuery = value;
+
+  String get _selectedLogDescription => switch (_selectedLogTab) {
+    DevToolsLogTab.app => '操作ログ / デバッグログ',
+    DevToolsLogTab.event => 'イベントログ',
+    DevToolsLogTab.timeline => 'タイムラインログ',
+    DevToolsLogTab.stats => '統計情報',
+  };
+
+  // ログパネルへ現在の選択状態と操作 callback を束ねて渡す。
+  Widget _buildLogPanel({VoidCallback? onClose, bool plain = false}) {
+    return DevToolsLogPanel(
+      selectedLogTab: _selectedLogTab,
+      selectedLogDescription: _selectedLogDescription,
+      selectedLogs: _selectedLogs,
+      logSearchController: _logSearchController,
+      onLogTabChanged: (value) {
+        _mutateView(() {
+          _selectedLogTab = value;
+        });
+      },
+      onLogSearchQueryChanged: (value) {
+        _mutateView(() {
+          _logSearchQuery = value;
+        });
+      },
+      onClose: onClose,
+      onCopyLogs: _copyLogs,
+      onClearLogs: _clearLogs,
+      scrollController: _logScrollController,
+      followLatest: _followLatestLogs,
+      onFollowLatestChanged: (value) {
+        _mutateView(() {
+          _followLatestLogs = value;
+        });
+      },
+      canFetchStats: _canFetchStats,
+      onFetchStats: _fetchStats,
+      plain: plain,
+    );
+  }
+
+  // RPC セクションへ現在の入力状態と操作 callback を束ねて渡す。
+  Widget _buildRpcRequestSection({bool initiallyExpanded = false}) {
+    return DevToolsRpcRequestSection(
+      selectedRpcMethod: _selectedRpcMethod,
+      availableRpcMethods: _pageNotifier.availableRpcMethods,
+      rpcNotification: _rpcNotification,
+      rpcBusy: _pageNotifier.rpcBusy,
+      canSendRpc: _canSendRpc,
+      rpcResult: _pageNotifier.rpcResult,
+      rpcTimeoutController: _rpcTimeoutController,
+      rpcParamsController: _rpcParamsController,
+      initiallyExpanded: initiallyExpanded,
+      onRpcMethodChanged: (value) {
+        _mutateView(() {
+          _selectedRpcMethod = value;
+        });
+        _rpcParamsController.text = _connectionController
+            .buildRpcParamsTemplateJson(value, _buildRpcTemplateRequest());
+      },
+      onRpcNotificationChanged: (value) {
+        _mutateView(() {
+          _rpcNotification = value;
+        });
+      },
+      onApplyTemplate: () {
+        final template = _connectionController.buildRpcParamsTemplateJson(
+          _selectedRpcMethod!,
+          _buildRpcTemplateRequest(),
+        );
+        _rpcParamsController.text = template;
+      },
+      onSendRpc: _sendRpcRequest,
+    );
+  }
+
+  // Video パネルへ現在の track 状態を束ねて渡す。
+  Widget _buildVideoPanel() {
+    return DevToolsVideoPanel(
+      showsRemoteVideo: _showsRemoteVideo,
+      showsLocalPreview: _showsLocalPreview,
+      isConnected: _isConnected,
+      isConnecting: _isConnecting,
+      needsCamera: _needsCamera,
+      localTextureId: _localTextureId,
+      localPreviewMirror: _localPreviewMirror,
+      remoteVideos: _remoteVideos,
+      remoteAudios: _remoteAudios,
+      remoteClients: _remoteClients,
+      selectedResolution: _selectedResolution,
+    );
+  }
+
+  // DataChannel 設定セクションを返す。
+  Widget _buildDataChannelSection() {
+    final disabled = _busy || _isConnected;
+    return ExpansionTile(
+      title: const Text('DataChannel'),
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: SwitchListTile(
+            title: const Text('DataChannel Signaling'),
+            subtitle: const Text('data_channel_signaling'),
+            contentPadding: EdgeInsets.zero,
+            value: _dataChannelSignalingEnabled,
+            onChanged: disabled
+                ? null
+                : (value) {
+                    _mutateView(() {
+                      _dataChannelSignalingEnabled = value;
+                    });
+                  },
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: SwitchListTile(
+            title: const Text('Ignore WebSocket Disconnect'),
+            subtitle: const Text('ignore_disconnect_websocket'),
+            contentPadding: EdgeInsets.zero,
+            value: _ignoreDisconnectWebSocketEnabled,
+            onChanged: disabled
+                ? null
+                : (value) {
+                    _mutateView(() {
+                      _ignoreDisconnectWebSocketEnabled = value;
+                    });
+                  },
+          ),
+        ),
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+
+  // dataChannels 設定セクションを返す。
+  Widget _buildDataChannelsSection() {
+    const directionOptions = <String>['sendrecv', 'sendonly', 'recvonly'];
+    final disabled = _busy || _isConnected;
+    return ExpansionTile(
+      title: const Text('dataChannels'),
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: SwitchListTile(
+            title: const Text('Enable DataChannels'),
+            subtitle: const Text('data_channels'),
+            contentPadding: EdgeInsets.zero,
+            value: _dataChannelsEnabled,
+            onChanged: disabled
+                ? null
+                : (value) {
+                    _mutateView(() {
+                      _dataChannelsEnabled = value;
+                    });
+                  },
+          ),
+        ),
+        if (!_dataChannelsEnabled)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Text('有効にすると label、direction、ordered、compress を設定できます。'),
+          ),
+        if (_dataChannelsEnabled) ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextFormField(
+              controller: _dataChannelLabelController,
+              decoration: const InputDecoration(
+                labelText: 'label',
+                helperText: '先頭に # をつける（例: #chat）',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              enabled: !disabled,
+              validator: validateDataChannelLabel,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                const Text('direction'),
+                const Spacer(),
+                DropdownButton<String>(
+                  value: _dataChannelDirection,
+                  underline: const SizedBox(),
+                  style: Theme.of(context).textTheme.bodyMedium,
+                  items: directionOptions
+                      .map(
+                        (dir) => DropdownMenuItem(value: dir, child: Text(dir)),
+                      )
+                      .toList(growable: false),
+                  onChanged: !disabled
+                      ? (value) {
+                          _mutateView(() {
+                            _dataChannelDirection = value!;
+                          });
+                        }
+                      : null,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: SwitchListTile(
+              title: const Text('Ordered delivery'),
+              subtitle: const Text('ordered'),
+              contentPadding: EdgeInsets.zero,
+              value: _dataChannelOrdered,
+              onChanged: !disabled
+                  ? (value) {
+                      _mutateView(() {
+                        _dataChannelOrdered = value;
+                      });
+                    }
+                  : null,
+            ),
+          ),
+          if (!_dataChannelOrdered)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: TextFormField(
+                controller: _dataChannelMaxPacketLifeTimeController,
+                decoration: const InputDecoration(
+                  labelText: 'max_packet_life_time (ms)',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                  helperText: '0 〜 65535 ms',
+                ),
+                keyboardType: TextInputType.number,
+                enabled: !disabled,
+                validator: validateMaxPacketLifeTime,
+                autovalidateMode: AutovalidateMode.onUserInteraction,
+                onChanged: (value) {
+                  final parsed = int.tryParse(value);
+                  if (parsed != null) {
+                    _dataChannelMaxPacketLifeTime = parsed;
+                  }
+                },
+              ),
+            ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: SwitchListTile(
+              title: const Text('Compression'),
+              subtitle: const Text('compress'),
+              contentPadding: EdgeInsets.zero,
+              value: _dataChannelCompress,
+              onChanged: !disabled
+                  ? (value) {
+                      _mutateView(() {
+                        _dataChannelCompress = value;
+                      });
+                    }
+                  : null,
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ],
+    );
+  }
+
+  // 接続タブへ接続設定、主要操作、状態 summary をまとめて表示する。
+  Widget _buildConnectionTab() {
+    return Form(
+      key: _connectionFormKey,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildConnectionSettingsSection(),
+            const SizedBox(height: 8),
+            _buildMediaDeviceSection(),
+            const SizedBox(height: 8),
+            _buildDataChannelSection(),
+            const SizedBox(height: 8),
+            _buildDataChannelsSection(),
+            const SizedBox(height: 8),
+            ExpansionTile(
+              title: const Text('Developer Option'),
+              initiallyExpanded: _useExternalVideoTrack,
+              children: [
+                SwitchListTile(
+                  title: const Text('External Video Track'),
+                  subtitle: const Text(
+                    'pub.dev の camera package 利用で映像を配信する検証用機能です',
+                  ),
+                  value: _useExternalVideoTrack,
+                  onChanged:
+                      _busy ||
+                          _isConnected ||
+                          !_supportsExternalVideoTrack ||
+                          !_publishesVideo
+                      ? null
+                      : (value) {
+                          _mutateView(() {
+                            _useExternalVideoTrack = value;
+                          });
+                          unawaited(_clearLocalPreview());
+                        },
+                  dense: true,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            DevToolsActionSection(
+              busy: _busy,
+              isConnecting: _isConnecting,
+              isConnected: _isConnected,
+              onConnectionButtonPressed: _handleConnectionButtonPressed,
+            ),
+            if (_isConnected && _beepAudioEnabled) ...[
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: _busy ? null : _handleTriggerBeep,
+                icon: const Icon(Icons.volume_up),
+                label: const Text('Trigger Beep'),
+              ),
+            ],
+            const SizedBox(height: 12),
+            DevToolsConnectionStatusSection(
+              connectionStateLabel: _connectionStateLabel,
+              peerConnectionStateLabel: _peerConnectionStateLabel,
+              iceStateLabel: _iceStateLabel,
+              dtlsStateLabel: _dtlsStateLabel,
+              sessionId: _connection?.sessionId,
+              connectionId: _connection?.connectionId,
+              clientId: _selfClientId,
+              disconnectCloseInfo: _disconnectCloseInfo,
+              connectionErrorCode: _connectionErrorCode,
+              connectionErrorMessage: _connectionErrorMessage,
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 映像タブへ preview 操作と映像表示パネルをまとめて表示する。
+  Widget _buildVideoTab() {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              SizedBox(
+                width: 220,
+                child: SwitchListTile(
+                  title: const Text('Audio Track'),
+                  contentPadding: EdgeInsets.zero,
+                  value: _audioEnabled,
+                  onChanged: _canToggleAudioEnabled
+                      ? (_) => _toggleAudioEnabled()
+                      : null,
+                ),
+              ),
+              SizedBox(
+                width: 220,
+                child: SwitchListTile(
+                  title: const Text('Video Track'),
+                  contentPadding: EdgeInsets.zero,
+                  value: _videoEnabled,
+                  onChanged: _canToggleVideoEnabled
+                      ? (_) => _toggleVideoEnabled()
+                      : null,
+                ),
+              ),
+              SizedBox(
+                width: 220,
+                child: SwitchListTile(
+                  title: const Text('Mirror Preview'),
+                  contentPadding: EdgeInsets.zero,
+                  value: _localPreviewMirror,
+                  onChanged: (value) {
+                    _mutateView(() {
+                      _localPreviewMirror = value;
+                    });
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              if (_isConnected)
+                FilledButton(
+                  onPressed: _busy ? null : _disconnect,
+                  child: const Text('Disconnect'),
+                ),
+              OutlinedButton(
+                onPressed: _canShowLocalPreview ? _showLocalPreview : null,
+                child: const Text('Show Local Preview'),
+              ),
+              OutlinedButton(
+                onPressed: _busy || !_canSwitchCamera ? null : _switchCamera,
+                child: const Text('Switch Camera'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Expanded(child: _buildVideoPanel()),
+        ],
+      ),
+    );
+  }
+
+  // RPC タブへ RPC 実行 UI を表示する。
+  Widget _buildRpcTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: _buildRpcRequestSection(initiallyExpanded: true),
+    );
+  }
+
+  // 診断タブへ stats 取得操作とログパネルを表示する。
+  Widget _buildDiagnosticsTab() {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(children: [Expanded(child: _buildLogPanel(plain: true))]),
+    );
+  }
+
+  // 接続設定セクションへ現在の設定値と操作 callback を束ねて渡す。
+  Widget _buildConnectionSettingsSection() {
+    return DevToolsConnectionSettingsSection(
+      signalingUrlController: _signalingUrlController,
+      channelIdController: _channelIdController,
+      clientIdController: _clientIdController,
+      bundleIdController: _bundleIdController,
+      metadataController: _metadataController,
+      signalingNotifyMetadataController: _signalingNotifyMetadataController,
+      audioBitRateController: _audioBitRateController,
+      videoVp9ParamsController: _videoVp9ParamsController,
+      videoH264ParamsController: _videoH264ParamsController,
+      videoH265ParamsController: _videoH265ParamsController,
+      videoAv1ParamsController: _videoAv1ParamsController,
+      forwardingFiltersController: _forwardingFiltersController,
+      connectionTimeoutController: _connectionTimeoutController,
+      disconnectWaitTimeoutController: _disconnectWaitTimeoutController,
+      signalingCandidateTimeoutController: _signalingCandidateTimeoutController,
+      selectedRole: _selectedRole,
+      simulcastEnabled: _simulcastEnabled,
+      selectedSimulcastRid: _selectedSimulcastRid,
+      spotlightEnabled: _spotlightEnabled,
+      selectedSpotlightFocusRid: _selectedSpotlightFocusRid,
+      selectedSpotlightUnfocusRid: _selectedSpotlightUnfocusRid,
+      connectAudio: _connectAudio,
+      connectVideo: _connectVideo,
+      beepAudioEnabled: _beepAudioEnabled,
+      useAudioDevice: _useAudioDevice,
+      useAudioDeviceEditable:
+          !Platform.isAndroid && !_useAudioDeviceSettingLocked,
+      isAndroid: Platform.isAndroid,
+      publishesVideo: _publishesVideo,
+      needsCamera: _needsCamera,
+      connectionParametersEditable: _canEditConnectionParameters,
+      canEditSimulcastRequestRid: _canEditSimulcastRequestRid,
+      canEditSpotlightRid: _canEditSpotlightRid,
+      selectedVideoCodecType: _selectedVideoCodecType,
+      selectedVideoBitRate: _selectedVideoBitRate,
+      selectedAudioCodecType: _selectedAudioCodecType,
+      selectedResolutionIndex: _selectedResolution != null
+          ? _videoInputResolutions.indexOf(_selectedResolution!)
+          : null,
+      selectedFrameRate: _selectedFrameRate,
+      simulcastRidOptions: DevToolsConstants.simulcastRidOptions,
+      videoCodecTypeOptions: _videoCodecTypeOptions,
+      videoBitRateOptions: DevToolsConstants.videoBitRateOptions,
+      frameRateOptions: DevToolsConstants.frameRateOptions,
+      resolutionLabels: _videoInputResolutions
+          .map((resolution) => resolution.toString())
+          .toList(growable: false),
+      onRoleChanged: (value) {
+        if (!_canEditConnectionParameters) {
+          return;
+        }
+        _mutateView(() {
+          _selectedRole = value;
+          if (!_usesSimulcastRequestRid) {
+            _selectedSimulcastRid = null;
+          }
+          if (!_usesSpotlightRid) {
+            _selectedSpotlightFocusRid = null;
+            _selectedSpotlightUnfocusRid = null;
+          }
+          if (!_needsCamera) {
+            _localTextureId = null;
+          }
+        });
+        unawaited(_clearLocalPreview());
+      },
+      onSimulcastEnabledChanged: (value) {
+        _mutateView(() {
+          _simulcastEnabled = value;
+          if (!_usesSimulcastRequestRid) {
+            _selectedSimulcastRid = null;
+          }
+          if (!_usesSpotlightRid) {
+            _selectedSpotlightFocusRid = null;
+            _selectedSpotlightUnfocusRid = null;
+          }
+        });
+      },
+      onSimulcastRidChanged: (value) {
+        _mutateView(() {
+          _selectedSimulcastRid = value;
+        });
+      },
+      onSpotlightEnabledChanged: (value) {
+        _mutateView(() {
+          _spotlightEnabled = value;
+          if (!_usesSpotlightRid) {
+            _selectedSpotlightFocusRid = null;
+            _selectedSpotlightUnfocusRid = null;
+          }
+        });
+      },
+      onSpotlightFocusRidChanged: (value) {
+        _mutateView(() {
+          _selectedSpotlightFocusRid = value;
+        });
+      },
+      onSpotlightUnfocusRidChanged: (value) {
+        _mutateView(() {
+          _selectedSpotlightUnfocusRid = value;
+        });
+      },
+      onConnectAudioChanged: (value) {
+        _changeConnectAudio(value);
+      },
+      onConnectVideoChanged: (value) {
+        _changeConnectVideo(value);
+      },
+      onBeepAudioEnabledChanged: (value) {
+        _mutateView(() {
+          _beepAudioEnabled = value;
+        });
+      },
+      onUseAudioDeviceChanged: (value) {
+        if (_useAudioDeviceSettingLocked || Platform.isAndroid) {
+          return;
+        }
+        _mutateView(() {
+          _useAudioDeviceOverride = value;
+        });
+      },
+      onAudioCodecTypeChanged: (value) {
+        _mutateView(() {
+          _selectedAudioCodecType = value;
+        });
+      },
+      onVideoCodecTypeChanged: (value) {
+        _mutateView(() {
+          _selectedVideoCodecType = value;
+        });
+      },
+      onVideoBitRateChanged: (value) {
+        _mutateView(() {
+          _selectedVideoBitRate = value;
+        });
+      },
+      onResolutionChanged: (index) {
+        if (!_canEditConnectionParameters) {
+          return;
+        }
+        _mutateView(() {
+          _selectedResolution = _videoInputResolutions[index];
+        });
+        unawaited(_clearLocalPreview());
+      },
+      onFrameRateChanged: (value) {
+        if (!_canEditConnectionParameters) {
+          return;
+        }
+        _mutateView(() {
+          _selectedFrameRate = value;
+        });
+        unawaited(_clearLocalPreview());
+      },
+      signalingUrlValidator: validateSignalingUrls,
+      channelIdValidator: validateChannelId,
+      metadataValidator: validateOptionalJsonValue,
+      signalingNotifyMetadataValidator: validateOptionalJsonValue,
+      audioBitRateValidator: validateOptionalAudioBitRate,
+      videoCodecParamsValidator: validateOptionalJsonObject,
+      forwardingFiltersValidator: validateOptionalJsonObjectArray,
+      timeoutValidator: validateOptionalNonNegativeInt,
+    );
+  }
+
+  // Media device セクションへ現在の選択状態と操作 callback を束ねて渡す。
+  Widget _buildMediaDeviceSection() {
+    return DevToolsMediaDeviceSection(
+      isAndroid: Platform.isAndroid,
+      needsCamera: _needsCamera,
+      canChangeAudioInput: _canEditConnectionParameters,
+      canChangeAudioOutput: _canChangeAudioOutput,
+      canChangeVideoInput: _canEditConnectionParameters,
+      cameraSubtitle: _needsCamera
+          ? (_selectedVideoInputDevice?.label ?? '')
+          : 'Camera is not used in current role',
+      selectedAudioInputLabel: _selectedAudioInputDevice == null
+          ? 'Unavailable'
+          : DevToolsMediaDevicesSupport.formatAudioInputDeviceLabel(
+              _selectedAudioInputDevice!,
+            ),
+      selectedAudioInputDeviceId: _selectedAudioInputDevice?.deviceId,
+      selectedAudioOutputDeviceId: _selectedAudioOutputDevice?.deviceId,
+      selectedVideoInputDeviceId: _selectedVideoInputDevice?.deviceId,
+      audioInputOptions: _audioInputDevices
+          .map(
+            (device) => DevToolsSelectionOption(
+              value: device.deviceId,
+              label: DevToolsMediaDevicesSupport.formatAudioInputDeviceLabel(
+                device,
+              ),
+            ),
+          )
+          .toList(growable: false),
+      audioOutputOptions: _audioOutputDevices
+          .map(
+            (device) => DevToolsSelectionOption(
+              value: device.deviceId,
+              label: DevToolsMediaDevicesSupport.formatAudioOutputDeviceLabel(
+                device,
+              ),
+            ),
+          )
+          .toList(growable: false),
+      videoInputOptions: _videoInputDevices
+          .map(
+            (device) => DevToolsSelectionOption(
+              value: device.deviceId,
+              label: device.label,
+            ),
+          )
+          .toList(growable: false),
+      onExpanded: () {
+        unawaited(_loadAudioDevices());
+      },
+      onAudioInputChanged: (deviceId) {
+        if (!_canEditConnectionParameters || _audioInputDevices.isEmpty) {
+          return;
+        }
+        _mutateView(() {
+          _selectedAudioInputDevice = _audioInputDevices.firstWhere(
+            (device) => device.deviceId == deviceId,
+            orElse: () => _audioInputDevices.first,
+          );
+        });
+        // 次回接続で選択を確実に反映するため、接続前 preview を破棄する。
+        unawaited(_clearLocalPreview());
+      },
+      onAudioOutputChanged: (deviceId) {
+        if (!_canChangeAudioOutput || _audioOutputDevices.isEmpty) {
+          return;
+        }
+        if (Platform.isAndroid) {
+          final outputDevice = _audioOutputDevices.firstWhere(
+            (device) => device.deviceId == deviceId,
+            orElse: () => _audioOutputDevices.first,
+          );
+          final inputDevice =
+              DevToolsMediaDevicesSupport.deriveAndroidAudioInputDevice(
+                outputDevice: outputDevice,
+                inputDevices: _audioInputDevices,
+              );
+          _mutateView(() {
+            _selectedAudioOutputDevice = outputDevice;
+            _selectedAudioInputDevice =
+                inputDevice ?? _selectedAudioInputDevice;
+          });
+        } else {
+          _mutateView(() {
+            _selectedAudioOutputDevice = _audioOutputDevices.firstWhere(
+              (device) => device.deviceId == deviceId,
+              orElse: () => _audioOutputDevices.first,
+            );
+          });
+        }
+        if (_connection != null) {
+          unawaited(
+            _connectionController.applySelectedAudioOutputDevice(
+              _selectedAudioOutputDevice?.deviceId,
+            ),
+          );
+        }
+      },
+      onVideoInputChanged: (deviceId) {
+        unawaited(_selectVideoInputDevice(deviceId));
+      },
+    );
+  }
+
+  // native 側 debug message から接続状態ラベルだけを抽出して反映する。
+  void _consumeDebugState(String message) {
+    if (!mounted) {
+      return;
+    }
+    _mutateView(() {
+      _pageNotifier.applyDebugStateMessage(message);
+    });
+  }
+
+  // タブリスト
+  static const List<Tab> _tabs = <Tab>[
+    Tab(icon: Icon(Icons.settings_ethernet), text: 'Connect'),
+    Tab(icon: Icon(Icons.videocam), text: 'Video'),
+    Tab(icon: Icon(Icons.hub), text: 'RPC'),
+    Tab(icon: Icon(Icons.message), text: 'Messages'),
+    Tab(icon: Icon(Icons.article), text: 'Diagnostics'),
+  ];
+
+  // メッセージタブへ DataChannel メッセージングの送受信 UI を表示する。
+  Widget _buildMessageTab() {
+    final label = _hasDataChannelConfig
+        ? _dataChannelLabelController.text.trim()
+        : null;
+    return DevToolsMessagePanel(
+      label: label,
+      messages: _messages,
+      sendEnabled: _canSendMessage,
+      sendGuidance: _messageSendGuidance,
+      onSend: _handleSendMessage,
+    );
+  }
+
+  /// 接続、映像、RPC、メッセージング、診断を横断できるタブ構造で画面を構築する。
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: _pageNotifier,
+      builder: (context, child) {
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('sora_sdk DevTools'),
+            actions: [
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Chip(
+                  avatar: Icon(
+                    _isConnected ? Icons.link : Icons.link_off,
+                    size: 16,
+                  ),
+                  label: Text(_connectionStateLabel),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+              IconButton(
+                onPressed: _busy || _isConnecting
+                    ? null
+                    : () {
+                        unawaited(_handleConnectionButtonPressed());
+                      },
+                tooltip: _isConnected ? 'Disconnect' : 'Connect',
+                icon: Icon(_isConnected ? Icons.link_off : Icons.link),
+              ),
+            ],
+            bottom: TabBar(controller: _tabController, tabs: _tabs),
+          ),
+          body: TabBarView(
+            controller: _tabController,
+            children: [
+              _buildConnectionTab(),
+              _buildVideoTab(),
+              _buildRpcTab(),
+              _buildMessageTab(),
+              _buildDiagnosticsTab(),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}

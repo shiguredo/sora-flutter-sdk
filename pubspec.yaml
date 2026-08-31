@@ -1,0 +1,50 @@
+name: sora_sdk
+description: Flutter plugin for Sora powered by libwebrtc-c.
+version: 2026.0.0
+repository: https://github.com/shiguredo/sora-flutter-sdk
+homepage: https://sora-flutter-sdk.shiguredo.jp/
+topics:
+  - webrtc
+  - flutter
+
+environment:
+  sdk: ">=3.10.0 <4.0.0"
+  flutter: ">=3.44.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Runtime
+  ffi: ^2.2.0
+  meta: ^1.16.0
+  web_socket_channel: ^3.0.3
+
+  # Build hook / CMake から実行されるスクリプトが参照するため dependencies に置く
+  # (dev_dependencies は SDK 利用者のビルドでは解決されない)
+  archive: ^4.0.2
+  crypto: ^3.0.6
+  hooks: ^2.0.2
+  path: ^1.9.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  config:
+    enable-swift-package-manager: true
+  plugin:
+    platforms:
+      android:
+        package: jp.shiguredo.sora_sdk
+        pluginClass: SoraSdkPlugin
+      ios:
+        pluginClass: SoraSdkPlugin
+      macos:
+        pluginClass: SoraSdkPlugin
+      linux:
+        pluginClass: SoraSdkPlugin
+      windows:
+        pluginClass: SoraSdkPluginCApi

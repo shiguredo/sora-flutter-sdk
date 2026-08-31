@@ -1,0 +1,4 @@
+module CWebrtc [system] {
+    header "CWebrtc.h"
+    export *
+}

@@ -1,0 +1,15 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+
+linter:
+  rules:
+    avoid_dynamic_calls: true
+    directives_ordering: true
+    public_member_api_docs: true
+    unnecessary_late: true
+    unawaited_futures: true

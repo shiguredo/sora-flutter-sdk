@@ -1,0 +1,817 @@
+# Dart / Kotlin / Swift の静的 check と devtools の Android / iOS / macOS build を行う。
+# push と手動実行の両方を許可し、重い build を必要なタイミングで明示実行できるようにする。
+# Slack 通知は sora-js-sdk と同じ `slack_notify` ジョブ構成と
+# `shiguredo/github-actions` の `slack-notify` action を使う。
+name: CI
+
+on:
+  # Actions 画面から任意のタイミングで再実行できるようにする。
+  workflow_dispatch:
+  push:
+    # Android build は重いため、CI に関係する変更だけで実行する。
+    paths:
+      - ".clang-format"
+      - ".github/workflows/ci.yml"
+      - ".editorconfig"
+      - ".swiftlint.yml"
+      - "analysis_options.yaml"
+      - "android/**"
+      - "ios/**"
+      - "linux/**"
+      - "macos/**"
+      - "windows/**"
+      - "devtools/**"
+      - "lib/**"
+      - "prek.toml"
+      - "pubspec.yaml"
+      - "pubspec.lock"
+      - "scripts/**"
+      - "test/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  # 同じ branch への連続 push では古い実行を止め、重い build を無駄に回さない。
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Flutter は公式 archive を直接取得し、SDK 本体ごと cache する。
+  FLUTTER_CHANNEL: stable
+  FLUTTER_VERSION: 3.47.2
+  # ローカルの `prek` 実行環境と Apple CI の `swift format` 判定を揃える。
+  XCODE_DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
+  # Android / Gradle 側は現行 repository 設定に合わせる。
+  JAVA_VERSION: "17"
+  KTLINT_VERSION: "1.7.1"
+  ANDROID_API_LEVEL: "34"
+  ANDROID_BUILD_TOOLS_VERSION: "34.0.0"
+  ANDROID_NDK_VERSION: "28.2.13676358"
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
+jobs:
+  build-android:
+    name: Build Android
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          # Gradle cache は setup-java の公式機能に任せる。
+          cache: gradle
+
+      - name: Install ktlint
+        run: |
+          set -euo pipefail
+          mkdir -p "${HOME}/.local/bin"
+          curl -fsSL \
+            "https://github.com/pinterest/ktlint/releases/download/${KTLINT_VERSION}/ktlint" \
+            -o "${HOME}/.local/bin/ktlint"
+          chmod +x "${HOME}/.local/bin/ktlint"
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+
+      - name: Install clang-format
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+
+      - name: Restore Flutter SDK cache
+        id: flutter-sdk-cache
+        uses: actions/cache@v5
+        with:
+          # Flutter SDK 本体と `flutter precache` の成果物をまとめて再利用する。
+          path: ~/flutter
+          key: ${{ runner.os }}-flutter-sdk-${{ env.FLUTTER_CHANNEL }}-${{
+            env.FLUTTER_VERSION }}
+
+      - name: Install Flutter SDK
+        if: steps.flutter-sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+
+          # 公式 release manifest から対象バージョンの archive path と sha256 を取得する。
+          releases_json="${RUNNER_TEMP}/releases_linux.json"
+
+          curl -fsSL \
+            "https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json" \
+            -o "${releases_json}"
+
+          release_info="$(jq -r \
+            --arg version "${FLUTTER_VERSION}" \
+            --arg channel "${FLUTTER_CHANNEL}" \
+            '.releases[]
+            | select(.version == $version and .channel == $channel)
+            | [.archive, .sha256]
+            | @tsv' \
+            "${releases_json}" \
+            | head -n 1)"
+
+          if [[ -z "${release_info}" ]]; then
+            echo "Flutter release ${FLUTTER_VERSION} (${FLUTTER_CHANNEL}) was not found." >&2
+            exit 1
+          fi
+
+          IFS=$'\t' read -r archive_path archive_sha256 <<< "${release_info}"
+          archive_file="${RUNNER_TEMP}/$(basename "${archive_path}")"
+
+          curl -fsSL \
+            "https://storage.googleapis.com/flutter_infra_release/releases/${archive_path}" \
+            -o "${archive_file}"
+
+          echo "${archive_sha256}  ${archive_file}" | sha256sum -c -
+          rm -rf "${HOME}/flutter"
+          tar -xJf "${archive_file}" -C "${HOME}"
+
+      - name: Add Flutter to PATH
+        run: echo "${HOME}/flutter/bin" >> "${GITHUB_PATH}"
+
+      - name: Restore Pub cache
+        uses: actions/cache@v5
+        with:
+          # package 本体と devtools の両方で使う pub cache を共有する。
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-pub-${{ env.FLUTTER_VERSION }}-${{
+            hashFiles('pubspec.yaml', 'pubspec.lock', 'devtools/pubspec.yaml',
+            'devtools/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-${{ env.FLUTTER_VERSION }}-
+
+      - name: Restore native dependency cache
+        uses: actions/cache@v5
+        with:
+          # Android plugin build 時に自動取得される libwebrtc-c 配布物を再利用する。
+          path: third_party/libwebrtc-c
+          key: ${{ runner.os }}-native-deps-${{ hashFiles('scripts/native_deps.json') }}
+
+      - name: Restore Android SDK package cache
+        uses: actions/cache@v5
+        with:
+          # runner image 付属の cmdline-tools を使い、追加で取得する package だけを cache する。
+          path: |
+            /usr/local/lib/android/sdk/build-tools/${{ env.ANDROID_BUILD_TOOLS_VERSION }}
+            /usr/local/lib/android/sdk/licenses
+            /usr/local/lib/android/sdk/ndk/${{ env.ANDROID_NDK_VERSION }}
+            /usr/local/lib/android/sdk/platforms/android-${{ env.ANDROID_API_LEVEL }}
+          key: ${{ runner.os }}-android-sdk-${{ env.ANDROID_API_LEVEL }}-${{
+            env.ANDROID_BUILD_TOOLS_VERSION }}-${{ env.ANDROID_NDK_VERSION }}
+
+      - name: Install Android SDK packages
+        run: |
+          set -euo pipefail
+
+          # ubuntu-24.04 image にある sdkmanager を使って不足 package だけを揃える。
+          sdkmanager="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "${sdkmanager}" ]]; then
+            sdkmanager="${ANDROID_SDK_ROOT}/cmdline-tools/bin/sdkmanager"
+          fi
+
+          yes | "${sdkmanager}" --licenses > /dev/null || true
+          "${sdkmanager}" \
+            "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" \
+            "ndk;${ANDROID_NDK_VERSION}" \
+            "platforms;android-${ANDROID_API_LEVEL}"
+
+      - name: Show tool versions
+        run: |
+          set -euo pipefail
+          flutter --version
+          java -version
+
+      - name: Precache Flutter Android artifacts
+        run: |
+          set -euo pipefail
+          # Android build に必要な engine artifact を先に温め、次回以降は Flutter SDK cache から再利用する。
+          flutter precache --android
+
+      - name: Resolve package dependencies
+        run: |
+          set -euo pipefail
+          flutter pub get
+
+      - name: Run package Dart format check
+        run: |
+          set -euo pipefail
+          dart format --output=none --set-exit-if-changed lib test
+
+      - name: Run package Flutter analyze
+        run: |
+          set -euo pipefail
+          flutter analyze --fatal-infos lib test
+
+      - name: Run Android ktlint check
+        run: |
+          set -euo pipefail
+          mapfile -t kotlin_files < <(git ls-files -- '*.kt' '*.kts')
+          if (( ${#kotlin_files[@]} > 0 )); then
+            ktlint --relative "${kotlin_files[@]}"
+          fi
+
+      - name: Run C and C++ clang-format check
+        run: |
+          set -euo pipefail
+          files="$(git ls-files -- '*.c' '*.cc' '*.h')"
+          if [[ -n "${files}" ]]; then
+            printf '%s\n' "${files}" | xargs clang-format --dry-run --Werror -style=file -fallback-style=none
+          fi
+
+      - name: Reject silent FFI test returns
+        run: |
+          set -euo pipefail
+          ffi_test_files=(
+            test/webrtc_client_test.dart
+            test/sdp_negotiation_test.dart
+            test/sora_data_channel_controller_test.dart
+            test/simulcast_video_encoder_factory_test.dart
+          )
+          if grep -nE 'if \((!ffiAvailable|inner == nullptr)\) return;' "${ffi_test_files[@]}"; then
+            echo "Silent FFI test return detected." >&2
+            exit 1
+          fi
+
+      - name: Run package tests
+        run: |
+          set -euo pipefail
+          flutter test
+
+      - name: Prepare devtools environment file
+        run: |
+          set -euo pipefail
+          # devtools は environment.dart を前提にしているため、CI では example から生成する。
+          cp devtools/lib/configs/environment.example.dart devtools/lib/configs/environment.dart
+
+      - name: Resolve devtools dependencies
+        working-directory: devtools
+        run: |
+          set -euo pipefail
+          flutter pub get
+
+      - name: Run devtools Dart format check
+        run: |
+          set -euo pipefail
+          dart format --output=none --set-exit-if-changed devtools/lib devtools/test
+
+      - name: Run devtools Flutter analyze
+        working-directory: devtools
+        run: |
+          set -euo pipefail
+          flutter analyze --fatal-infos lib test
+
+      - name: Build devtools Android APK
+        working-directory: devtools
+        run: |
+          set -euo pipefail
+          # devtools の widget test は現状レイアウト overflow で失敗するため、
+          # ここでは package test の後に Android build 成立性を確認する。
+          flutter build apk --debug --no-pub
+
+      - name: Upload devtools Android artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: devtools-android-apk
+          path: devtools/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+
+  build-apple:
+    name: Build Apple
+    runs-on: macos-26
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Select Xcode Version
+        run: sudo xcode-select -s "${{ env.XCODE_DEVELOPER_DIR }}"
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: Run Swift format lint
+        run: |
+          set -euo pipefail
+          swift format lint --strict --parallel --recursive \
+            ios/sora_sdk/Sources/sora_sdk \
+            macos/sora_sdk/Sources/sora_sdk \
+            devtools/ios/Runner \
+            devtools/ios/RunnerTests \
+            devtools/macos/Runner \
+            devtools/macos/RunnerTests
+
+      - name: Run SwiftLint
+        run: |
+          set -euo pipefail
+          swiftlint lint --strict --config .swiftlint.yml
+
+      - name: Restore Flutter SDK cache
+        id: flutter-sdk-cache-macos
+        uses: actions/cache@v5
+        with:
+          # Flutter SDK 本体と `flutter precache` の成果物をまとめて再利用する。
+          path: ~/flutter
+          key: ${{ runner.os }}-flutter-sdk-${{ env.FLUTTER_CHANNEL }}-${{
+            env.FLUTTER_VERSION }}
+
+      - name: Install Flutter SDK
+        if: steps.flutter-sdk-cache-macos.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+
+          # 公式 release manifest から対象バージョンの archive path と sha256 を取得する。
+          releases_json="${RUNNER_TEMP}/releases_macos.json"
+
+          curl -fsSL \
+            "https://storage.googleapis.com/flutter_infra_release/releases/releases_macos.json" \
+            -o "${releases_json}"
+
+          release_info="$(jq -r \
+            --arg version "${FLUTTER_VERSION}" \
+            --arg channel "${FLUTTER_CHANNEL}" \
+            '.releases[]
+            | select(.version == $version and .channel == $channel)
+            | [.archive, .sha256]
+            | @tsv' \
+            "${releases_json}" \
+            | head -n 1)"
+
+          if [[ -z "${release_info}" ]]; then
+            echo "Flutter release ${FLUTTER_VERSION} (${FLUTTER_CHANNEL}) was not found." >&2
+            exit 1
+          fi
+
+          IFS=$'\t' read -r archive_path archive_sha256 <<< "${release_info}"
+          archive_file="${RUNNER_TEMP}/$(basename "${archive_path}")"
+
+          curl -fsSL \
+            "https://storage.googleapis.com/flutter_infra_release/releases/${archive_path}" \
+            -o "${archive_file}"
+
+          echo "${archive_sha256}  ${archive_file}" | shasum -a 256 -c -
+          rm -rf "${HOME}/flutter"
+
+          case "${archive_file}" in
+            *.zip)
+              unzip -q "${archive_file}" -d "${HOME}"
+              ;;
+            *.tar.xz)
+              tar -xJf "${archive_file}" -C "${HOME}"
+              ;;
+            *)
+              echo "Unsupported Flutter archive format: ${archive_file}" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Add Flutter to PATH
+        run: echo "${HOME}/flutter/bin" >> "${GITHUB_PATH}"
+
+      - name: Restore Pub cache
+        uses: actions/cache@v5
+        with:
+          # package 本体と devtools の両方で使う pub cache を共有する。
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-pub-${{ env.FLUTTER_VERSION }}-${{
+            hashFiles('pubspec.yaml', 'pubspec.lock', 'devtools/pubspec.yaml',
+            'devtools/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-${{ env.FLUTTER_VERSION }}-
+
+      - name: Restore native dependency cache
+        uses: actions/cache@v5
+        with:
+          # iOS / macOS plugin build 時に自動取得される libwebrtc-c 配布物を再利用する。
+          path: third_party/libwebrtc-c
+          key: ${{ runner.os }}-native-deps-${{ hashFiles('scripts/native_deps.json') }}
+
+      - name: Show tool versions
+        run: |
+          set -euo pipefail
+          flutter --version
+          xcodebuild -version
+
+      - name: Resolve package dependencies
+        run: |
+          set -euo pipefail
+          flutter pub get
+
+      - name: Precache Flutter iOS artifacts
+        run: |
+          set -euo pipefail
+          # iOS build に必要な engine artifact を先に温め、次回以降は Flutter SDK cache から再利用する。
+          flutter precache --ios
+
+      - name: Precache Flutter macOS artifacts
+        run: |
+          set -euo pipefail
+          # macOS build に必要な engine artifact を先に温め、次回以降は Flutter SDK cache から再利用する。
+          flutter precache --macos
+
+      - name: Prepare devtools environment file
+        run: |
+          set -euo pipefail
+          # devtools は environment.dart を前提にしているため、CI では example から生成する。
+          cp devtools/lib/configs/environment.example.dart devtools/lib/configs/environment.dart
+
+      - name: Resolve devtools dependencies
+        working-directory: devtools
+        run: |
+          set -euo pipefail
+          flutter pub get
+
+      - name: Build devtools iOS app
+        working-directory: devtools
+        run: |
+          set -euo pipefail
+          # 現行の native dependency 配布は iphoneos 向けのため、署名なし実機 build で成立性を確認する。
+          flutter build ios --release --no-codesign --no-pub
+
+      - name: Build devtools macOS app
+        working-directory: devtools
+        run: |
+          set -euo pipefail
+          # macOS デスクトップ向け build の成立性を確認する。
+          flutter build macos --release --no-pub
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-2022
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Restore Flutter SDK cache
+        id: flutter-sdk-cache-windows
+        uses: actions/cache@v5
+        with:
+          # Flutter SDK 本体と `flutter precache` の成果物をまとめて再利用する。
+          path: ~/flutter
+          key: ${{ runner.os }}-flutter-sdk-${{ env.FLUTTER_CHANNEL }}-${{
+            env.FLUTTER_VERSION }}
+
+      - name: Install Flutter SDK
+        if: steps.flutter-sdk-cache-windows.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+
+          # 公式 release manifest から対象バージョンの archive path と sha256 を取得する
+          $releasesJson = "$env:RUNNER_TEMP/releases_windows.json"
+
+          Invoke-WebRequest -Uri "https://storage.googleapis.com/flutter_infra_release/releases/releases_windows.json" -OutFile $releasesJson
+
+          # jq は windows-2022 にプリインストールされていないため ConvertFrom-Json を使う
+          $releases = Get-Content -Raw $releasesJson | ConvertFrom-Json
+          $release = $releases.releases | Where-Object {
+            $_.version -eq $env:FLUTTER_VERSION -and $_.channel -eq $env:FLUTTER_CHANNEL
+          } | Select-Object -First 1
+
+          if (-not $release) {
+            throw "Flutter release $env:FLUTTER_VERSION ($env:FLUTTER_CHANNEL) was not found."
+          }
+
+          $archivePath = $release.archive
+          $archiveSha256 = $release.sha256
+          $archiveFile = Join-Path $env:RUNNER_TEMP (Split-Path $archivePath -Leaf)
+
+          Invoke-WebRequest -Uri "https://storage.googleapis.com/flutter_infra_release/releases/$archivePath" -OutFile $archiveFile
+
+          $actualHash = (Get-FileHash -Path $archiveFile -Algorithm SHA256).Hash.ToLower()
+          if ($actualHash -ne $archiveSha256) {
+            throw "SHA256 mismatch: expected=$archiveSha256 actual=$actualHash"
+          }
+
+          Remove-Item -Recurse -Force "$env:USERPROFILE/flutter" -ErrorAction SilentlyContinue
+
+          if ($archiveFile.EndsWith('.zip')) {
+            Expand-Archive -Path $archiveFile -DestinationPath "$env:USERPROFILE"
+          } elseif ($archiveFile.EndsWith('.tar.xz')) {
+            tar -xJf $archiveFile -C "$env:USERPROFILE"
+            if ($LASTEXITCODE -ne 0) {
+              throw "tar failed with exit code $LASTEXITCODE"
+            }
+          } else {
+            throw "Unsupported Flutter archive format: $archiveFile"
+          }
+
+      - name: Add Flutter to PATH
+        run: echo "${HOME}/flutter/bin" >> "${GITHUB_PATH}"
+
+      - name: Set Pub cache path for Windows
+        run: echo "PUB_CACHE=${HOME}/.pub-cache" >> "${GITHUB_ENV}"
+
+      - name: Restore Pub cache
+        uses: actions/cache@v5
+        with:
+          # package 本体と devtools の両方で使う pub cache を共有する。
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-pub-${{ env.FLUTTER_VERSION }}-${{
+            hashFiles('pubspec.yaml', 'pubspec.lock', 'devtools/pubspec.yaml',
+            'devtools/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-${{ env.FLUTTER_VERSION }}-
+
+      - name: Restore native dependency cache
+        uses: actions/cache@v5
+        with:
+          # Windows plugin build 時に自動取得される libwebrtc-c 配布物を再利用する。
+          path: third_party/libwebrtc-c
+          key: ${{ runner.os }}-native-deps-${{ hashFiles('scripts/native_deps.json') }}
+
+      - name: Show tool versions
+        run: |
+          set -euo pipefail
+          flutter --version
+
+      - name: Resolve package dependencies
+        run: |
+          set -euo pipefail
+          flutter pub get
+
+      - name: Prepare devtools environment file
+        run: |
+          set -euo pipefail
+          # devtools は environment.dart を前提にしているため、CI では example から生成する。
+          cp devtools/lib/configs/environment.example.dart devtools/lib/configs/environment.dart
+
+      - name: Resolve devtools dependencies
+        working-directory: devtools
+        run: |
+          set -euo pipefail
+          flutter pub get
+
+      - name: Run devtools Dart format check
+        run: |
+          set -euo pipefail
+          dart format --output=none --set-exit-if-changed devtools/lib devtools/test
+
+      - name: Run devtools Flutter analyze
+        working-directory: devtools
+        run: |
+          set -euo pipefail
+          flutter analyze --fatal-infos lib test
+
+      - name: Build devtools Windows app
+        working-directory: devtools
+        run: |
+          set -euo pipefail
+          flutter build windows --release --no-pub
+
+      - name: Upload devtools Windows artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: devtools-windows
+          path: devtools/build/windows/x64/runner/Release/
+          if-no-files-found: error
+
+      - name: Precache Flutter Windows artifacts
+        run: |
+          set -euo pipefail
+          # Windows build に必要な engine artifact を先に温め、次回以降は Flutter SDK cache から再利用する。
+          flutter precache --windows
+
+      - name: Resolve e2e_test_app dependencies
+        working-directory: e2e_test_app
+        run: |
+          set -euo pipefail
+          flutter pub get
+
+      - name: Build e2e_test_app Windows app
+        working-directory: e2e_test_app
+        run: |
+          set -euo pipefail
+          # Windows デスクトップ向け build の成立性を確認する。
+          # CMake が自動的に fetch_native_deps.dart を起動し、ネイティブ依存を取得する。
+          flutter build windows --release --no-pub
+
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install system dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang-format \
+            ninja-build \
+            clang \
+            cmake \
+            pkg-config \
+            libgtk-3-dev \
+            liblzma-dev \
+            libpulse-dev \
+            libjpeg-dev
+
+      - name: Restore Flutter SDK cache
+        id: flutter-sdk-cache-linux
+        uses: actions/cache@v5
+        with:
+          path: ~/flutter
+          key: ${{ runner.os }}-flutter-sdk-${{ env.FLUTTER_CHANNEL }}-${{
+            env.FLUTTER_VERSION }}
+
+      - name: Install Flutter SDK
+        if: steps.flutter-sdk-cache-linux.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+
+          releases_json="${RUNNER_TEMP}/releases_linux.json"
+
+          curl -fsSL \
+            "https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json" \
+            -o "${releases_json}"
+
+          release_info="$(jq -r \
+            --arg version "${FLUTTER_VERSION}" \
+            --arg channel "${FLUTTER_CHANNEL}" \
+            '.releases[]
+            | select(.version == $version and .channel == $channel)
+            | [.archive, .sha256]
+            | @tsv' \
+            "${releases_json}" \
+            | head -n 1)"
+
+          if [[ -z "${release_info}" ]]; then
+            echo "Flutter release ${FLUTTER_VERSION} (${FLUTTER_CHANNEL}) was not found." >&2
+            exit 1
+          fi
+
+          IFS=$'\t' read -r archive_path archive_sha256 <<< "${release_info}"
+          archive_file="${RUNNER_TEMP}/$(basename "${archive_path}")"
+
+          curl -fsSL \
+            "https://storage.googleapis.com/flutter_infra_release/releases/${archive_path}" \
+            -o "${archive_file}"
+
+          echo "${archive_sha256}  ${archive_file}" | sha256sum -c -
+          rm -rf "${HOME}/flutter"
+          tar -xJf "${archive_file}" -C "${HOME}"
+
+      - name: Add Flutter to PATH
+        run: echo "${HOME}/flutter/bin" >> "${GITHUB_PATH}"
+
+      - name: Restore Pub cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-pub-${{ env.FLUTTER_VERSION }}-${{
+            hashFiles('pubspec.yaml', 'pubspec.lock', 'devtools/pubspec.yaml',
+            'devtools/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-${{ env.FLUTTER_VERSION }}-
+
+      - name: Restore native dependency cache
+        uses: actions/cache@v5
+        with:
+          path: third_party/libwebrtc-c
+          key: ${{ runner.os }}-native-deps-${{ hashFiles('scripts/native_deps.json') }}
+
+      - name: Show tool versions
+        run: |
+          set -euo pipefail
+          flutter --version
+
+      - name: Resolve package dependencies
+        run: |
+          set -euo pipefail
+          flutter pub get
+
+      - name: Precache Flutter Linux artifacts
+        run: |
+          set -euo pipefail
+          flutter precache --linux
+
+      - name: Run package Dart format check
+        run: |
+          set -euo pipefail
+          dart format --output=none --set-exit-if-changed lib test
+
+      - name: Run package Flutter analyze
+        run: |
+          set -euo pipefail
+          flutter analyze --fatal-infos lib test
+
+      - name: Run C and C++ clang-format check
+        run: |
+          set -euo pipefail
+          files="$(git ls-files -- '*.c' '*.cc' '*.h')"
+          if [[ -n "${files}" ]]; then
+            printf '%s\n' "${files}" | xargs clang-format --dry-run --Werror -style=file -fallback-style=none
+          fi
+
+      - name: Prepare devtools environment file
+        run: |
+          set -euo pipefail
+          cp devtools/lib/configs/environment.example.dart devtools/lib/configs/environment.dart
+
+      - name: Resolve devtools dependencies
+        working-directory: devtools
+        run: |
+          set -euo pipefail
+          flutter pub get
+
+      - name: Run devtools Dart format check
+        run: |
+          set -euo pipefail
+          dart format --output=none --set-exit-if-changed devtools/lib devtools/test
+
+      - name: Run devtools Flutter analyze
+        working-directory: devtools
+        run: |
+          set -euo pipefail
+          flutter analyze --fatal-infos lib test
+
+      - name: Fetch native dependencies for Linux
+        run: |
+          set -euo pipefail
+          dart run scripts/fetch_native_deps.dart linux_ubuntu_24_04_x86_64
+
+      - name: Build devtools Linux app
+        working-directory: devtools
+        run: |
+          set -euo pipefail
+          flutter build linux --release --no-pub -v
+
+      - name: Run FFI-dependent package tests
+        run: |
+          set -euo pipefail
+          native_dir="${GITHUB_WORKSPACE}/devtools/build/linux/x64/release/bundle/lib"
+          library_path="${native_dir}/libsora_sdk.so"
+          if [[ ! -f "${library_path}" ]]; then
+            echo "FFI test library was not found: ${library_path}" >&2
+            exit 1
+          fi
+          LD_LIBRARY_PATH="${native_dir}:${LD_LIBRARY_PATH:-}" \
+            SORA_FFI_TEST_LIBRARY_PATH="${library_path}" \
+            flutter test \
+              test/webrtc_client_test.dart \
+              test/sdp_negotiation_test.dart \
+              test/sora_data_channel_controller_test.dart \
+              test/simulcast_video_encoder_factory_test.dart \
+              test/sora_media_stream_test.dart \
+              test/sora_connection_test.dart
+
+      - name: Upload devtools Linux artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: devtools-linux
+          path: devtools/build/linux/x64/release/bundle/
+          if-no-files-found: error
+
+      - name: Resolve e2e_test_app dependencies
+        working-directory: e2e_test_app
+        run: |
+          set -euo pipefail
+          flutter pub get
+
+      - name: Build e2e_test_app Linux app
+        working-directory: e2e_test_app
+        run: |
+          set -euo pipefail
+          flutter build linux --release --no-pub
+
+  slack_notify:
+    name: Slack Notify
+    needs: [ build-android, build-apple, build-windows, build-linux ]
+    runs-on: ubuntu-24.04
+    if: ${{ always() }}
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Slack Notification
+        uses: shiguredo/github-actions/.github/actions/slack-notify@main
+        with:
+          status: ${{ job.status }}
+          slack_webhook: ${{ secrets.SLACK_WEBHOOK }}
+          slack_channel: sora-flutter-sdk
+          notify_mode: failure_and_fixed

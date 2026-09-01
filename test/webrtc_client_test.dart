@@ -143,6 +143,80 @@ void main() {
     });
   }, skip: ffiTestEnvironment.skipReason);
 
+  group('shared factory の途中失敗時のクリーンアップ', () {
+    // 共有 factory の生成は isolate 内で 1 度しか実行できず、成功すると
+    // 静的な状態が恒久化する。そのため失敗経路の検証はこの 1 テスト内で
+    // 連続して行う。共有 factory 生成を伴うテストを追加する場合は、この
+    // テストが冒頭で factory 未生成を検証し最後に factory を恒久生成する
+    // ため、必ずこのテストより後に配置すること。
+    //
+    // 実音声デバイスに依存しないよう push audio device を利用する。
+    // factory 生成後は `useAudioDevice` setter が値変更を拒否するため、
+    // この isolate 内では push audio device 前提の factory が恒久化する。
+    // 本テストは macOS / Linux / Windows のホスト OS での実行を前提とする。
+    // Android は ADM 初期化を行わないため、失敗経路を検証できない。
+    test('ADM init / factory 生成の失敗でリソースが解放され、リトライで再生成される', () {
+      WebrtcClient.useAudioDevice = false;
+      try {
+        // 事前状態: 共有 factory と生成途中リソースが未生成であること
+        expect(WebrtcClient.hasSharedFactoryForTest, false);
+        expect(WebrtcClient.hasSharedFactoryResourcesForTest, false);
+
+        // ADM init の失敗を模擬して共有 factory 生成を失敗させる
+        WebrtcClient.forceAudioDeviceModuleInitFailureForTest = true;
+        expect(
+          () => WebrtcClient.sharedFactory,
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              contains('AudioDeviceModule init failed'),
+            ),
+          ),
+        );
+
+        // 失敗後は作成済みリソース (3 スレッド / deps / ADM) が全て
+        // 解放され、static field がリセットされる
+        expect(WebrtcClient.hasSharedFactoryForTest, false);
+        expect(WebrtcClient.hasSharedFactoryResourcesForTest, false);
+
+        // factory 生成 (後段) の失敗を模擬して再び失敗させる。simulcast
+        // factory が deps へ渡された後の経路で、dispose と static field の
+        // リセットを検証する。
+        WebrtcClient.forceAudioDeviceModuleInitFailureForTest = false;
+        WebrtcClient.forceCreateModularPeerConnectionFactoryFailureForTest =
+            true;
+        expect(
+          () => WebrtcClient.sharedFactory,
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              contains('Failed to create PeerConnectionFactory.'),
+            ),
+          ),
+        );
+
+        // 後段の失敗でも simulcast factory を含む全リソースが解放される
+        expect(WebrtcClient.hasSharedFactoryForTest, false);
+        expect(WebrtcClient.hasSharedFactoryResourcesForTest, false);
+
+        // 両フックを解除してリトライすると再生成される (先行失敗時の
+        // 静的フィールドのリセットは上記で検証済み。ネイティブ側の
+        // 参照カウントまではこのテストでは検証できない)
+        WebrtcClient.forceCreateModularPeerConnectionFactoryFailureForTest =
+            false;
+        expect(WebrtcClient.sharedFactory, isNot(nullptr));
+        expect(WebrtcClient.hasSharedFactoryForTest, true);
+        expect(WebrtcClient.hasSharedFactoryResourcesForTest, true);
+      } finally {
+        WebrtcClient.forceAudioDeviceModuleInitFailureForTest = false;
+        WebrtcClient.forceCreateModularPeerConnectionFactoryFailureForTest =
+            false;
+      }
+    });
+  }, skip: ffiTestEnvironment.skipReason);
+
   group('PeerConnection state change のイベント変換', () {
     late WebrtcConstants consts;
 

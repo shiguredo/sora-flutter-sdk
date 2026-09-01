@@ -145,6 +145,18 @@ class WebrtcClient {
   // 音声デバイスを利用するかどうか。共有 factory の生成前に設定する。
   // false の場合は push audio device が選択される。
   static bool _useAudioDevice = true;
+  // テスト専用フック。true の間は AudioDeviceModule の初期化を常に失敗させる。
+  // ネイティブ環境 (音声デバイスの有無) に依存せずに共有 factory 生成の
+  // 失敗経路を検証するために利用する。通常実行では常に false のまま。
+  // Android は ADM 初期化を行わないため本フックは無効。
+  @visibleForTesting
+  static bool forceAudioDeviceModuleInitFailureForTest = false;
+  // テスト専用フック。true の間は modular PeerConnectionFactory の生成を
+  // 常に nullptr で失敗させる。deps へ factory 群が揃った後段の失敗経路
+  // (simulcast factory の dispose・static field のリセット) を検証するために
+  // 利用する。通常実行では常に false のまま。
+  @visibleForTesting
+  static bool forceCreateModularPeerConnectionFactoryFailureForTest = false;
 
   /// 共有 factory の音声デバイス使用設定を変更する。
   ///
@@ -157,6 +169,22 @@ class WebrtcClient {
     }
     _useAudioDevice = value;
   }
+
+  // テスト専用フック。共有 factory が生成済みかどうかを返す。
+  @visibleForTesting
+  static bool get hasSharedFactoryForTest => _sharedFactoryRef != null;
+
+  // テスト専用フック。共有 factory 生成途中で確保されるリソース
+  // (3 スレッド / ADM / simulcast factory) が保持されているかを返す。
+  // 失敗経路のクリーンアップ検証に利用する。simulcast factory は ADM
+  // やスレッドより後で生成されるため、後段失敗時の解放検証に効く。
+  @visibleForTesting
+  static bool get hasSharedFactoryResourcesForTest =>
+      _sharedNetworkThread != null ||
+      _sharedWorkerThread != null ||
+      _sharedSignalingThread != null ||
+      _sharedAdmRef != null ||
+      _sharedSimulcastVideoEncoderFactory != null;
 
   // `LibWebrtcC` の共有インスタンスを返す。
   //
@@ -279,6 +307,11 @@ class WebrtcClient {
   /// network / worker / signaling thread、ADM、encoder/decoder factory、
   /// audio processing をまとめて依存オブジェクトへ積み、最後に modular
   /// factory を構築する。
+  ///
+  /// ADM 初期化が失敗するなど途中で例外が発生した場合は、作成済みの
+  /// thread / deps / ADM / simulcast factory を解放して static field を
+  /// リセットし、例外をそのまま伝播させる。これにより失敗後の再試行で
+  /// リソースが二重に確保されることを防ぐ。
   static void _ensureSharedFactory() {
     if (_sharedFactoryRef != null) {
       return;
@@ -286,203 +319,306 @@ class WebrtcClient {
 
     final requestedUseAudioDevice = _useAudioDevice;
 
-    _sharedNetworkThread = sharedLib.threadCreateWithSocketServer();
-    _sharedWorkerThread = sharedLib.threadCreate();
-    _sharedSignalingThread = sharedLib.threadCreate();
-    sharedLib.threadStart(sharedLib.threadUniqueGet(_sharedNetworkThread!));
-    sharedLib.threadStart(sharedLib.threadUniqueGet(_sharedWorkerThread!));
-    sharedLib.threadStart(sharedLib.threadUniqueGet(_sharedSignalingThread!));
+    // 途中失敗時の解放対象を catch 節から参照する。成功時は delete 後に
+    // null へ戻して catch 節での二重解放を防ぐ。
+    Pointer<WebrtcPeerConnectionFactoryDependencies>? depsToRelease;
 
-    final deps = sharedLib.pcFactoryDependenciesNew();
-    sharedLib.pcFactoryDependenciesSetNetworkThread(
-      deps,
-      sharedLib.threadUniqueGet(_sharedNetworkThread!),
-    );
-    sharedLib.pcFactoryDependenciesSetWorkerThread(
-      deps,
-      sharedLib.threadUniqueGet(_sharedWorkerThread!),
-    );
-    sharedLib.pcFactoryDependenciesSetSignalingThread(
-      deps,
-      sharedLib.threadUniqueGet(_sharedSignalingThread!),
-    );
+    try {
+      _sharedNetworkThread = sharedLib.threadCreateWithSocketServer();
+      _sharedWorkerThread = sharedLib.threadCreate();
+      _sharedSignalingThread = sharedLib.threadCreate();
+      sharedLib.threadStart(sharedLib.threadUniqueGet(_sharedNetworkThread!));
+      sharedLib.threadStart(sharedLib.threadUniqueGet(_sharedWorkerThread!));
+      sharedLib.threadStart(sharedLib.threadUniqueGet(_sharedSignalingThread!));
 
-    if (Platform.isAndroid) {
-      final env = sharedLib.createEnvironment();
-      final adm = sharedLib.createAndroidAudioDeviceModule(env);
-      sharedLib.environmentDelete(env);
-      if (adm != nullptr) {
-        sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
-        sharedLib.audioDeviceModuleRelease(
-          sharedLib.audioDeviceModuleRefcountedGet(adm),
-        );
-      }
-    } else if (Platform.isMacOS) {
-      if (requestedUseAudioDevice) {
+      final deps = sharedLib.pcFactoryDependenciesNew();
+      depsToRelease = deps;
+      sharedLib.pcFactoryDependenciesSetNetworkThread(
+        deps,
+        sharedLib.threadUniqueGet(_sharedNetworkThread!),
+      );
+      sharedLib.pcFactoryDependenciesSetWorkerThread(
+        deps,
+        sharedLib.threadUniqueGet(_sharedWorkerThread!),
+      );
+      sharedLib.pcFactoryDependenciesSetSignalingThread(
+        deps,
+        sharedLib.threadUniqueGet(_sharedSignalingThread!),
+      );
+
+      if (Platform.isAndroid) {
         final env = sharedLib.createEnvironment();
-        final adm = sharedLib.createAudioDeviceModule(
-          env,
-          sharedConsts.kPlatformDefaultAudio,
-        );
+        final adm = sharedLib.createAndroidAudioDeviceModule(env);
         sharedLib.environmentDelete(env);
         if (adm != nullptr) {
           sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
-          // Dart から SetRecordingDevice を呼ぶために参照を保持しておく
-          if (_sharedAdmRef != null) {
-            sharedLib.audioDeviceModuleRelease(
-              sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
-            );
-          }
-          _sharedAdmRef = adm;
-          final initRcMac = sharedLib.audioDeviceModuleInit(
+          sharedLib.audioDeviceModuleRelease(
             sharedLib.audioDeviceModuleRefcountedGet(adm),
           );
-          if (initRcMac != 0) {
-            throw StateError('AudioDeviceModule init failed: rc=$initRcMac');
+        }
+      } else if (Platform.isMacOS) {
+        if (requestedUseAudioDevice) {
+          final env = sharedLib.createEnvironment();
+          final adm = sharedLib.createAudioDeviceModule(
+            env,
+            sharedConsts.kPlatformDefaultAudio,
+          );
+          sharedLib.environmentDelete(env);
+          if (adm != nullptr) {
+            sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+            // Dart から SetRecordingDevice を呼ぶために参照を保持しておく
+            if (_sharedAdmRef != null) {
+              sharedLib.audioDeviceModuleRelease(
+                sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+              );
+            }
+            _sharedAdmRef = adm;
+            final initRcMac = _initAudioDeviceModule(adm);
+            if (initRcMac != 0) {
+              throw StateError('AudioDeviceModule init failed: rc=$initRcMac');
+            }
+          }
+        } else {
+          final adm = sharedLib.soraCreatePushAudioDevice();
+          if (adm != nullptr) {
+            sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+            if (_sharedAdmRef != null) {
+              sharedLib.audioDeviceModuleRelease(
+                sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+              );
+            }
+            _sharedAdmRef = adm;
+            final initRcMac = _initAudioDeviceModule(adm);
+            if (initRcMac != 0) {
+              throw StateError('AudioDeviceModule init failed: rc=$initRcMac');
+            }
           }
         }
-      } else {
-        final adm = sharedLib.soraCreatePushAudioDevice();
-        if (adm != nullptr) {
-          sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
-          if (_sharedAdmRef != null) {
-            sharedLib.audioDeviceModuleRelease(
-              sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
-            );
-          }
-          _sharedAdmRef = adm;
-          final initRcMac = sharedLib.audioDeviceModuleInit(
-            sharedLib.audioDeviceModuleRefcountedGet(adm),
+      } else if (Platform.isWindows) {
+        if (requestedUseAudioDevice) {
+          // Windows: setjmp/longjmp で abort を捕捉して安全に ADM を作成する
+          final env = sharedLib.createEnvironment();
+          final adm = sharedLib.soraCreateAudioDeviceModule(
+            env,
+            sharedConsts.kPlatformDefaultAudio,
           );
-          if (initRcMac != 0) {
-            throw StateError('AudioDeviceModule init failed: rc=$initRcMac');
+          sharedLib.environmentDelete(env);
+          if (adm != nullptr) {
+            sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+            if (_sharedAdmRef != null) {
+              sharedLib.audioDeviceModuleRelease(
+                sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+              );
+            }
+            _sharedAdmRef = adm;
+            final initRcWin = _initAudioDeviceModule(adm);
+            if (initRcWin != 0) {
+              throw StateError('AudioDeviceModule init failed: rc=$initRcWin');
+            }
+          }
+        } else {
+          final adm = sharedLib.soraCreatePushAudioDevice();
+          if (adm != nullptr) {
+            sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+            if (_sharedAdmRef != null) {
+              sharedLib.audioDeviceModuleRelease(
+                sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+              );
+            }
+            _sharedAdmRef = adm;
+            final initRcWin = _initAudioDeviceModule(adm);
+            if (initRcWin != 0) {
+              throw StateError('AudioDeviceModule init failed: rc=$initRcWin');
+            }
+          }
+        }
+      } else if (Platform.isLinux) {
+        if (requestedUseAudioDevice) {
+          final env = sharedLib.createEnvironment();
+          final adm = sharedLib.createAudioDeviceModule(
+            env,
+            sharedConsts.kPlatformDefaultAudio,
+          );
+          sharedLib.environmentDelete(env);
+          if (adm != nullptr) {
+            sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+            if (_sharedAdmRef != null) {
+              sharedLib.audioDeviceModuleRelease(
+                sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+              );
+            }
+            _sharedAdmRef = adm;
+            final initRcLinux = _initAudioDeviceModule(adm);
+            if (initRcLinux != 0) {
+              throw StateError(
+                'AudioDeviceModule init failed: rc=$initRcLinux',
+              );
+            }
+          }
+        } else {
+          final adm = sharedLib.soraCreatePushAudioDevice();
+          if (adm != nullptr) {
+            sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+            if (_sharedAdmRef != null) {
+              sharedLib.audioDeviceModuleRelease(
+                sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+              );
+            }
+            _sharedAdmRef = adm;
+            final initRcLinux = _initAudioDeviceModule(adm);
+            if (initRcLinux != 0) {
+              throw StateError(
+                'AudioDeviceModule init failed: rc=$initRcLinux',
+              );
+            }
           }
         }
       }
-    } else if (Platform.isWindows) {
-      if (requestedUseAudioDevice) {
-        // Windows: setjmp/longjmp で abort を捕捉して安全に ADM を作成する
-        final env = sharedLib.createEnvironment();
-        final adm = sharedLib.soraCreateAudioDeviceModule(
-          env,
-          sharedConsts.kPlatformDefaultAudio,
-        );
-        sharedLib.environmentDelete(env);
-        if (adm != nullptr) {
-          sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
-          if (_sharedAdmRef != null) {
-            sharedLib.audioDeviceModuleRelease(
-              sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
-            );
-          }
-          _sharedAdmRef = adm;
-          final initRcWin = sharedLib.audioDeviceModuleInit(
-            sharedLib.audioDeviceModuleRefcountedGet(adm),
-          );
-          if (initRcWin != 0) {
-            throw StateError('AudioDeviceModule init failed: rc=$initRcWin');
-          }
-        }
-      } else {
-        final adm = sharedLib.soraCreatePushAudioDevice();
-        if (adm != nullptr) {
-          sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
-          if (_sharedAdmRef != null) {
-            sharedLib.audioDeviceModuleRelease(
-              sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
-            );
-          }
-          _sharedAdmRef = adm;
-          final initRcWin = sharedLib.audioDeviceModuleInit(
-            sharedLib.audioDeviceModuleRefcountedGet(adm),
-          );
-          if (initRcWin != 0) {
-            throw StateError('AudioDeviceModule init failed: rc=$initRcWin');
-          }
-        }
+
+      final eventLogFactory = sharedLib.rtcEventLogFactoryCreate();
+      sharedLib.pcFactoryDependenciesSetEventLogFactory(deps, eventLogFactory);
+
+      final audioEnc = sharedLib.createBuiltinAudioEncoderFactory();
+      final audioDec = sharedLib.createBuiltinAudioDecoderFactory();
+      sharedLib.pcFactoryDependenciesSetAudioEncoderFactory(deps, audioEnc);
+      sharedLib.pcFactoryDependenciesSetAudioDecoderFactory(deps, audioDec);
+      // deps が保持する参照とは別に確保したローカル参照をここで解放する。
+      // Set 直後に release しても deps 側の参照は残るため、後段の video
+      // factory 生成が失敗しても audioEnc / audioDec は deps delete で解放される。
+      // (video factory 系は unique ポインタで所有権が deps へ移譲されるため
+      // ローカル参照の release は不要)
+      sharedLib.audioEncoderFactoryRelease(
+        sharedLib.audioEncoderFactoryRefcountedGet(audioEnc),
+      );
+      sharedLib.audioDecoderFactoryRelease(
+        sharedLib.audioDecoderFactoryRefcountedGet(audioDec),
+      );
+
+      final videoEnc = _createDefaultVideoEncoderFactory();
+      _sharedSimulcastVideoEncoderFactory = SimulcastVideoEncoderFactory(
+        sharedLib,
+        videoEnc,
+      );
+      final videoDec = _createDefaultVideoDecoderFactory();
+      sharedLib.pcFactoryDependenciesSetVideoEncoderFactory(
+        deps,
+        _sharedSimulcastVideoEncoderFactory!.native(),
+      );
+      sharedLib.pcFactoryDependenciesSetVideoDecoderFactory(deps, videoDec);
+
+      final apBuilder = sharedLib.builtinAudioProcessingBuilderCreate();
+      sharedLib.pcFactoryDependenciesSetAudioProcessingBuilder(deps, apBuilder);
+      sharedLib.enableMedia(deps);
+      final factoryRef = _createSharedModularPeerConnectionFactory(deps);
+      if (factoryRef == nullptr) {
+        // nullptr は Dart の null ではなくアドレス 0 の Pointer のため、
+        // `_sharedFactoryRef == null` 判定では捕捉できない。明示的に検査して
+        // throw することで catch のクリーンアップ経路に乗せ、リトライを可能にする。
+        throw StateError('Failed to create PeerConnectionFactory.');
       }
-    } else if (Platform.isLinux) {
-      if (requestedUseAudioDevice) {
-        final env = sharedLib.createEnvironment();
-        final adm = sharedLib.createAudioDeviceModule(
-          env,
-          sharedConsts.kPlatformDefaultAudio,
-        );
-        sharedLib.environmentDelete(env);
-        if (adm != nullptr) {
-          sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
-          if (_sharedAdmRef != null) {
-            sharedLib.audioDeviceModuleRelease(
-              sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
-            );
-          }
-          _sharedAdmRef = adm;
-          final initRcLinux = sharedLib.audioDeviceModuleInit(
-            sharedLib.audioDeviceModuleRefcountedGet(adm),
-          );
-          if (initRcLinux != 0) {
-            throw StateError('AudioDeviceModule init failed: rc=$initRcLinux');
-          }
-        }
-      } else {
-        final adm = sharedLib.soraCreatePushAudioDevice();
-        if (adm != nullptr) {
-          sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
-          if (_sharedAdmRef != null) {
-            sharedLib.audioDeviceModuleRelease(
-              sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
-            );
-          }
-          _sharedAdmRef = adm;
-          final initRcLinux = sharedLib.audioDeviceModuleInit(
-            sharedLib.audioDeviceModuleRefcountedGet(adm),
-          );
-          if (initRcLinux != 0) {
-            throw StateError('AudioDeviceModule init failed: rc=$initRcLinux');
-          }
-        }
+      _sharedFactoryRef = factoryRef;
+      sharedLib.pcFactoryDependenciesDelete(deps);
+      depsToRelease = null;
+
+      final options = sharedLib.pcFactoryOptionsNew();
+      sharedLib.pcFactoryOptionsSetDisableEncryption(options, 0);
+      sharedLib.pcFactoryOptionsSetSslMaxVersion(
+        options,
+        sharedConsts.sslProtocolDtls12,
+      );
+      // `sharedFactory` getter は `_ensureSharedFactory` を再入するため、
+      // 生成済みの参照を直接使って options を適用する。
+      sharedLib.pcFactorySetOptions(
+        sharedLib.pcFactoryRefcountedGet(_sharedFactoryRef!),
+        options,
+      );
+      sharedLib.pcFactoryOptionsDelete(options);
+    } catch (_) {
+      // factory 生成 (成功) 後の例外では factory とその資源 (スレッド /
+      // ADM) が生きているため破棄しない。生成前の失敗 (ADM init 失敗等)
+      // のみ、作成済みの thread / deps / ADM を解放して static field を
+      // リセットし、リトライで再生成できるようにする。
+      if (_sharedFactoryRef == null) {
+        _releaseSharedFactoryResources(depsToRelease);
       }
+      rethrow;
+    }
+  }
+
+  // `_ensureSharedFactory` が途中で失敗した場合に、作成済みの thread / deps /
+  // ADM / simulcast factory を解放して static field をリセットする。
+  //
+  // deps は成功時に delete 済みで null になっているため、失敗時のみ解放する。
+  static void _releaseSharedFactoryResources(
+    Pointer<WebrtcPeerConnectionFactoryDependencies>? deps,
+  ) {
+    if (deps != null) {
+      sharedLib.pcFactoryDependenciesDelete(deps);
     }
 
-    final eventLogFactory = sharedLib.rtcEventLogFactoryCreate();
-    sharedLib.pcFactoryDependenciesSetEventLogFactory(deps, eventLogFactory);
+    final adm = _sharedAdmRef;
+    if (adm != null) {
+      sharedLib.audioDeviceModuleRelease(
+        sharedLib.audioDeviceModuleRefcountedGet(adm),
+      );
+      _sharedAdmRef = null;
+    }
 
-    final audioEnc = sharedLib.createBuiltinAudioEncoderFactory();
-    final audioDec = sharedLib.createBuiltinAudioDecoderFactory();
-    final videoEnc = _createDefaultVideoEncoderFactory();
-    _sharedSimulcastVideoEncoderFactory = SimulcastVideoEncoderFactory(
-      sharedLib,
-      videoEnc,
-    );
-    final videoDec = _createDefaultVideoDecoderFactory();
-    sharedLib.pcFactoryDependenciesSetAudioEncoderFactory(deps, audioEnc);
-    sharedLib.pcFactoryDependenciesSetAudioDecoderFactory(deps, audioDec);
-    sharedLib.pcFactoryDependenciesSetVideoEncoderFactory(
-      deps,
-      _sharedSimulcastVideoEncoderFactory!.native(),
-    );
-    sharedLib.pcFactoryDependenciesSetVideoDecoderFactory(deps, videoDec);
-    sharedLib.audioEncoderFactoryRelease(
-      sharedLib.audioEncoderFactoryRefcountedGet(audioEnc),
-    );
-    sharedLib.audioDecoderFactoryRelease(
-      sharedLib.audioDecoderFactoryRefcountedGet(audioDec),
-    );
+    // 生成途中で保持していた SimulcastVideoEncoderFactory も解放する。
+    // dispose() はネイティブへ所有権移譲済み (_native == nullptr) でも
+    // `_cleaned` ガードにより二重解放されず、生成前なら何もしない。
+    final simulcast = _sharedSimulcastVideoEncoderFactory;
+    if (simulcast != null) {
+      simulcast.dispose();
+      _sharedSimulcastVideoEncoderFactory = null;
+    }
 
-    final apBuilder = sharedLib.builtinAudioProcessingBuilderCreate();
-    sharedLib.pcFactoryDependenciesSetAudioProcessingBuilder(deps, apBuilder);
-    sharedLib.enableMedia(deps);
-    _sharedFactoryRef = sharedLib.createModularPeerConnectionFactory(deps);
-    sharedLib.pcFactoryDependenciesDelete(deps);
+    _destroySharedThread(_sharedNetworkThread);
+    _sharedNetworkThread = null;
+    _destroySharedThread(_sharedWorkerThread);
+    _sharedWorkerThread = null;
+    _destroySharedThread(_sharedSignalingThread);
+    _sharedSignalingThread = null;
+  }
 
-    final options = sharedLib.pcFactoryOptionsNew();
-    sharedLib.pcFactoryOptionsSetDisableEncryption(options, 0);
-    sharedLib.pcFactoryOptionsSetSslMaxVersion(
-      options,
-      sharedConsts.sslProtocolDtls12,
+  // 共有 factory 用スレッドを停止して delete する。
+  static void _destroySharedThread(Pointer<WebrtcThreadUnique>? thread) {
+    if (thread == null) {
+      return;
+    }
+    sharedLib.threadStop(sharedLib.threadUniqueGet(thread));
+    sharedLib.threadUniqueDelete(thread);
+  }
+
+  // AudioDeviceModule を初期化し、失敗時の返り値 (rc) を返す。
+  //
+  // テスト専用フック `forceAudioDeviceModuleInitFailureForTest` が立っている
+  // 間はネイティブ初期化を呼ばずに失敗を模擬する。通常実行ではネイティブ
+  // 呼び出しと同等の結果を返す。
+  static int _initAudioDeviceModule(
+    Pointer<WebrtcAudioDeviceModuleRefcounted> adm,
+  ) {
+    if (forceAudioDeviceModuleInitFailureForTest) {
+      return 1;
+    }
+    return sharedLib.audioDeviceModuleInit(
+      sharedLib.audioDeviceModuleRefcountedGet(adm),
     );
-    sharedLib.pcFactorySetOptions(sharedFactory, options);
-    sharedLib.pcFactoryOptionsDelete(options);
+  }
+
+  // modular PeerConnectionFactory を生成し、失敗時は nullptr を返す。
+  //
+  // テスト専用フック `forceCreateModularPeerConnectionFactoryFailureForTest` が
+  // 立っている間はネイティブ生成を呼ばずに nullptr を返して失敗を模擬する。
+  // 通常実行ではネイティブ呼び出しと同じ結果を返す。
+  static Pointer<WebrtcPeerConnectionFactoryInterfaceRefcounted>
+  _createSharedModularPeerConnectionFactory(
+    Pointer<WebrtcPeerConnectionFactoryDependencies> deps,
+  ) {
+    if (forceCreateModularPeerConnectionFactoryFailureForTest) {
+      return nullptr;
+    }
+    return sharedLib.createModularPeerConnectionFactory(deps);
   }
 
   /// 設定とイベント出力先を束ねた `WebrtcClient` を生成する。

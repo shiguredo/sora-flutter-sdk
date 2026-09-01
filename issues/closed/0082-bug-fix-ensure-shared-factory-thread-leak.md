@@ -1,7 +1,7 @@
 # `_ensureSharedFactory` の途中 throw で thread / deps / ADM が leak し、リトライごとに 3 スレッドずつ堆積する
 
 - Created: 2026-08-27
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-01
 - Branch: feature/fix-ensure-shared-factory-thread-leak
 - Polished: 2026-08-27
 - Milestone: 2026.1.0
@@ -37,3 +37,13 @@ throw 発生時は `pcFactoryDependenciesDelete(deps)` や thread stop / delete 
 - [ ] deps / ADM 中間参照も同様にリークしない。
 - [ ] ADM init 失敗を模擬するテストを追加し、失敗後に static field（`_sharedNetworkThread` / `_sharedWorkerThread` / `_sharedSignalingThread` / `_sharedAdmRef` / `_sharedFactoryRef`）がリセットされ、リトライで再生成が 1 セットに収まることを検証する。注入手段は `@visibleForTesting` テストフック（ADM init の rc を強制的に失敗させるフック）を production コードに追加して実施し、モックやスタブは使わない。
 - [ ] `flutter analyze` と関連テストが成功する。
+
+## 解決方法
+
+- `lib/src/ffi/webrtc_client.dart` の `WebrtcClient._ensureSharedFactory` を try/catch で包み、途中で throw した場合は `_releaseSharedFactoryResources` で作成済みの deps / ADM / simulcast factory / 3 スレッドを解放し、static field（`_sharedNetworkThread` / `_sharedWorkerThread` / `_sharedSignalingThread` / `_sharedAdmRef` / `_sharedSimulcastVideoEncoderFactory`）をリセットしてから rethrow するようにした。
+- factory 生成（成功）後の例外では catch 冒頭の `_sharedFactoryRef == null` ガードにより factory とその資源を破棄しない構造にした。
+- `createModularPeerConnectionFactory` の戻り値が nullptr（Dart の null ではない）の場合は明示的に StateError を throw してクリーンアップ経路に乗せ、リトライ可能にした。あわせて options 適用を `pcFactoryRefcountedGet(_sharedFactoryRef!)` の直接参照に変更し、`sharedFactory` getter 経由の再入を除去した。
+- audioEnc / audioDec は deps へ set した直後にローカル参照を release する順序に変更し、後段の video factory 生成が失敗してもリークしないようにした。
+- テストフック（`forceAudioDeviceModuleInitFailureForTest` / `forceCreateModularPeerConnectionFactoryFailureForTest` / `hasSharedFactoryForTest` / `hasSharedFactoryResourcesForTest`）を production コードに追加した。
+- `test/webrtc_client_test.dart` に「ADM init 失敗 → factory 生成失敗 → リトライ成功」を連続検証するテストを追加し、各失敗後のリソース解放とリセットを検証した。
+- `flutter analyze --fatal-infos` と全テスト（FFI 非依存分）の成功を確認した。FFI 依存テストは CI（Linux ジョブ）で実行される。

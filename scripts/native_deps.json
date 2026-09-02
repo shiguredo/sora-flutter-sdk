@@ -1,50 +1,50 @@
 {
   "libwebrtc_c": {
-    "version": "0.150.0",
+    "version": "0.150.3",
     "base_url": "https://github.com/shiguredo/webrtc-rs/releases/download",
     "apple_xcframework": {
       "base_url": "https://github.com/shiguredo/webrtc-rs/releases/download",
       "artifact": "libwebrtc_c.xcframework.zip",
-      "checksum": "28fe87e5368bde34acacd4dc409f3b98d9bd60898ae37af2e8dda009787dc7cf"
+      "checksum": "0b830c49d9bdfe7a16a24624765bed70c7d773347b9f466f4836555f4c275c23"
     },
     "archives": {
       "android_arm64": {
         "file": "libwebrtc_c-android_arm64.tar.gz",
-        "sha256": "c20e0d85f6401bdff89e1bdaccd044af92b12f3caf5fb7f806155f2132378fd0"
+        "sha256": "cf166d261bbccd0c69ca9433444b94d19d6b459af530db0ad008789c9f60b28d"
       },
       "linux_ubuntu_22_04_x86_64": {
         "file": "libwebrtc_c-ubuntu-22.04_x86_64.tar.gz",
-        "sha256": "f5519176f4ad3e4eb6b6a99c0a4a9c892a83f65c45c01defe9732f62fd433150"
+        "sha256": "24e129c8e74a6743671f3e4c4a1c4cec8d742fedfd6f47f3d51030302c695a61"
       },
       "linux_ubuntu_24_04_x86_64": {
         "file": "libwebrtc_c-ubuntu-24.04_x86_64.tar.gz",
-        "sha256": "c273dad494987773ae904d6ee1311357d59ab3b02470e80566d92a300c720eca"
+        "sha256": "e07ed13b7f18f8f88157c6907488503919f9d46042028996bb120c534b996131"
       },
       "windows_x86_64": {
         "file": "libwebrtc_c-windows_x86_64.tar.gz",
-        "sha256": "3baadabb7dc7cb96d200e987cc195ddf06ee3f78d4ce80472e5f7e495679ffa5"
+        "sha256": "a99d782fd693687b80e2376740c5e4a9e76ec256bd77653fb0145b62c39be17e"
       }
     }
   },
   "webrtc": {
-    "version": "m150.7871.0.0",
+    "version": "m150.7871.3.1",
     "base_url": "https://github.com/shiguredo-webrtc-build/webrtc-build/releases/download",
     "archives": {
       "android_arm64": {
         "file": "webrtc.android.tar.gz",
-        "sha256": "907c4712fd5b0e44a08048c59b60971a4d047788d89be967be3bbc47cbfd1014"
+        "sha256": "f8af34a6930d2d3dd89005e1f126a5cca6906f88c5f00093109560341b51f300"
       },
       "linux_ubuntu_22_04_x86_64": {
         "file": "webrtc.ubuntu-22.04_x86_64.tar.gz",
-        "sha256": "296133d67c9820fe60bbae695160705338d894855f0c49f9815be97017d26bdd"
+        "sha256": "b94ce9403f2303ab11eee796b7643d4713c25a0900a1e702582524d854a2328d"
       },
       "linux_ubuntu_24_04_x86_64": {
         "file": "webrtc.ubuntu-24.04_x86_64.tar.gz",
-        "sha256": "4fcc3759771cb35df021bdddfb4fd540314a90e9636647c1280d73802e1413ec"
+        "sha256": "4fd5a7b6d88b3460ed77b6a55aeffcd54c7171be32ca80ade6a6ac5d05c174bf"
       },
       "windows_x86_64": {
         "file": "webrtc.windows_x86_64.zip",
-        "sha256": "a4c7f9606b52c801bb3e13f26e49bd22cdd56ac1fc990a4c11e5082432ba0444"
+        "sha256": "6b63edbc0ad4ab2a736f02503c51e0a4f26dddc258d078dd39dba60111a247d7"
       }
     }
   }

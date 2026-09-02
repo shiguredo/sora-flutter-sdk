@@ -1884,24 +1884,15 @@ class WebrtcClient {
       );
     }
 
-    final errorUnique = _lib.rtpSenderSetParameters(_videoRtpSender!, params);
-    if (errorUnique != nullptr) {
-      final error = _lib.rtcErrorUniqueGet(errorUnique);
-      if (_lib.rtcErrorOk(error) == 0) {
-        final msgPtr = calloc<Pointer<Char>>();
-        final lenPtr = calloc<Size>();
-        _lib.rtcErrorMessage(error, msgPtr, lenPtr);
-        final msg = lenPtr.value > 0
-            ? msgPtr.value.cast<Utf8>().toDartString(length: lenPtr.value)
-            : 'unknown';
-        _emitDebug('native: set_sender_parameters_failed: $msg');
-        calloc.free(msgPtr);
-        calloc.free(lenPtr);
-      }
-      _lib.rtcErrorUniqueDelete(errorUnique);
+    final errorPtr = calloc<Pointer<WebrtcRTCErrorUnique>>();
+    _lib.rtpSenderSetParameters(_videoRtpSender!, params, errorPtr);
+    final errMsg = rtcErrorMessage(_lib, errorPtr.value);
+    if (errMsg != null) {
+      _emitDebug('native: set_sender_parameters_failed: $errMsg');
     } else {
       _emitDebug('native: simulcast encodings applied');
     }
+    calloc.free(errorPtr);
     _lib.rtpParametersDelete(params);
   }
 

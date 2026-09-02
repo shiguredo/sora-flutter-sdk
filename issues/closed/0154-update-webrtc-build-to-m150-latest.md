@@ -1,7 +1,7 @@
 # WebRTC build を M150 の最新リリースに更新する
 
 - Created: 2026-09-02
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-02
 - Branch: feature/update-webrtc-build-to-m150-latest
 - Polished: 2026-09-02
 - Milestone: 2026.1.0
@@ -43,46 +43,22 @@
 
 ## 完了条件
 
-- [ ] `scripts/native_deps.json` のバージョンが `libwebrtc_c: 0.150.3`、`webrtc: m150.7871.3.1` になっている。
-- [ ] Android / Linux / Windows 向けアーカイブの URL と SHA-256 が対象リリースと一致している。
-- [ ] iOS / macOS の `Package.swift` が `libwebrtc_c` `0.150.3` を参照している。
-- [ ] `lib/src/sora_sdk_version.g.dart` が `libwebrtc_c` `0.150.3` と `Shiguredo-Build M150` を表示している。
-- [ ] `rtpSenderSetParameters` の Dart FFI 定義と呼び出しが `0.150.3` の out パラメータ形式になっている。
-- [ ] Android / Linux / Windows のネイティブ依存取得が成功し、`required_paths` がすべて揃っている。
-- [ ] 対応する Android / Linux / Windows のビルドが成功している。
-- [ ] iOS / macOS の Swift Package Manager による XCFramework 取得とビルドが成功している。
-- [ ] 更新対象の設定・生成物に `m150.7871.0.0` と `0.150.0` が残っていない。
+- [x] `scripts/native_deps.json` のバージョンが `libwebrtc_c: 0.150.3`、`webrtc: m150.7871.3.1` になっている。
+- [x] Android / Linux / Windows 向けアーカイブの URL と SHA-256 が対象リリースと一致している。
+- [x] iOS / macOS の `Package.swift` が `libwebrtc_c` `0.150.3` を参照している。
+- [x] `lib/src/sora_sdk_version.g.dart` が `libwebrtc_c` `0.150.3` と `Shiguredo-Build M150` を表示している。
+- [x] `rtpSenderSetParameters` の Dart FFI 定義と呼び出しが `0.150.3` の out パラメータ形式になっている。
+- [x] Android / Linux / Windows のネイティブ依存取得が成功し、`required_paths` がすべて揃っている。
+- [ ] 対応する Android / Linux / Windows のビルドが成功している（CI で確認）。
+- [ ] iOS / macOS の Swift Package Manager による XCFramework 取得とビルドが成功している（CI で確認）。
+- [x] 更新対象の設定・生成物に `m150.7871.0.0` と `0.150.0` が残っていない。
 
 ## 解決方法
 
-1. `scripts/native_deps.json` を更新する。
-
-   `libwebrtc_c` `0.150.3` の対象 SHA-256:
-
-   - Android: `cf166d261bbccd0c69ca9433444b94d19d6b459af530db0ad008789c9f60b28d`
-   - Ubuntu 22.04: `24e129c8e74a6743671f3e4c4a1c4cec8d742fedfd6f47f3d51030302c695a61`
-   - Ubuntu 24.04: `e07ed13b7f18f8f88157c6907488503919f9d46042028996bb120c534b996131`
-   - Windows: `a99d782fd693687b80e2376740c5e4a9e76ec256bd77653fb0145b62c39be17e`
-   - Apple XCFramework: `0b830c49d9bdfe7a16a24624765bed70c7d773347b9f466f4836555f4c275c23`
-
-   `webrtc` `m150.7871.3.1` の対象 SHA-256:
-
-   - Android: `f8af34a6930d2d3dd89005e1f126a5cca6906f88c5f00093109560341b51f300`
-   - Ubuntu 22.04: `b94ce9403f2303ab11eee796b7643d4713c25a0900a1e702582524d854a2328d`
-   - Ubuntu 24.04: `4fd5a7b6d88b3460ed77b6a55aeffcd54c7171be32ca80ade6a6ac5d05c174bf`
-   - Windows: `6b63edbc0ad4ab2a736f02503c51e0a4f26dddc258d078dd39dba60111a247d7`
-
-2. `dart run scripts/update_apple_native_binary.dart` を実行し、iOS / macOS の `Package.swift` を更新する。
-
-3. `dart run scripts/generate_sdk_version.dart` を実行し、`lib/src/sora_sdk_version.g.dart` を更新する。
-
-4. `lib/src/ffi/bindings.dart` の `rtpSenderSetParameters` を `void` + `out_rtc_error` 形式へ更新する。
-
-5. `lib/src/ffi/webrtc_client.dart` の呼び出しを out パラメータ形式へ更新する。
-
-6. 次のプラットフォームの依存取得を実行する。
-
-   `dart run scripts/fetch_native_deps.dart android_arm64 linux_ubuntu_22_04_x86_64 linux_ubuntu_24_04_x86_64 windows_x86_64`
-
-7. 各プラットフォームのビルドと既存テストを実行する。
-   ローカルでできないプラットフォームのビルドは CI に任せてよい。
+1. `scripts/native_deps.json` を `libwebrtc_c` `0.150.3` / `webrtc` `m150.7871.3.1` と各 SHA-256 へ更新した。
+2. `dart run scripts/update_apple_native_binary.dart` で iOS / macOS の `Package.swift` を更新した。
+3. `dart run scripts/generate_sdk_version.dart` で `lib/src/sora_sdk_version.g.dart` を更新した。
+4. `lib/src/ffi/bindings.dart` の `rtpSenderSetParameters` を `void` + `out_rtc_error` 形式へ更新した。
+5. `lib/src/ffi/webrtc_client.dart` の呼び出しを `pcAddTrack` と同様の `rtcErrorMessage` パターンへ更新した。
+6. `dart run scripts/fetch_native_deps.dart` で Android / Linux / Windows 向け依存取得が成功した。
+7. `flutter test` を実行した。各プラットフォームのビルドは CI で確認する。

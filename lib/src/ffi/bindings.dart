@@ -2409,13 +2409,15 @@ class LibWebrtcC {
 
   late final rtpSenderSetParameters = _lib
       .lookupFunction<
-        Pointer<WebrtcRTCErrorUnique> Function(
+        Void Function(
           Pointer<WebrtcRtpSenderInterface>,
           Pointer<WebrtcRtpParameters>,
+          Pointer<Pointer<WebrtcRTCErrorUnique>>,
         ),
-        Pointer<WebrtcRTCErrorUnique> Function(
+        void Function(
           Pointer<WebrtcRtpSenderInterface>,
           Pointer<WebrtcRtpParameters>,
+          Pointer<Pointer<WebrtcRTCErrorUnique>>,
         )
       >('webrtc_RtpSenderInterface_SetParameters');
 

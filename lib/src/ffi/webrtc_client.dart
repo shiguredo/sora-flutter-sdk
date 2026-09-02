@@ -1884,6 +1884,7 @@ class WebrtcClient {
       );
     }
 
+    // libwebrtc_c 0.150.1 以降、SetParameters は out_rtc_error 形式へ変わった。
     final errorPtr = calloc<Pointer<WebrtcRTCErrorUnique>>();
     _lib.rtpSenderSetParameters(_videoRtpSender!, params, errorPtr);
     final errMsg = rtcErrorMessage(_lib, errorPtr.value);

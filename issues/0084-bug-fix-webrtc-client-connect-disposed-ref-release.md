@@ -3,7 +3,7 @@
 - Created: 2026-08-27
 - Completed: {YYYY-MM-DD}
 - Branch: feature/fix-webrtc-client-connect-disposed-ref-release
-- Polished: 2026-08-27
+- Polished: 2026-09-04
 - Milestone: 2026.1.0
 
 ## 目的
@@ -19,12 +19,12 @@
 
 ## 設計方針
 
-- `WebrtcClient.connect` の `_disposed` 早期 return 経路で、`localAudioTrackRef != null` なら `sharedLib.audioTrackRelease(sharedLib.audioTrackRefcountedGet(localAudioTrackRef!))`、`localVideoTrackRef != null` なら同様に `videoTrackRelease` を呼ぶ。
+- `WebrtcClient.connect` の `_disposed` 早期 return 経路で、`localAudioTrackRef != null` なら `_lib.audioTrackRelease(_lib.audioTrackRefcountedGet(localAudioTrackRef!))`、`localVideoTrackRef != null` なら同様に `_lib.videoTrackRelease(_lib.videoTrackRefcountedGet(localVideoTrackRef!))` を呼ぶ（`_lib` は `closePeerConnection` の既存の解放パターンに合わせる）。
 - release 順序は audio → video のいずれでも構わないが、既存の解放パターンに合わせる。
 - 変更後の挙動を dartdoc に明記する（「dispose 済みの場合でも、渡された ref は必ず解放される」）。
 
 ## 完了条件
 
 - [ ] `WebrtcClient.connect` の `_disposed` 早期 return 経路で `localAudioTrackRef` / `localVideoTrackRef` が確実に release される。
-- [ ] `_disposed == true` の状態で `connect(localAudioTrackRef: ...)` を呼び、release 処理が実行されることをユニットテストで確認する。refcount の絶対値は Dart 側から検証できないため、release 呼び出しを記録する `@visibleForTesting` テストフック（`setupPendingStatsForTest` 等の前例に倣う）を production コードに追加して観測する。テストに渡す有効な ref は実 track から `retainNativeTrackRefcounted()` で取得し、libwebrtc-c が利用できない環境では `_ffiAvailable()` ガード（`webrtc_client_test.dart` の前例）に倣ってテストをスキップする。また、正常経路の呼び出し元（`SoraConnection._connect`）の挙動が変わらないこと（crash / 例外が発生しないこと）も確認する（モックやスタブは使わない）。
+- [ ] `_disposed == true` の状態で `connect(localAudioTrackRef: ...)` を呼び、release 処理が実行されることをユニットテストで確認する。refcount の絶対値は Dart 側から検証できないため、release 呼び出しを記録する `@visibleForTesting` テストフック（`setupPendingStatsForTest` 等の前例に倣う）を production コードに追加して観測する（モックやスタブは使わない）。テストに渡す有効な ref は実 track から `retainNativeTrackRefcounted()` で取得し、libwebrtc-c が利用できない環境では `prepareFfiTestEnvironment()` + `skip:` の既存パターン（`test/webrtc_client_test.dart` の `ffiTestEnvironment.skipReason`、closed issue 0105 で確立）に倣ってテストをスキップする。変更は `if (_disposed) return;` の分岐内のみで正常経路には触れないため、正常経路の挙動は既存の関連テストが成功することで担保する。
 - [ ] `flutter analyze` と関連テストが成功する。

@@ -69,6 +69,14 @@ class _StatsRequest {
 
 /// WebRTC クライアント (dart:ffi 実装)
 class WebrtcClient {
+  /// 孤立 stats request の保持上限です。
+  ///
+  /// 遅延コールバック到着時の native クラッシュを避けるため、孤立 request の
+  /// 即時解放は行いません。上限に達した新規 `getStats()` は `StateError` で
+  /// 拒否することで、無制限の滞留を抑えます。1 切断・タイムアウトで最大 1 件の
+  /// 孤立が生じるため、10 サイクル分の余裕を持たせています。
+  static const int maxOrphanedStatsRequests = 10;
+
   final LibWebrtcC _lib;
   final WebrtcConstants _consts;
   final Map<String, Object?> _config;
@@ -725,6 +733,10 @@ class WebrtcClient {
   ///
   /// `disconnect()` 相当の片付けを行ったうえで、
   /// 以降のシグナリング入力や sender 操作を無効化する。
+  ///
+  /// 孤立 stats request の即時解放は行いません。遅延コールバック到着時に
+  /// 解放済みメモリを参照して native 側がクラッシュする恐れがあるためです。
+  /// 孤立の増加は `maxOrphanedStatsRequests` による背圧で有界にします。
   void dispose() {
     if (_disposed) return;
     _disposed = true;
@@ -733,21 +745,25 @@ class WebrtcClient {
     _factoryRef = null;
   }
 
-  // PeerConnection と関連リソースを解放する
-  //
-  // 解放順序:
-  // 1. DataChannel の Observer 解除と解放
-  // 2. リモートビデオトラックのシンク解除と参照解放
-  // 3. 進行中の getStats の Dart 側追跡解除
-  //    (native callback リソースは onStatsDelivered が自己解放)
-  // 4. ローカルビデオトラックの解放
-  // 5. PeerConnection の解放
-  // 6. C コールバックブリッジの破棄
-  // 7. NativeCallable の解放
-  //
-  // リモートビデオトラックは PeerConnection の Release 前に解放する。
-  // PeerConnection 破棄後だと VideoTrack のデストラクタが
-  // 無効な VideoSource に対して UnregisterObserver を呼んでクラッシュする。
+  /// PeerConnection と関連リソースを解放する
+  ///
+  /// 解放順序:
+  /// 1. DataChannel の Observer 解除と解放
+  /// 2. リモートビデオトラックのシンク解除と参照解放
+  /// 3. 進行中の getStats の Dart 側追跡解除
+  ///    (native callback リソースは `_handleStatsDelivered` が自己解放)
+  /// 4. ローカルビデオトラックの解放
+  /// 5. PeerConnection の解放
+  /// 6. C コールバックブリッジの破棄
+  /// 7. NativeCallable の解放
+  ///
+  /// リモートビデオトラックは PeerConnection の Release 前に解放する。
+  /// PeerConnection 破棄後だと VideoTrack のデストラクタが
+  /// 無効な VideoSource に対して UnregisterObserver を呼んでクラッシュする。
+  ///
+  /// 進行中の getStats は Dart 側追跡だけを外し、native 資源は孤立保持する
+  /// (遅延コールバック到着時の native クラッシュ回避)。孤立の増加は
+  /// `maxOrphanedStatsRequests` による背圧で有界にする。
   @visibleForTesting
   void closePeerConnection() {
     // DataChannel をクリーンアップする
@@ -770,6 +786,9 @@ class WebrtcClient {
     // stats callback が drop されうる。
     // そのため callback 未到達時は孤立 request が残りうるが、
     // 解放済みメモリ参照の回避を優先して意図的に許容する。
+    // 孤立の増加は `maxOrphanedStatsRequests` による背圧で有界にする。
+    // `dispose` 時の即時解放は行わない (遅延コールバック到着時の
+    // native クラッシュを避けるため)。
     cleanupPendingStatsRequest()?.completeError(
       StateError('PeerConnection closed during getStats.'),
     );
@@ -1169,6 +1188,13 @@ class WebrtcClient {
   //
   // 公開 API の `RTCPeerConnection.getStats()` 互換を保つため、
   // `get` をあえて残している。
+  //
+  // 孤立 request が `maxOrphanedStatsRequests` に達している場合は、
+  // 新規発行せず同期的に `StateError` を throw する。上限到達時は PC 未生成か
+  // 否かにかかわらず throw し、上限未達で PC 未生成の場合は null を返す。
+  // 進行中の request がある場合はそちらの future を返す。
+  // 上限到達後はコールバック到着による自然減まで拒否が続く。
+  // 自然減が起きない場合はクライアント再生成が必要になる。
   Future<String?> getStats() {
     if (_disposed) {
       return Future<String?>.value(null);
@@ -1182,6 +1208,15 @@ class WebrtcClient {
     // 多重に native request を発行せず null を返す。
     if (_pendingStatsRequest != null) {
       return Future<String?>.value(null);
+    }
+    // 孤立 request の無制限滞留を抑えるため、上限到達時は新規発行を拒否する。
+    // 孤立側の即時解放は行わない (遅延コールバック到着時の native クラッシュを
+    // 避けるため)。
+    if (_orphanedStatsRequests.length >= maxOrphanedStatsRequests) {
+      throw StateError(
+        'Too many orphaned getStats requests '
+        '(${_orphanedStatsRequests.length}).',
+      );
     }
     if (_pcRef == null) {
       return Future<String?>.value(null);

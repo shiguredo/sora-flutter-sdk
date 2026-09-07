@@ -1,7 +1,7 @@
 # `WebrtcClient.connect()` が `_disposed` 時に受け取った refcounted 参照を release しない
 
 - Created: 2026-08-27
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-07
 - Branch: feature/fix-webrtc-client-connect-disposed-ref-release
 - Polished: 2026-09-07
 - Milestone: 2026.1.0
@@ -29,3 +29,7 @@
 - [ ] disposed 経路の release をユニットテストで確認する。audio のみ、video のみ、両方あり、両方 null の 4 通りを `retainNativeTrackRefcounted` で取得した実 track で exercise し、設計方針の release 記録カウンタで判定する（モックやスタブは使わない）。libwebrtc-c が利用できない環境では `prepareFfiTestEnvironment()` + `skip:` の既存パターン（`test/webrtc_client_test.dart` の `ffiTestEnvironment.skipReason`、closed issue 0105 で確立）に倣ってスキップする。
 - [ ] 正常系の回帰は `test/webrtc_client_test.dart` と `test/sora_connection_test.dart` の成功で担保する。
 - [ ] `flutter analyze` と関連テストが成功する。
+
+## 解決方法
+
+`WebrtcClient.connect` の `_disposed` 早期 return 経路で受け取った owned ref を audio から video の順に即時解放する。所有権契約を dartdoc に明記し、検証用カウンタ 2 件を追加する。disposed 経路の解放テスト 4 件で検証する。正式リリース前のため `CHANGELOG.md` には記載しない。

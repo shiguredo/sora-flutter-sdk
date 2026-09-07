@@ -3,7 +3,7 @@
 - Created: 2026-08-27
 - Completed: {YYYY-MM-DD}
 - Branch: feature/fix-connection-dartdoc-typo
-- Polished: {YYYY-MM-DD}
+- Polished: 2026-09-07
 - Milestone: 2026.1.0
 
 ## 目的
@@ -22,17 +22,17 @@ LocalAudioTrack? _currentAudioTrack;
 LocalVideoTrack? _currentVideoTrack;
 ```
 
-「現在保持している**の**ローカル…」は日本語文法として誤り。「現在保持しているローカル…」または「現在保持している**現在の**ローカル…」等に直す。
+「現在保持している**の**ローカル…」は日本語文法として誤り。「現在保持しているローカル…」に直す。
 
 ## 設計方針
 
 - 「現在保持している」の後の「の」を削除する:
   - 「現在保持しているローカル音声トラック」
   - 「現在保持しているローカル映像トラック」
-- 他 SoraConnection の private フィールドの dartdoc（`_currentAudioTrack` 系の説明）と整合性を取る。
+- 他のフィールドへの波及は行わず、当該 2 箇所のみを修正する。
 - 挙動変更なし。dartdoc のみの修正。
 
 ## 完了条件
 
 - [ ] 該当 2 箇所の dartdoc が文法的に正しい。
-- [ ] `flutter analyze` と関連テストが成功する。
+- [ ] `flutter analyze` が成功する。コメントのみの修正のため専用の関連テストはなし。

@@ -189,12 +189,10 @@ extension _SoraConnectionSignaling on SoraConnection {
           if (statsJson != null)
             'stats': await _decodeJsonMaybeOffloaded(statsJson),
         };
-        _emitDebugMessage('ws send: pong (with stats)');
-        _signalingState.webSocketChannel?.sink.add(jsonEncode(pongMessage));
+        _sendPongMessage(pongMessage, 'ws send: pong (with stats)');
       } else {
         const pongMessage = <String, Object?>{'type': 'pong'};
-        _emitDebugMessage('ws send: ${jsonEncode(pongMessage)}');
-        _signalingState.webSocketChannel?.sink.add(jsonEncode(pongMessage));
+        _sendPongMessage(pongMessage, 'ws send: ${jsonEncode(pongMessage)}');
       }
       return;
     }
@@ -233,6 +231,23 @@ extension _SoraConnectionSignaling on SoraConnection {
   void _handleNotifyMessage(Map<String, Object?> payload) {
     _emitNotifyMessage(payload);
     _handleSelfConnectionCreated(payload);
+  }
+
+  /// pong 応答を WebSocket で送信する。
+  ///
+  /// 送信失敗時は debug ログに残すのみで、呼び出し元へ伝搬しない。再送は行わない。
+  void _sendPongMessage(Map<String, Object?> pongMessage, String sentLog) {
+    final text = jsonEncode(pongMessage);
+    // 送信先がない場合と送信失敗時は debug ログに残る。再送は行わない。
+    if (!_trySendWebSocketText(
+      _signalingState.webSocketChannel,
+      text,
+      skippedLog: 'ws pong send skipped: no channel',
+      failedLog: 'ws pong send failed',
+    )) {
+      return;
+    }
+    _emitDebugMessage(sentLog);
   }
 
   /// switched メッセージを処理する
@@ -398,6 +413,7 @@ extension _SoraConnectionSignaling on SoraConnection {
     _emitLogEvent('SIGNALING CONNECT MESSAGE', connectMessage);
     _emitDebugMessage('ws send: ${jsonEncode(connectMessage)}');
     _emitSignalingEvent('websocket', 'sent', connectMessage);
+    // 失敗時はメッセージ tail の失敗経路に吸収されるため、ここでは保護しない。
     newChannel.sink.add(jsonEncode(connectMessage));
   }
 

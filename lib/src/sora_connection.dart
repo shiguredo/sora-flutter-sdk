@@ -272,6 +272,18 @@ class SoraConnection {
   @visibleForTesting
   Object? teardownFailureForTest;
 
+  /// テスト専用に switched 時の subscription cancel 失敗を模擬するフック。
+  ///
+  /// 設定時は実 cancel を行わず指定例外を throw し、参照は 1 回で null に戻す。
+  @visibleForTesting
+  Object? switchedCancelFailureForTest;
+
+  /// テスト専用に switched 時の channel close 失敗を模擬するフック。
+  ///
+  /// 設定時は実 close を行わず指定例外を throw し、参照は 1 回で null に戻す。
+  @visibleForTesting
+  Object? switchedCloseFailureForTest;
+
   /// WebSocket / DataChannel 両経路から届く connection.created notify を
   /// 自分の接続として判定し、デバッグログを記録する。
   /// `SoraConnectedState` の発火は PeerConnection の `state_changed: connected`
@@ -1890,6 +1902,15 @@ class SoraConnection {
   @visibleForTesting
   bool get signalingHasActiveTransportForTest =>
       _signalingState.hasActiveTransport;
+
+  /// テスト専用に、旧 WebSocket の channel と subscription が残存しているかを返す。
+  ///
+  /// switched による DataChannel 切替後は総合 transport が残るため、
+  /// 旧 WebSocket の後始末は本 getter で検証する。
+  @visibleForTesting
+  bool get hasWebSocketTransportForTest =>
+      _signalingState.webSocketChannel != null ||
+      _signalingState.webSocketSubscription != null;
 
   /// テスト専用に、`_disconnecting` フラグの現在値を返す。
   ///

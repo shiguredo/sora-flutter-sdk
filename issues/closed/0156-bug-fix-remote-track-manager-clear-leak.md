@@ -1,7 +1,7 @@
 # `detachAll` 失敗時に entry を失わず renderer を回収する
 
 - Created: 2026-09-07
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-07
 - Branch: feature/fix-remote-track-manager-clear-leak
 - Polished: 2026-09-07
 
@@ -24,3 +24,7 @@
 
 - [ ] `disposeRemoteVideoRenderer` 失敗時も entry が保持され、再試行で renderer が回収されることをユニットテストで確認する（判定は video 限定とし、audio のみ保持は対象外とする）。
 - [ ] `flutter analyze` と関連テストが成功する。
+
+## 解決方法
+
+`_detachRemoteVideoTrackUnsafe` で破棄失敗時に entry を保持し、`detachAll` の反復対象に加えて再試行する。再試行では release を skip して二重解放を防ぐ。`clear` は再試行待ちを消さず検出ログに留める。破棄失敗の注入フックと再試行テスト 5 件で検証する。世代・並行相互作用の硬化は別 issue に分離する。正式リリース前のため `CHANGELOG.md` には記載しない。

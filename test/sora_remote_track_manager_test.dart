@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sora_sdk/src/sora_method_channels.dart';
+import 'package:sora_sdk/src/sora_remote_track.dart';
 import 'package:sora_sdk/src/sora_remote_track_manager.dart';
 
 void main() {
@@ -477,6 +478,185 @@ void main() {
         5,
         reason: 'smoke シナリオ全体で expected な release 収支が守られること',
       );
+    });
+  });
+
+  group('RemoteTrackManager の renderer 破棄再試行', () {
+    late List<int> releasedAddresses;
+    late List<String> debugMessages;
+    late List<RemoteMediaStreamTrack> removedTracks;
+    late bool disposeShouldFail;
+    late int disposeCalls;
+
+    setUp(() {
+      releasedAddresses = <int>[];
+      debugMessages = <String>[];
+      removedTracks = <RemoteMediaStreamTrack>[];
+      disposeShouldFail = false;
+      disposeCalls = 0;
+      // attach の renderer 作成は応答し、破棄はフックで注入する。
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(soraMethodChannel, (call) async {
+            if (call.method == 'createRemoteVideoRenderer') {
+              return <String, Object?>{
+                'rendererId': 1,
+                'renderingSinkPtr': 0,
+                'videoSinkPtr': 2,
+                'textureId': 3,
+              };
+            }
+            return null;
+          });
+    });
+
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(soraMethodChannel, null);
+    });
+
+    RemoteTrackManager createManager() {
+      final manager = RemoteTrackManager(
+        clientId: 1,
+        soraMethodChannel: soraMethodChannel,
+        onDebugMessage: debugMessages.add,
+        onTrackEvent: (_) {},
+        onRemoveTrackEvent: removedTracks.add,
+      );
+      // ダミー trackAddress の FFI を回避し、呼び出し回数を記録する。
+      manager.releaseTrackRefForTest = releasedAddresses.add;
+      manager.attachSinkToTrackForTest = (_, _) {};
+      manager.removeSinkFromTrackForTest = (_, _) {};
+      // 破棄失敗を注入する。失敗時はプラットフォーム呼び出しを行わない。
+      manager.disposeRemoteVideoRendererForTest = (rendererId) async {
+        disposeCalls++;
+        if (disposeShouldFail) {
+          throw StateError('dispose failed for test');
+        }
+      };
+      return manager;
+    }
+
+    test('破棄失敗時は entry が保持され release は 1 回だけ行われる', () async {
+      // renderer 破棄に失敗しても参照を二重解放しないことを検証する。
+      final manager = createManager();
+      const trackAddress = 0x3001;
+      await manager.attachRemoteVideoTrack(
+        trackAddress,
+        trackId: 'connR-video',
+      );
+      disposeShouldFail = true;
+
+      await manager.detachAllRemoteVideoTracks();
+
+      // add 分の 1 回だけ返却され、二重 release しない。
+      expect(releasedAddresses, <int>[
+        trackAddress,
+      ], reason: '破棄失敗時も add 分の release は 1 回だけ行われること');
+      // 破棄は試行され、再試行待ちが debug ログに残る。
+      expect(disposeCalls, 1);
+      expect(
+        debugMessages.any((message) => message.contains('will retry')),
+        isTrue,
+        reason: '再試行待ちが検出可能であること',
+      );
+      // stream の video は残り、remove イベントは発火しない。
+      expect(manager.remoteMediaStreams['connR']?.videoTrack, isNotNull);
+      expect(removedTracks, isEmpty);
+    });
+
+    test('再試行で renderer が回収される', () async {
+      // 失敗後の detachAll で破棄と後始末だけが行われることを検証する。
+      final manager = createManager();
+      const trackAddress = 0x3002;
+      await manager.attachRemoteVideoTrack(
+        trackAddress,
+        trackId: 'connS-video',
+      );
+      disposeShouldFail = true;
+      await manager.detachAllRemoteVideoTracks();
+      expect(releasedAddresses, <int>[trackAddress]);
+
+      disposeShouldFail = false;
+      await manager.detachAllRemoteVideoTracks();
+
+      // 再試行では release せず、破棄だけが再実行される。
+      expect(releasedAddresses, <int>[
+        trackAddress,
+      ], reason: '再試行で release を繰り返さないこと');
+      expect(disposeCalls, 2, reason: '破棄が再試行されること');
+      // 後始末が完了し、remove イベントが発火する。
+      expect(manager.remoteMediaStreams['connS']?.videoTrack, isNull);
+      expect(removedTracks, hasLength(1));
+      expect(removedTracks.single.trackId, 'connS-video');
+    });
+
+    test('clear は再試行待ちを消さず次回 detachAll で回収する', () async {
+      // 後始末順序 (teardown 後の reset) でも回収の手がかりが残ることを検証する。
+      final manager = createManager();
+      const trackAddress = 0x3003;
+      await manager.attachRemoteVideoTrack(
+        trackAddress,
+        trackId: 'connT-video',
+      );
+      disposeShouldFail = true;
+      await manager.detachAllRemoteVideoTracks();
+
+      manager.clear();
+
+      expect(
+        debugMessages.any((message) => message.contains('clear deferred')),
+        isTrue,
+        reason: '残存を消さず検出ログに残すこと',
+      );
+      disposeShouldFail = false;
+      await manager.detachAllRemoteVideoTracks();
+      expect(disposeCalls, 2);
+      expect(releasedAddresses, <int>[trackAddress]);
+      expect(removedTracks, hasLength(1));
+    });
+
+    test('二回連続失敗でも entry が残り release は 1 回のままになる', () async {
+      // 再試行の再退避で参照収支が壊れないことを検証する。
+      final manager = createManager();
+      const trackAddress = 0x3004;
+      await manager.attachRemoteVideoTrack(
+        trackAddress,
+        trackId: 'connU-video',
+      );
+      disposeShouldFail = true;
+      await manager.detachAllRemoteVideoTracks();
+      await manager.detachAllRemoteVideoTracks();
+
+      expect(disposeCalls, 2);
+      expect(releasedAddresses, <int>[
+        trackAddress,
+      ], reason: '再退避を繰り返しても release は 1 回だけ行われること');
+      expect(removedTracks, isEmpty);
+    });
+
+    test('個別 detach でも再試行待ちが回収される', () async {
+      // detachAll 以外の経路で再試行が進むことを検証する。
+      final manager = createManager();
+      const trackAddress = 0x3005;
+      await manager.attachRemoteVideoTrack(
+        trackAddress,
+        trackId: 'connV-video',
+      );
+      disposeShouldFail = true;
+      await manager.detachAllRemoteVideoTracks();
+      expect(releasedAddresses, <int>[trackAddress]);
+
+      disposeShouldFail = false;
+      // 新規 remove イベントに対応する参照として入口で 1 回返却され、
+      // 再試行では破棄だけが行われる。
+      await manager.detachRemoteVideoTrack(trackAddress);
+
+      expect(releasedAddresses, <int>[
+        trackAddress,
+        trackAddress,
+      ], reason: '入口の remove 分と初回の add 分で計 2 回返却されること');
+      expect(disposeCalls, 2);
+      expect(removedTracks, hasLength(1));
     });
   });
 }

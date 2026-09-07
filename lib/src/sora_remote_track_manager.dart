@@ -115,6 +115,11 @@ class RemoteTrackManager {
   /// track address をキーとするリモートトラック管理エントリ
   final Map<int, _RemoteTrackEntry> _remoteTracks = {};
 
+  /// renderer 破棄に失敗して再試行待ちのエントリ。
+  ///
+  /// add 分の参照は返却済みのため、再試行では release せず破棄と後始末のみ行う。
+  final Map<int, _RemoteTrackEntry> _disposeRetryEntries = {};
+
   /// connectionId をキーとするリモート MediaStream マップ
   final Map<String, MutableRemoteMediaStream> _remoteMediaStreams = {};
 
@@ -123,6 +128,9 @@ class RemoteTrackManager {
       Map<String, RemoteMediaStream>.unmodifiable(_remoteMediaStreams);
 
   /// 内部状態をクリアする
+  ///
+  /// 再試行待ちの entry は消さず、次回 `detachAllRemoteVideoTracks` で
+  /// 回収する。
   void clear() {
     for (final completer in _pendingAttachWaiters.values.toList()) {
       if (!completer.isCompleted) {
@@ -135,6 +143,13 @@ class RemoteTrackManager {
     _pendingAttachWaiters.clear();
     _detachWaiters.clear();
     _removedBeforeAttach.clear();
+    // 再試行待ちの entry は消さず、次回 detachAll で回収する。
+    if (_disposeRetryEntries.isNotEmpty) {
+      onDebugMessage(
+        'remote_track clear deferred: '
+        '${_disposeRetryEntries.length} dispose retries pending',
+      );
+    }
   }
 
   /// 新しい接続・切断サイクルを開始する。
@@ -216,6 +231,13 @@ class RemoteTrackManager {
   @visibleForTesting
   void Function(int trackAddress, int videoSinkPtr)? removeSinkFromTrackForTest;
 
+  /// テスト専用に renderer 破棄の失敗を模擬するフック。
+  ///
+  /// 設定時はプラットフォーム呼び出しを行わず指定例外を throw し、
+  /// 破棄失敗経路を再現する。production では `null` のままにしておく。
+  @visibleForTesting
+  Future<void> Function(int rendererId)? disposeRemoteVideoRendererForTest;
+
   /// トラック参照 (`webrtc_VideoTrackInterface_AddRef` で追加された refcount)
   /// を 1 回返却する。すべての release 経路はこのヘルパを経由することで、
   /// テストからの観測と差し替えを 1 箇所に集約する。
@@ -259,15 +281,26 @@ class RemoteTrackManager {
     int trackAddress,
   ) async {
     if (response != null) {
-      await soraMethodChannel.invokeMethod<void>(
-        'disposeRemoteVideoRenderer',
-        <String, Object?>{
-          'clientId': clientId,
-          'rendererId': (response['rendererId'] as num).toInt(),
-        },
+      await _disposeRemoteVideoRenderer(
+        (response['rendererId'] as num).toInt(),
       );
     }
     _releaseTrackRef(trackAddress);
+  }
+
+  /// プラットフォーム側レンダラーを破棄する。
+  ///
+  /// テスト差し替えを可能にするためヘルパに集約している。
+  Future<void> _disposeRemoteVideoRenderer(int rendererId) async {
+    final hook = disposeRemoteVideoRendererForTest;
+    if (hook != null) {
+      await hook(rendererId);
+      return;
+    }
+    await soraMethodChannel.invokeMethod<void>(
+      'disposeRemoteVideoRenderer',
+      <String, Object?>{'clientId': clientId, 'rendererId': rendererId},
+    );
   }
 
   /// detach happy path の FFI sink 解除処理。
@@ -515,6 +548,8 @@ class RemoteTrackManager {
   Future<void> detachRemoteVideoTrack(int trackAddress) async {
     // remove 分の参照を入口で必ず 1 回返却する。以降の early return や
     // `_ongoingDetachAll` によるスキップを通っても収支が 0 になる。
+    // 破棄再試行待ちの場合も、新規 remove イベントに対応する参照として
+    // 返却する (add 分の返却は再試行側で skip する)。
     _releaseTrackRef(trackAddress);
     if (_ongoingDetachAll != null) {
       return;
@@ -545,6 +580,10 @@ class RemoteTrackManager {
   ///
   /// remove 分の返却は `detachRemoteVideoTrack` の入口責務で、本メソッドは
   /// `detachAllRemoteVideoTracks` からも呼ばれるため remove 分は扱わない。
+  ///
+  /// `disposeRemoteVideoRenderer` に失敗した場合は entry を保持して
+  /// 次回で再試行する。再試行では release 済みのため release を skip し、
+  /// 破棄と後始末のみ行う (二重 release しない)。
   Future<void> _detachRemoteVideoTrackUnsafe(int trackAddress) async {
     // attach 待ちの場合は先行 remove として記録し、resume 後に打ち消す
     if (_pendingAttach.contains(trackAddress)) {
@@ -556,21 +595,32 @@ class RemoteTrackManager {
       return;
     }
 
-    final entry = _remoteTracks.remove(trackAddress);
+    // 破棄再試行待ちの場合は release 済みのため破棄から再開する。
+    final retryEntry = _disposeRetryEntries.remove(trackAddress);
+    final entry = retryEntry ?? _remoteTracks.remove(trackAddress);
     if (entry == null) return;
 
-    // FFI で Sink を解除してトラックを解放する。ヘルパ経由にすることで
-    // テスト差し替え (SEGV 回避) を可能にする。
-    _removeSinkFromTrack(trackAddress, entry.videoSinkPtr);
-    // add 分の参照を返却する。`_releaseTrackRef` を経由することで、
-    // 全経路の release を単一箇所で観測・差し替えできる。
-    _releaseTrackRef(entry.trackAddress);
+    if (retryEntry == null) {
+      // FFI で Sink を解除してトラックを解放する。ヘルパ経由にすることで
+      // テスト差し替え (SEGV 回避) を可能にする。
+      _removeSinkFromTrack(trackAddress, entry.videoSinkPtr);
+      // add 分の参照を返却する。`_releaseTrackRef` を経由することで、
+      // 全経路の release を単一箇所で観測・差し替えできる。
+      _releaseTrackRef(entry.trackAddress);
+    }
 
     // プラットフォーム側でレンダラーを破棄する
-    await soraMethodChannel.invokeMethod<void>(
-      'disposeRemoteVideoRenderer',
-      <String, Object?>{'clientId': clientId, 'rendererId': entry.rendererId},
-    );
+    try {
+      await _disposeRemoteVideoRenderer(entry.rendererId);
+    } catch (error) {
+      // release 済みを示す状態付きで保持し、次回 detachAll で再試行する。
+      _disposeRetryEntries[trackAddress] = entry;
+      onDebugMessage(
+        'remote_track dispose failed, will retry: '
+        'trackAddress=$trackAddress rendererId=${entry.rendererId} error=$error',
+      );
+      return;
+    }
 
     onDebugMessage(
       'remote_track_detached: trackAddress=$trackAddress textureId=${entry.textureId}',
@@ -606,7 +656,10 @@ class RemoteTrackManager {
       final detachWaits = _detachWaiters.values
           .map((waiter) => waiter.future)
           .toList(growable: false);
-      final addresses = _remoteTracks.keys.toList();
+      final addresses = <int>{
+        ..._remoteTracks.keys,
+        ..._disposeRetryEntries.keys,
+      }.toList();
       for (final addr in addresses) {
         try {
           await _runTrackedDetach(addr);

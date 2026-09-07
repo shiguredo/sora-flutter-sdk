@@ -95,7 +95,7 @@ void main() {
         expect(wc.hasPendingStatsRequestForTest, false);
         expect(wc.orphanedStatsRequestCountForTest, 1);
       } finally {
-        calloc.free(cbsPtr);
+        // cbsPtr は孤立集合が参照中のため解放しない (プロセスごと回収される)。
         wc.dispose();
       }
     });
@@ -142,7 +142,7 @@ void main() {
         final result = wc.getStats();
         expect(result, completion(isNull));
       } finally {
-        calloc.free(cbsPtr);
+        // cbsPtr は孤立集合が参照中のため解放しない (プロセスごと回収される)。
         wc.dispose();
       }
     });
@@ -429,6 +429,100 @@ void main() {
         expect(wc.disposedAudioTrackReleaseCountForTest, 0);
         expect(wc.disposedVideoTrackReleaseCountForTest, 0);
         expect(events, isEmpty, reason: 'disposed 経路では状態遷移しないこと');
+      } finally {
+        wc.dispose();
+      }
+    });
+  }, skip: ffiTestEnvironment.skipReason);
+
+  group('getStats の孤立 request 上限', () {
+    // cbsPtr 付きの孤立を 1 件積む。コールバック未到達状態の再現である。
+    // 確保した構造体は解放しない (孤立集合が参照中のため。テスト終了時に
+    // プロセスごと回収される)。`NativeCallable` までは再現しない。
+    void addOrphan(WebrtcClient wc) {
+      final cbsPtr = calloc<RTCStatsCollectorCallbackCbs>();
+      wc.setupPendingStatsForTest(null, null, cbsPtr: cbsPtr);
+    }
+
+    // タイマー発火と同一の分離で孤立を 1 件積む。タイマー由来のエラー完了まで
+    // 再現する。
+    void addTimeoutOrphan(WebrtcClient wc) {
+      final completer = Completer<String?>();
+      final timer = Timer(const Duration(seconds: 30), () {});
+      final cbsPtr = calloc<RTCStatsCollectorCallbackCbs>();
+      wc.setupPendingStatsForTest(completer, timer, cbsPtr: cbsPtr);
+      unawaited(
+        completer.future.catchError(
+          (_) => null,
+          test: (e) => e is TimeoutException,
+        ),
+      );
+      wc.cleanupPendingStatsRequest()?.completeError(
+        TimeoutException('getStats() timed out.', const Duration(seconds: 5)),
+      );
+    }
+
+    test('上限未満では拒否せず null を返す', () async {
+      // 上限判定を通過し、PC 未生成の既定 null 返却に届くことを検証する。
+      final wc = WebrtcClient.create(config: {}, onEvent: (_, _) {});
+      try {
+        for (var i = 0; i < WebrtcClient.maxOrphanedStatsRequests - 1; i++) {
+          addOrphan(wc);
+        }
+        expect(
+          wc.orphanedStatsRequestCountForTest,
+          WebrtcClient.maxOrphanedStatsRequests - 1,
+        );
+        await expectLater(wc.getStats(), completion(isNull));
+      } finally {
+        wc.dispose();
+      }
+    });
+
+    test('上限到達時は StateError で拒否する (タイムアウト経路)', () {
+      // タイマー発火と同一の分離で孤立を積み、背圧で拒否されることを検証する。
+      final wc = WebrtcClient.create(config: {}, onEvent: (_, _) {});
+      try {
+        for (var i = 0; i < WebrtcClient.maxOrphanedStatsRequests; i++) {
+          addTimeoutOrphan(wc);
+        }
+        expect(
+          wc.orphanedStatsRequestCountForTest,
+          WebrtcClient.maxOrphanedStatsRequests,
+        );
+        expect(() => wc.getStats(), throwsStateError);
+      } finally {
+        wc.dispose();
+      }
+    });
+
+    test('上限到達時は StateError で拒否する (切断サイクル)', () {
+      // 切断後始末の反復で孤立を積み、背圧で拒否されることを検証する。
+      // 確保した構造体は孤立集合が参照中のため解放しない (上記ヘルパー参照)。
+      final wc = WebrtcClient.create(config: {}, onEvent: (_, _) {});
+      try {
+        for (var i = 0; i < WebrtcClient.maxOrphanedStatsRequests; i++) {
+          final completer = Completer<String?>();
+          final timer = Timer(const Duration(seconds: 30), () {});
+          wc.setupPendingStatsForTest(
+            completer,
+            timer,
+            cbsPtr: calloc<RTCStatsCollectorCallbackCbs>(),
+          );
+          unawaited(
+            completer.future.catchError(
+              (_) => null,
+              test: (e) => e is StateError,
+            ),
+          );
+          wc.closePeerConnection();
+          expect(timer.isActive, isFalse, reason: '分離でタイマーを止めること');
+        }
+        expect(
+          wc.orphanedStatsRequestCountForTest,
+          WebrtcClient.maxOrphanedStatsRequests,
+        );
+        expect(() => wc.getStats(), throwsStateError);
       } finally {
         wc.dispose();
       }

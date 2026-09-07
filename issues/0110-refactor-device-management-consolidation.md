@@ -1,7 +1,7 @@
 # MethodChannel と FFI の二重デバイス管理を単一 façade に集約する
 
 - Created: 2026-08-27
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-07
 - Branch: feature/refactor-device-management-consolidation
 - Polished: {YYYY-MM-DD}
 
@@ -33,3 +33,10 @@
 - [ ] プラットフォーム分岐が集約クラスの内部に閉じている。
 - [ ] `WebrtcClient.setRecordingDeviceByGuid` を直接呼ぶ経路が消えている（もしくは意図がコメントで明示されている）。
 - [ ] `flutter analyze` と関連テストが成功する。
+
+## 解決方法
+
+対応不要として closed にする。polish 時の実ファイル照合で以下が判明したため、本 issue の前提は成立しない。
+
+- Dart 側の窓口は既に `media/sora_media_device_platform.dart` の `setAudioInputDevice` 1 つに集約されており、プラットフォーム分岐も同関数内に閉じている。`WebrtcClient.setRecordingDeviceByGuid` は並列窓口ではなく同関数 (90 行目相当) から呼ばれる唯一の下位実装であり、他の呼び出し元は無い。呼び出し側 (`sora_media_devices.dart`) も窓口経由のみである。
+- よって「二重管理」「片方だけ更新による挙動差」の動機は存在せず、Strategy 導入は過剰設計になる。音声デバイス管理に手を入れる場合は別 issue で実際の問題を特定して起票する。

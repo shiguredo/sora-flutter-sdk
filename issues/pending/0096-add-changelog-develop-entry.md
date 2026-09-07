@@ -10,7 +10,7 @@
 
 0070 のコード修正 (`8562c85`。残り 2 commit は issue ファイル操作のみ) で完了した「audio / video 未指定時のローカル Stream 拒否を修正する」（`issues/closed/0070-*`）が、`CHANGELOG.md` の `## develop` セクションに未記載である。バグ修正 (FIX 相当。0070 が bug-fix issue のため) として追記する。
 
-注意: `CODEBASE.md` の「正式リリース前」節は正式リリース前の `CHANGELOG.md` 記載を禁じている。本 issue の実施可否は未決着であり、末尾の保留事項を参照すること。
+注意: `CODEBASE.md` の「正式リリース前」節は正式リリース前の `CHANGELOG.md` 記載を禁じているため、本 issue は正式リリース後まで pending とする (末尾の理由を参照すること)。
 
 ## 現状
 
@@ -25,12 +25,8 @@
 - `CHANGELOG.md ## develop` に以下相当のエントリを追加する:
   - `- [FIX] audio / video 未指定時に connect() へローカル Stream を渡して接続できるよう修正する`
   - 担当者行 (`- @ユーザー名`) をエントリ末尾に付ける (`shiguredo-changelog` 規約に従う)。
-- 記法は `shiguredo-changelog` スキルの規約 (`- [種別] ...` 形式、種別順序) に合わせる。表記の最終統一は `0097-refactor-changelog-conform-to-convention` の決着に従う。本 issue が `## develop` の 0070 エントリを所有し、`0097` は形式整備のみを行う (`0097` 38 行目と一致)。
+- 記法は `shiguredo-changelog` スキルの規約 (`- [種別] ...` 形式、種別順序) に合わせる。表記の最終統一は `0097-refactor-changelog-conform-to-convention` の決着に従う。本 issue が `## develop` の 0070 エントリを所有し、`0097` は形式整備のみを行う。
 - 記述に issue 番号やファイル名を書かない（shiguredo-issues 規約に準拠）。
-
-## 保留事項
-
-- `CODEBASE.md` の「正式リリース前」節が `CHANGELOG.md` への記載を禁じているため、本 issue は現状実施できない。正式リリース後まで pending にするかどうか、`CODEBASE.md` を改訂するかどうかが未決着である。方針決定まで着手しないこと。
 
 ## 完了条件
 

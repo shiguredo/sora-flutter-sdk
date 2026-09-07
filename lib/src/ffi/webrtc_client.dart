@@ -76,6 +76,30 @@ class WebrtcClient {
   bool _disposed = false;
   int? _sessionGeneration;
 
+  // テスト専用に `connect` の disposed 経路で解放した audio ref 数を記録する。
+  //
+  // 正常系の release では加算しない。disposed 時の即時解放の検証に使う。
+  int _disposedAudioTrackReleaseCountForTest = 0;
+
+  /// テスト専用に `connect` の disposed 経路で解放した audio ref 数を返す。
+  ///
+  /// 正常系の release では加算しない。
+  @visibleForTesting
+  int get disposedAudioTrackReleaseCountForTest =>
+      _disposedAudioTrackReleaseCountForTest;
+
+  // テスト専用に `connect` の disposed 経路で解放した video ref 数を記録する。
+  //
+  // 正常系の release では加算しない。disposed 時の即時解放の検証に使う。
+  int _disposedVideoTrackReleaseCountForTest = 0;
+
+  /// テスト専用に `connect` の disposed 経路で解放した video ref 数を返す。
+  ///
+  /// 正常系の release では加算しない。
+  @visibleForTesting
+  int get disposedVideoTrackReleaseCountForTest =>
+      _disposedVideoTrackReleaseCountForTest;
+
   // PeerConnectionFactory / PeerConnection
   Pointer<WebrtcPeerConnectionFactoryInterfaceRefcounted>? _factoryRef;
   Pointer<WebrtcPeerConnectionInterfaceRefcounted>? _pcRef;
@@ -643,6 +667,11 @@ class WebrtcClient {
   /// 実際の `PeerConnection` 生成は offer 受信時まで遅延されるが、
   /// connect 呼び出し時点で state は `connecting` へ遷移させる。
   ///
+  /// 受け取った owned ref は保持し、初回 offer かつ送信 role かつ
+  /// config 有効の場合に sender 追加で消費し、それ以外は
+  /// `closePeerConnection` で解放する。
+  /// dispose 済みの場合は保持せず即時解放する。
+  ///
   /// [sessionGeneration] は `SoraConnection` のセッション世代。
   /// 全 state_changed イベントに付与され、旧セッションの遅延イベント抑制に使われる。
   void connect({
@@ -651,7 +680,23 @@ class WebrtcClient {
     String? localStreamId,
     required int sessionGeneration,
   }) {
-    if (_disposed) return;
+    if (_disposed) {
+      // 呼び出し側が確保した owned ref のため、受け取り側で必ず解放する。
+      // `closePeerConnection` と同一の順序 (audio から video) で解放する。
+      if (localAudioTrackRef != null) {
+        _lib.audioTrackRelease(
+          _lib.audioTrackRefcountedGet(localAudioTrackRef),
+        );
+        _disposedAudioTrackReleaseCountForTest++;
+      }
+      if (localVideoTrackRef != null) {
+        _lib.videoTrackRelease(
+          _lib.videoTrackRefcountedGet(localVideoTrackRef),
+        );
+        _disposedVideoTrackReleaseCountForTest++;
+      }
+      return;
+    }
     _sessionGeneration = sessionGeneration;
     _emitState('connecting', null, null, sessionGeneration: sessionGeneration);
     _pendingLocalAudioTrackRef = localAudioTrackRef;

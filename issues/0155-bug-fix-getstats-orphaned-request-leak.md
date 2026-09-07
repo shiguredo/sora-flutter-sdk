@@ -1,7 +1,7 @@
 # `getStats` 孤立 request の無制限滞留を解消する
 
 - Created: 2026-09-07
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-07
 - Branch: feature/fix-getstats-orphaned-request-leak
 - Polished: 2026-09-07
 
@@ -26,3 +26,7 @@
 - [ ] 孤立 request が上限を超えて増えず、超過時の新規 `getStats` が `StateError` で拒否されることをユニットテストで確認する（切断サイクルとタイムアウト経路の両方を exercise する）。
 - [ ] `dispose` 時に孤立を即時解放しない理由と上限による有界性が `WebrtcClient.dispose` と `WebrtcClient.closePeerConnection` の docstring に明記される。
 - [ ] `flutter analyze` と関連テストが成功する。
+
+## 解決方法
+
+孤立保持によるクラッシュ回避を維持し、`maxOrphanedStatsRequests` の上限を超えた新規 `getStats` を `StateError` で拒否する。`dispose` 時の不掃除と上限による有界性を docstring に明記する。上限のユニットテスト 3 件で検証する。正式リリース前のため `CHANGELOG.md` には記載しない。

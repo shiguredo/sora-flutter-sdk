@@ -3,11 +3,11 @@
 - Created: 2026-08-27
 - Completed: {YYYY-MM-DD}
 - Branch: feature/refactor-remote-video-widget-const
-- Polished: {YYYY-MM-DD}
+- Polished: 2026-09-07
 
 ## 目的
 
-`SoraRemoteVideoWidget` のコンストラクタが `assert` を含むため `const` になっていないが、`assert` 式は `const` コンストラクタでも許容されるため `const` 化できる。呼び出し側でも `const` 化可能になり Widget 再生成コスト削減につながる。
+`SoraRemoteVideoWidget` のコンストラクタが `assert` を含むため `const` になっていないが、`assert` 式は `const` コンストラクタでも許容されるため `const` 化できる。`const` な引数を渡せる箇所では `const` 呼び出しが可能になる。
 
 ## 現状
 
@@ -18,11 +18,11 @@ Dart 言語仕様では `const` コンストラクタでも initializer list で
 ## 設計方針
 
 - `SoraRemoteVideoWidget` のコンストラクタに `const` を付ける。initializer list の `assert` は既存のまま残す。
-- `SoraLocalVideoWidget` にも同種の余地がないか確認し、あれば併せて `const` 化する。
-- 挙動変更なし。呼び出し側で `const` として使えるようになるだけ。
+- `SoraLocalVideoWidget` は既に `const` であるため対象外とする。
+- 本 issue の範囲はコンストラクタ宣言への `const` 付与のみとし、呼び出し側の変更は含まない。
+- 挙動変更なし。
 
 ## 完了条件
 
 - [ ] `SoraRemoteVideoWidget` のコンストラクタが `const` になっている。
-- [ ] `SoraLocalVideoWidget` も同様に評価される。
-- [ ] `flutter analyze` と関連テストが成功する。
+- [ ] `flutter analyze` と `flutter test test/sora_video_widget_test.dart` が成功する。

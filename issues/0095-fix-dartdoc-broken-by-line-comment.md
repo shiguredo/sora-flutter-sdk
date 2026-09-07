@@ -1,40 +1,44 @@
-# `///` 直後の `//` で dartdoc が公開ドキュメントから落ちる 6 箇所を修正する
+# `///` に続く `//` で dartdoc が公開ドキュメントから落ちる 7 箇所を修正する
 
 - Created: 2026-08-27
 - Completed: {YYYY-MM-DD}
 - Branch: feature/fix-dartdoc-broken-by-line-comment
-- Polished: {YYYY-MM-DD}
+- Polished: 2026-09-07
 - Milestone: 2026.1.0
 
 ## 目的
 
-`///` の空行の後に `//` で書かれた「なぜ」の説明が `dart doc` の出力から落ちる 6 箇所を修正する。ローカルソースは読めるが、生成される公開 dartdoc では冒頭 1 行のみで補足が消える。
+`///` の後に `//` で書かれた「なぜ」の説明が `dart doc` の出力から落ちる 7 箇所を修正する。ローカルソースは読めるが、生成される公開 dartdoc では冒頭のみ (または dartdoc 自体が無い箇所は 0 行) で補足が消える。
 
 ## 現状
 
-以下の宣言で dartdoc の記法が `///` + 空 `///` + `//` の構造になっており、`//` 部分が dartdoc 出力から落ちる:
+W3C API 命名理由の「名前をそろえるため、`get` をあえて残している。」相当の補足が `//` で書かれている箇所が 7 ブロックある:
 
-- `lib/src/sora_media_stream_track_base.dart` の `MediaStreamTrackBase.getTracks()` 前後
-- `lib/src/sora_media_stream.dart` の `LocalMediaStream.getAudioTracks()` / `getVideoTracks()` および付随箇所（W3C API 命名理由の説明）
-- `lib/src/sora_remote_media_stream.dart` の `RemoteMediaStream.getTracks()` 相当
-- `lib/src/sora_media_devices.dart` の `MediaDevices.getUserMedia()` 前
-- `lib/src/sora_connection.dart` の `SoraConnection.getStats()` 前（W3C RTCPeerConnection.getStats() 命名理由）
+1. `lib/src/sora_media_stream_track_base.dart` 13-16 行目 (`MediaStream.getTracks()` 前、`///` + 空 `///` + `//` 2 行)
+2. `lib/src/sora_media_stream.dart` 49-52 行目 (`LocalMediaStream.getTracks()` 前、同構造)
+3. `lib/src/sora_media_stream.dart` 59-62 行目 (`getAudioTracks()` 前、同構造)
+4. `lib/src/sora_media_stream.dart` 91-94 行目 (`getVideoTracks()` 前、同構造)
+5. `lib/src/sora_media_devices.dart` 118-121 行目 (`MediaDevices.getUserMedia()` 前、同構造。定数側 60-61 行目は `0113-remove-duplicated-comment` の範囲で対象外)
+6. `lib/src/sora_connection.dart` 1136-1138 行目 (`SoraConnection.getStats()` 前、`///` 1 行 + `//` 2 行で空 `///` なし)
+7. `lib/src/sora_remote_media_stream.dart` 59-60 行目 (`RemoteMediaStream.getTracks()` 前、`//` 2 行のみで `///` 自体が無い。dartdoc を新規追加する扱い)
 
 ## 設計方針
 
-- 補足も残すなら 4 行とも `///` に統一する。例:
+- 1-5 は 4 行とも `///` に統一する。例:
   ```dart
   /// 現在の audio track 一覧を snapshot として返す。
   ///
   /// W3C Media Capture and Streams の `MediaStream.getAudioTracks()` と
   /// 名前をそろえるため、`get` をあえて残している。
   ```
-- 補足を消してよい箇所は空 `///` ごと削除して簡潔化する。
-- 該当 6 箇所を一度に修正する。ファイルまたぎでは影響範囲を確認する。
-- 別 issue で `sora_media_devices.dart` の重複コメント削除を扱っている場合、そちらとの整合を取る。
+- 6 は 3 行とも `///` に統一する。`getStats()` 前は `0094-doc-add-public-api-throws-dartdoc` の例外追記範囲と重なるため、本 issue を先に実施し、`0094` は例外追記のみ行う (`0094` 側と一致)。
+- 7 は他と同文言の公開 dartdoc を新規追加する (2 行の `//` を `///` 3 行相当に置き換える)。
+- 7 箇所とも補足を残す。削除する選択肢は取らない (W3C 命名理由は有用な「なぜ」の説明のため)。
+- `sora_media_devices.dart` の定数側 60-61 行目は `0113` が削除を所有するため、本 issue では触れない。メソッド側 118-121 行目のみ `///` 化する。
+- 挙動変更なし。コメント / dartdoc のみの修正。
 
 ## 完了条件
 
-- [ ] 該当 6 箇所すべてで `dart doc` の出力に「なぜ」の説明が含まれる、あるいは補足が削除されて簡潔になっている。
-- [ ] 該当パターンが lib/ 配下に残っていない（`grep -nE "^\s*///\s*$" -A1 lib/` などで確認）。
-- [ ] `flutter analyze` と関連テストが成功する。
+- [ ] 上記 7 箇所すべてで補足が `///` のみで構成されている。
+- [ ] `///` の直後行または空 `///` の次行に `//` が続く箇所が `lib/` 配下に残っていない。
+- [ ] `flutter analyze` が成功する。コメントのみの変更のため専用の関連テストはなし。

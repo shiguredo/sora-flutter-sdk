@@ -21,7 +21,7 @@
 
 `sdpTypeAnswer` は `lib/` 内では `sdpTypeOffer` のみ使用だが、`test/sdp_negotiation_test.dart` の `_createAnswerDescription` が `WebrtcConstants(dylib).sdpTypeAnswer` を使って Answer 用 SDP を生成している。Offer / Answer は対になる正当な定数のため、本 issue の削除対象には含めない。
 
-`kDummyAudio` はコード参照がゼロだが、`lib/src/sora_connection_config.dart` の `useAudioDevice` の dartdoc に言及が残っている。`0092-fix-use-audio-device-dartdoc` が本 issue への委譲を明記しているため、本 issue で dartdoc 言及の除去まで行う。
+`kDummyAudio` は Dart の `lib/` 内ではコード参照がゼロだが、`lib/src/sora_connection_config.dart` の `useAudioDevice` の dartdoc に言及が残っている。dartdoc の修正は `0092-fix-use-audio-device-dartdoc` が所有するため、本 issue では binding 定数の削除のみを行い、dartdoc には触れない。
 
 `bindings.dart` は手書き dart:ffi バインディングである (`bindings.dart` 冒頭に明記)。`LibWebrtcC` は `late final` による遅延 lookup のため、未参照 symbol の lookup コストは発生しない。削除の動機は lookup 失敗回避ではなく、未使用 API 表面の削減と誤用防止である。
 
@@ -31,7 +31,7 @@ native 側の symbol 実体は外部の `libwebrtc-c` プロジェクトの preb
 
 - 上記シンボルを Dart 側 binding から削除する。`sdpTypeAnswer` は対象外として残す。
 - 将来予約のためのコメントは残さない。対応する open issue が無い symbol は削除する。
-- `lib/src/sora_connection_config.dart` の `useAudioDevice` の dartdoc に残る `kDummyAudio` 言及を除去する (`0092` との委譲関係による)。
+- `useAudioDevice` の dartdoc の修正は `0092` が所有するため、本 issue では dartdoc に触れない。
 - native 側の symbol 削除は行わない。Dart 側削除後に `flutter test` が lookup エラーなく成功することで整合を確認する。
 - `CHANGELOG.md` への記載は行わない。
 - `bindings.dart` は手書きのため、差分は削除対象に最小限に留める。
@@ -40,6 +40,5 @@ native 側の symbol 実体は外部の `libwebrtc-c` プロジェクトの preb
 
 - [ ] 上記 dead シンボル (`sdpTypeAnswer` を除く) が `bindings.dart` から削除されている。
 - [ ] `sdpTypeAnswer` が残っている。
-- [ ] `sora_connection_config.dart` の dartdoc から `kDummyAudio` 言及が除去されている。
 - [ ] `lib/` と `test/` に削除シンボルの参照が残っていない。
 - [ ] `flutter analyze` と `flutter test test/sdp_negotiation_test.dart` を含む関連テストが成功する。

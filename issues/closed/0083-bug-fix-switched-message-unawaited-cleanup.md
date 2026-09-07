@@ -1,7 +1,7 @@
 # `_handleSwitchedMessage` の subscription.cancel / sink.close の Future を捨てている
 
 - Created: 2026-08-27
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-07
 - Branch: feature/fix-switched-message-unawaited-cleanup
 - Polished: 2026-09-07
 - Milestone: 2026.1.0
@@ -33,3 +33,7 @@ DataChannel シグナリングへの切替（`type: switched`）で `ignoreDisco
 - [ ] `type: switched` のハンドラが `_handleSwitchedMessage` の完了を待つ（tail 経由の次メッセージが cleanup 完了ログの後に開始する）。
 - [ ] 上記シナリオを exercise するユニットテストを追加する。
 - [ ] `flutter analyze` と関連テストが成功する。
+
+## 解決方法
+
+`_SoraConnectionSignaling._handleSwitchedMessage` を `Future<void>` 化し、呼び出し元で await する。cancel と close は個別 try/catch で保護し、失敗ログと完了ログを残す。失敗注入フック 2 件と旧 WebSocket 残存 getter を追加し、cleanup 完了待ちテスト 4 件で検証する。正式リリース前のため `CHANGELOG.md` には記載しない。

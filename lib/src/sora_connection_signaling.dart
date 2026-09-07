@@ -223,7 +223,7 @@ extension _SoraConnectionSignaling on SoraConnection {
     } else if (type == 'disconnect') {
       _webrtcClient.handleDisconnect();
     } else if (type == 'switched') {
-      _handleSwitchedMessage(payload);
+      await _handleSwitchedMessage(payload);
     } else if (type == 'redirect') {
       await _handleRedirectMessage(payload);
     }
@@ -236,7 +236,7 @@ extension _SoraConnectionSignaling on SoraConnection {
   }
 
   /// switched メッセージを処理する
-  void _handleSwitchedMessage(Map<String, Object?> payload) {
+  Future<void> _handleSwitchedMessage(Map<String, Object?> payload) async {
     _signalingState.signalingSwitched = true;
     // 切断ハンドラから参照できるよう、ignore_disconnect_websocket の値を
     // セッション状態へ保存する。
@@ -245,16 +245,42 @@ extension _SoraConnectionSignaling on SoraConnection {
     _emitDebugMessage('switched: signaling switched to datachannel');
     _emitSwitchedMessage(payload);
     final ignoreDisconnectWebSocket = _signalingState.ignoreDisconnectWebSocket;
-    if (ignoreDisconnectWebSocket) {
-      _emitDebugMessage(
-        'switched: closing websocket (ignore_disconnect_websocket=true)',
-      );
-      final channel = _signalingState.webSocketChannel;
-      _signalingState.webSocketChannel = null;
-      _signalingState.webSocketSubscription?.cancel();
-      _signalingState.webSocketSubscription = null;
-      channel?.sink.close();
+    if (!ignoreDisconnectWebSocket) {
+      // 次セッションへの持ち越しを防ぐため、未消費の注入を破棄する。
+      switchedCancelFailureForTest = null;
+      switchedCloseFailureForTest = null;
+      return;
     }
+    _emitDebugMessage(
+      'switched: closing websocket (ignore_disconnect_websocket=true)',
+    );
+    final channel = _signalingState.webSocketChannel;
+    _signalingState.webSocketChannel = null;
+    // cancel と close は個別に保護し、片方の失敗で他方を skip しない。
+    // redirect 経路の cancel / close 保護と同様の扱いである。
+    final subscription = _signalingState.webSocketSubscription;
+    _signalingState.webSocketSubscription = null;
+    try {
+      final cancelFailure = switchedCancelFailureForTest;
+      switchedCancelFailureForTest = null;
+      if (cancelFailure != null) {
+        throw cancelFailure;
+      }
+      await subscription?.cancel();
+    } catch (cancelError) {
+      _emitDebugMessage('switched: subscription cancel failed: $cancelError');
+    }
+    try {
+      final closeFailure = switchedCloseFailureForTest;
+      switchedCloseFailureForTest = null;
+      if (closeFailure != null) {
+        throw closeFailure;
+      }
+      await channel?.sink.close();
+    } catch (closeError) {
+      _emitDebugMessage('switched: old channel close failed: $closeError');
+    }
+    _emitDebugMessage('switched: websocket cleanup done');
   }
 
   void _handleWebSocketTimeout() {

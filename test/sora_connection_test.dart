@@ -978,4 +978,242 @@ void main() {
       }
     });
   }, skip: ffiTestEnvironment.skipReason);
+
+  group('SoraConnection._handleSwitchedMessage の cleanup 完了待ち', () {
+    late WebrtcClient wc;
+    late HttpServer acceptServer;
+    late String acceptUrl;
+
+    setUpAll(() async {
+      // SoraConnection 生成には FFI の共有 factory が必要なため、
+      // 事前に WebrtcClient を生成して初期化する。
+      wc = WebrtcClient.create(config: {}, onEvent: (_, _) {});
+      // switched 起動前の初期 WebSocket として使う実サーバー。
+      acceptServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      acceptServer.listen((request) async {
+        if (WebSocketTransformer.isUpgradeRequest(request)) {
+          await WebSocketTransformer.upgrade(request);
+        } else {
+          request.response.statusCode = HttpStatus.badRequest;
+          await request.response.close();
+        }
+      });
+      acceptUrl = 'ws://${acceptServer.address.host}:${acceptServer.port}';
+    });
+
+    tearDownAll(() async {
+      await acceptServer.close(force: true);
+      wc.dispose();
+    });
+
+    SoraConnection createConnection() {
+      return SoraConnection.createForTest(
+        config: SoraConnectionConfig(
+          signalingUrls: <String>[acceptUrl],
+          channelId: 'test-channel',
+          role: SoraRole.recvonly,
+        ),
+        clientId: 1,
+        eventChannelName: 'test-event-channel',
+      );
+    }
+
+    Future<void> disposeConnection(SoraConnection connection) async {
+      try {
+        await connection.dispose();
+      } on MissingPluginException catch (_) {
+        // handler 未登録による通信失敗のみを想定内として無視する。
+      }
+    }
+
+    Future<WebSocketChannel> establishInitialChannel() async {
+      final channel = WebSocketChannel.connect(Uri.parse(acceptUrl));
+      await channel.ready;
+      return channel;
+    }
+
+    // switched メッセージ投入から cleanup 完了までを zone 監視下で実行する。
+    // zone unhandled error の有無は collector で判定する。
+    Future<List<String>> runSwitchedMessage({
+      required SoraConnection connection,
+      required List<Object> zoneErrors,
+      Map<String, Object?>? payload,
+    }) async {
+      final debugMessages = <String>[];
+      final debugSub = connection.debugMessages.listen(debugMessages.add);
+      try {
+        await runZonedGuarded(
+          () async {
+            await connection.enqueueWebSocketMessageForTest(
+              jsonEncode(
+                payload ??
+                    <String, Object?>{
+                      'type': 'switched',
+                      'ignore_disconnect_websocket': true,
+                    },
+              ),
+            );
+            await pumpEventQueue();
+            // sink.close の実ハンドシェイク由来の遅延エラーを zone 内で収集する。
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+            await pumpEventQueue();
+          },
+          (Object error, StackTrace stackTrace) {
+            zoneErrors.add(error);
+          },
+        );
+        return debugMessages;
+      } finally {
+        await debugSub.cancel();
+      }
+    }
+
+    test('ignore true で cleanup 完了ログが出て transport が残らない', () async {
+      // 正常系の cleanup が完了し、zone unhandled error にならないことを検証する。
+      final connection = createConnection();
+      final channel = await establishInitialChannel();
+      connection.injectSignalingWebSocketForTest(channel);
+      final zoneErrors = <Object>[];
+      try {
+        final debugMessages = await runSwitchedMessage(
+          connection: connection,
+          zoneErrors: zoneErrors,
+        );
+        expect(
+          debugMessages,
+          contains('switched: websocket cleanup done'),
+          reason: 'cancel と close の完了後に完了ログが出ること',
+        );
+        expect(
+          connection.signalingHasActiveTransportForTest,
+          isTrue,
+          reason: 'DataChannel 切替後も総合 transport は残ること',
+        );
+        expect(
+          connection.hasWebSocketTransportForTest,
+          isFalse,
+          reason: '旧 WebSocket の channel と subscription が残らないこと',
+        );
+        expect(zoneErrors, isEmpty, reason: 'cleanup の非同期失敗が zone に漏れないこと');
+      } finally {
+        await disposeConnection(connection);
+      }
+    });
+
+    test('cancel 失敗でも zone に漏れず cancel 失敗ログが残る', () async {
+      // cancel 側の失敗注入で catch 経路を通し、完了ログまで進むことを検証する。
+      final connection = createConnection();
+      final channel = await establishInitialChannel();
+      connection.injectSignalingWebSocketForTest(channel);
+      connection.switchedCancelFailureForTest = StateError(
+        'cancel failed for test',
+      );
+      final zoneErrors = <Object>[];
+      try {
+        final debugMessages = await runSwitchedMessage(
+          connection: connection,
+          zoneErrors: zoneErrors,
+        );
+        expect(
+          debugMessages.any(
+            (message) =>
+                message.startsWith('switched: subscription cancel failed'),
+          ),
+          isTrue,
+          reason: 'cancel 失敗が debug ログに残ること',
+        );
+        expect(
+          debugMessages,
+          contains('switched: websocket cleanup done'),
+          reason: 'cancel 失敗後も close まで進み完了ログが出ること',
+        );
+        expect(zoneErrors, isEmpty);
+      } finally {
+        await disposeConnection(connection);
+      }
+    });
+
+    test('close 失敗でも zone に漏れず close 失敗ログが残る', () async {
+      // close 側の失敗注入で catch 経路を通し、完了ログまで進むことを検証する。
+      final connection = createConnection();
+      final channel = await establishInitialChannel();
+      connection.injectSignalingWebSocketForTest(channel);
+      connection.switchedCloseFailureForTest = StateError(
+        'close failed for test',
+      );
+      final zoneErrors = <Object>[];
+      try {
+        final debugMessages = await runSwitchedMessage(
+          connection: connection,
+          zoneErrors: zoneErrors,
+        );
+        expect(
+          debugMessages.any(
+            (message) =>
+                message.startsWith('switched: old channel close failed'),
+          ),
+          isTrue,
+          reason: 'close 失敗が debug ログに残ること',
+        );
+        expect(
+          debugMessages,
+          contains('switched: websocket cleanup done'),
+          reason: 'close 失敗後も完了ログが出ること',
+        );
+        expect(zoneErrors, isEmpty);
+      } finally {
+        await disposeConnection(connection);
+      }
+    });
+
+    test('tail 経由の次メッセージが cleanup 完了後に開始する', () async {
+      // await 化により次メッセージが cleanup 完了後に処理されることを検証する。
+      final connection = createConnection();
+      final channel = await establishInitialChannel();
+      connection.injectSignalingWebSocketForTest(channel);
+      final zoneErrors = <Object>[];
+      final debugMessages = <String>[];
+      final debugSub = connection.debugMessages.listen(debugMessages.add);
+      try {
+        await runZonedGuarded(
+          () async {
+            final switched = connection.enqueueWebSocketMessageForTest(
+              jsonEncode(<String, Object?>{
+                'type': 'switched',
+                'ignore_disconnect_websocket': true,
+              }),
+            );
+            final next = connection.enqueueWebSocketMessageForTest(
+              jsonEncode(<String, Object?>{'type': 'ping'}),
+            );
+            await Future.wait(<Future<void>>[switched, next]);
+            await pumpEventQueue();
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+            await pumpEventQueue();
+          },
+          (Object error, StackTrace stackTrace) {
+            zoneErrors.add(error);
+          },
+        );
+        await pumpEventQueue();
+        final cleanupIndex = debugMessages.indexOf(
+          'switched: websocket cleanup done',
+        );
+        final pongIndex = debugMessages.indexWhere(
+          (message) => message.contains('pong'),
+        );
+        expect(cleanupIndex, isNot(-1), reason: 'cleanup 完了ログが出ること');
+        expect(pongIndex, isNot(-1), reason: '後続 ping が処理されること');
+        expect(
+          cleanupIndex < pongIndex,
+          isTrue,
+          reason: '次メッセージが cleanup 完了後に開始すること',
+        );
+        expect(zoneErrors, isEmpty);
+      } finally {
+        await debugSub.cancel();
+        await disposeConnection(connection);
+      }
+    });
+  }, skip: ffiTestEnvironment.skipReason);
 }

@@ -1042,23 +1042,26 @@ void main() {
       final debugMessages = <String>[];
       final debugSub = connection.debugMessages.listen(debugMessages.add);
       try {
-        await runZonedGuarded(() async {
-          await connection.enqueueWebSocketMessageForTest(
-            jsonEncode(
-              payload ??
-                  <String, Object?>{
-                    'type': 'switched',
-                    'ignore_disconnect_websocket': true,
-                  },
-            ),
-          );
-          await pumpEventQueue();
-          // sink.close の実ハンドシェイク由来の遅延エラーを zone 内で収集する。
-          await Future<void>.delayed(const Duration(milliseconds: 100));
-          await pumpEventQueue();
-        }, (Object error, StackTrace stackTrace) {
-          zoneErrors.add(error);
-        });
+        await runZonedGuarded(
+          () async {
+            await connection.enqueueWebSocketMessageForTest(
+              jsonEncode(
+                payload ??
+                    <String, Object?>{
+                      'type': 'switched',
+                      'ignore_disconnect_websocket': true,
+                    },
+              ),
+            );
+            await pumpEventQueue();
+            // sink.close の実ハンドシェイク由来の遅延エラーを zone 内で収集する。
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+            await pumpEventQueue();
+          },
+          (Object error, StackTrace stackTrace) {
+            zoneErrors.add(error);
+          },
+        );
         return debugMessages;
       } finally {
         await debugSub.cancel();
@@ -1091,11 +1094,7 @@ void main() {
           isFalse,
           reason: '旧 WebSocket の channel と subscription が残らないこと',
         );
-        expect(
-          zoneErrors,
-          isEmpty,
-          reason: 'cleanup の非同期失敗が zone に漏れないこと',
-        );
+        expect(zoneErrors, isEmpty, reason: 'cleanup の非同期失敗が zone に漏れないこと');
       } finally {
         await disposeConnection(connection);
       }
@@ -1117,9 +1116,8 @@ void main() {
         );
         expect(
           debugMessages.any(
-            (message) => message.startsWith(
-              'switched: subscription cancel failed',
-            ),
+            (message) =>
+                message.startsWith('switched: subscription cancel failed'),
           ),
           isTrue,
           reason: 'cancel 失敗が debug ログに残ること',
@@ -1177,23 +1175,26 @@ void main() {
       final debugMessages = <String>[];
       final debugSub = connection.debugMessages.listen(debugMessages.add);
       try {
-        await runZonedGuarded(() async {
-          final switched = connection.enqueueWebSocketMessageForTest(
-            jsonEncode(<String, Object?>{
-              'type': 'switched',
-              'ignore_disconnect_websocket': true,
-            }),
-          );
-          final next = connection.enqueueWebSocketMessageForTest(
-            jsonEncode(<String, Object?>{'type': 'ping'}),
-          );
-          await Future.wait(<Future<void>>[switched, next]);
-          await pumpEventQueue();
-          await Future<void>.delayed(const Duration(milliseconds: 100));
-          await pumpEventQueue();
-        }, (Object error, StackTrace stackTrace) {
-          zoneErrors.add(error);
-        });
+        await runZonedGuarded(
+          () async {
+            final switched = connection.enqueueWebSocketMessageForTest(
+              jsonEncode(<String, Object?>{
+                'type': 'switched',
+                'ignore_disconnect_websocket': true,
+              }),
+            );
+            final next = connection.enqueueWebSocketMessageForTest(
+              jsonEncode(<String, Object?>{'type': 'ping'}),
+            );
+            await Future.wait(<Future<void>>[switched, next]);
+            await pumpEventQueue();
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+            await pumpEventQueue();
+          },
+          (Object error, StackTrace stackTrace) {
+            zoneErrors.add(error);
+          },
+        );
         await pumpEventQueue();
         final cleanupIndex = debugMessages.indexOf(
           'switched: websocket cleanup done',

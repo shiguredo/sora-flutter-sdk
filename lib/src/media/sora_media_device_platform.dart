@@ -4,6 +4,7 @@ library;
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:meta/meta.dart';
 
 import '../ffi/webrtc_client.dart';
@@ -117,6 +118,37 @@ Future<String> getDefaultAudioInputDeviceId() async {
     throw StateError('Default audio input device not found.');
   }
   return deviceId;
+}
+
+/// 音声入力デバイスの不存在を表す例外かどうかを判定します。
+///
+/// `MediaDevices.createAudioTrack` が `setAudioInputDevice` の失敗を
+/// silent に無視してよいのは、デバイスが存在しない場合に限ります。
+/// それ以外の例外は呼び出し側へ伝搬させます。
+///
+/// 無視対象の由来は次のとおりです。
+/// - `audio_device_not_found`: iOS と Android の MethodChannel 経路
+/// - `device_not_found`: `deviceId == null` 時に Linux の
+///   `getDefaultAudioInputDevice` 経路でのみ想定します
+/// - `StateError` 3 種: Dart 変換 1 件と FFI 経路 2 件のデバイス不存在メッセージ
+@internal
+bool isAudioInputDeviceNotFoundError(Object error) {
+  if (error is PlatformException) {
+    // message は条件に含めず code のみで判定します。
+    return error.code == 'audio_device_not_found' ||
+        error.code == 'device_not_found';
+  }
+  if (error is StateError) {
+    const notFoundMessages = <String>[
+      'Default audio input device not found.',
+      'No audio input devices available.',
+    ];
+    if (notFoundMessages.contains(error.message)) {
+      return true;
+    }
+    return error.message.startsWith('Audio input device not found: ');
+  }
+  return false;
 }
 
 /// SDK 管理のローカル映像トラックが使うプレビューテクスチャを確保します。

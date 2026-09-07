@@ -7,10 +7,14 @@ import 'package:sora_sdk/src/ffi/bindings.dart';
 import 'package:sora_sdk/src/ffi/library_loader.dart';
 import 'package:sora_sdk/src/ffi/webrtc_client.dart';
 import 'package:sora_sdk/src/sora_media_devices.dart';
+import 'package:sora_sdk/src/sora_method_channels.dart';
 
 import 'support/ffi_test_environment.dart';
 
 void main() {
+  // MethodChannel 応答が必要なテストがあるため先に binding を初期化する。
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   final ffiTestEnvironment = prepareFfiTestEnvironment();
 
   group('getStats cleanup on disconnect', () {
@@ -310,6 +314,28 @@ void main() {
       // headless 環境で共有 factory 生成が音声デバイス初期化で失敗しないよう、
       // 生成前に push ADM へ切り替える。audio track 自体の生成には影響しない。
       MediaDevices.setUseAudioDevice(false);
+    });
+
+    setUp(() {
+      // 音声デバイス選択の MethodChannel 応答をテスト側で返す。実プラット
+      // フォーム実装を使わないため、テスト環境に依存せず経路検証だけを行える。
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(soraMethodChannel, (call) async {
+            switch (call.method) {
+              case 'getDefaultAudioInputDevice':
+                return 'test-mic';
+              case 'enumerateAudioInputDevices':
+                return <Map<String, String>>[
+                  <String, String>{'deviceId': 'test-mic', 'label': 'Test Mic'},
+                ];
+            }
+            return null;
+          });
+    });
+
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(soraMethodChannel, null);
     });
 
     test('audio のみ渡すと audio ref だけ解放される', () async {

@@ -162,6 +162,9 @@ abstract final class MediaDevices {
   /// local audio track を 1 本生成する。
   /// `audioDeviceId` を指定すると、その ID のマイクを使うようネイティブ側に指示する。
   /// 未指定時は前回の明示選択を解除する。
+  ///
+  /// デバイスが存在しない環境では `setAudioInputDevice` の失敗を無視して続行する。
+  /// それ以外の失敗は呼び出し側へ throw する。
   static Future<LocalAudioTrack> createAudioTrack({
     String? audioDeviceId,
   }) async {
@@ -173,10 +176,14 @@ abstract final class MediaDevices {
       // オーディオ入力デバイスが存在しない環境（CI 等）では
       // setAudioInputDevice が失敗する可能性があるが、ネイティブの
       // audio track 作成自体はデバイスがなくても成功するため、
-      // エラーは無視して続行する。
+      // デバイス不存在の場合のみエラーを無視して続行する。
       try {
         await media_device_platform.setAudioInputDevice(audioDeviceId);
-      } catch (_) {}
+      } catch (error) {
+        if (!media_device_platform.isAudioInputDeviceNotFoundError(error)) {
+          rethrow;
+        }
+      }
     }
     final lib = WebrtcClient.sharedLib;
     final factory = WebrtcClient.sharedFactory;

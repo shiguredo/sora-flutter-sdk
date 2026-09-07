@@ -1,37 +1,38 @@
-# `CODEBASE.md` を追加してリポジトリ固有規約と方針を明文化する
+# `CODEBASE.md` に未文書化ポリシーを追記して節構成を再構成する
 
 - Created: 2026-08-27
 - Completed: {YYYY-MM-DD}
 - Branch: feature/doc-add-codebase-md
-- Polished: {YYYY-MM-DD}
+- Polished: 2026-09-07
 
 ## 目的
 
-AGENTS.md line 20「リポジトリ固有の規約・設定がある場合は `CODEBASE.md` を参照すること」に沿って、リポジトリ固有の方針を明文化する `CODEBASE.md` を追加する。annotation ポリシー、export 方針、CHANGELOG のファイル名扱いなど、既存コードに散在する暗黙ルールを一元化する。
+既存 `CODEBASE.md` (変更履歴 / pub.dev 公開 / 正式リリース前の 3 節、26 行) に記載の無い確定ポリシーを追記し、節構成を再構成する。各ポリシーの内容決定は owner issue が行い、本 issue は転記と構成のみを所有する。
 
 ## 現状
 
-`CODEBASE.md` は未作成。以下の方針がどこにも文書化されておらず、レビュー・修正時に判断根拠を推測することになる:
+`CODEBASE.md` に記載が無く、他 issue で確定済みまたは確定予定のポリシーは以下である:
 
-- 公開 data class の `@immutable` / `final class` 付与方針
-- `///` と `//` の使い分け（dartdoc は `///` のみ、混在させない）
-- コンストラクタで `@nodoc` を使わず `@internal` またはドキュメントで扱う方針
-- `sora_sdk.dart` の export 方針（`show` 方式 vs `hide` 方式）
-- `CHANGELOG.md` のファイル名扱い（`shiguredo-changelog` は `CHANGES.md` を要求するが pub.dev 表示都合で `CHANGELOG.md` を使う）
-- Test の日本語名徹底
-- `test/` の `public/` `internal/` 分離方針
+- annotation 方針 (`@immutable` / `final class` / `@nodoc` / `@internal`)。内容確定は `0131-fix-annotation-policy` が所有する。
+- `///` と `//` の使い分け。`0095` (7 箇所の `///` 化) と `0112` (英語見出し等) が具体箇所を所有する。
+- `sora_sdk.dart` の export 方針。`0100` で `show` 許可リスト方式に解決済み (現行は素 export と `show` 2 件の混在であり、`hide` は存在しない)。
+- テスト名の日本語化。`0106` が 21 件を特定済みである。
+- `test/` の `public/` / `internal/` 分離方針。`0135` が振り分け表を所有する。
+
+記載済みのため対象外とする:
+
+- `CHANGELOG.md` のファイル名扱い (`CODEBASE.md` 5-7 行目で決着済み)。
+- 「正式リリース前」節 (`0148-doc-update-codebase-md-release-flow` が更新を所有するため触れない)。
 
 ## 設計方針
 
-- リポジトリルートに `CODEBASE.md` を新規作成する。
-- 上記の各ポリシーを節に分けて記述する。日本語で書く。
-- 「なぜ」の根拠（過去の経緯、pub.dev の制約、レビュー結果など）を各節に付ける。
-- 将来の追加ポリシーを想定した節構成にする（Style / Testing / API Compatibility / CHANGELOG / Third-party Dependency 等）。
-- 参照方向: `AGENTS.md` は既に `CODEBASE.md` への言及があるためそのまま。`CODEBASE.md` から具体的な例（別 issue で扱う `@internal` 付与 / export 方式）を参照する。
-- 挙動変更なし。ドキュメント追加のみ。
+- 既存 3 節 (変更履歴 / pub.dev 公開 / 正式リリース前) は維持し、新規節 (API 規約 / テスト規約) を追加する再構成とする。新規作成・上書き破棄は行わない。
+- 各節の内容は owner issue (`0131` / `0095` / `0112` / `0106` / `0135` / `0100` 決着) の結論を転記する。本 issue で内容を決定しない。
+- owner issue の完了後に転記する。未完了の owner がある節は空節を作らず、転記可能分のみ行う。
+- 日本語で書く。
 
 ## 完了条件
 
-- [ ] `CODEBASE.md` がリポジトリルートに存在する。
-- [ ] 現時点で決まっている全ポリシーが明文化されている。
-- [ ] AGENTS.md からの参照が有効に機能している。
+- [ ] API 規約 / テスト規約の新規節が追加され、既存 3 節と統合されている。
+- [ ] 各節の内容が owner issue の結論と矛盾しない。
+- [ ] `AGENTS.md` からの参照が有効である (リンク切れなし)。

@@ -1,38 +1,35 @@
-# `pubspec.yaml` の description / topics / issue_tracker を整備する
+# `pubspec.yaml` の description 拡張と `issue_tracker` 方針確定
 
 - Created: 2026-08-27
 - Completed: {YYYY-MM-DD}
 - Branch: feature/update-pubspec-metadata
-- Polished: {YYYY-MM-DD}
+- Polished: 2026-09-07
 - Milestone: 2026.1.0
 
 ## 目的
 
-`pubspec.yaml` のメタデータを pub.dev のパッケージスコアリング（pana）と検索性の観点から整備する。description の拡張、topics への `sora` 追加、`issue_tracker` の方針明記を行う。
+`pubspec.yaml` のメタデータを pub.dev での説明不足解消の観点から整備する。`description` の拡張と `issue_tracker` の方針確定を行う。`topics` は `0066-change-add-pubspec-topics` で `webrtc` / `flutter` に確定済み (`sora` は混同回避のため除外) のため、本 issue では変更しない。
 
 ## 現状
 
-- `description`: `Flutter plugin for Sora powered by libwebrtc-c.` は 48 文字。pana のパッケージスコアリング側で description 長は減点対象になりうる（推奨 60〜180 文字）。正式リリース版として不利。
-- `topics`: `webrtc`, `flutter` のみ。自 SDK の名称 `sora` が含まれておらず、pub.dev 検索で見つかりにくい。
-- `issue_tracker`: 明示指定なし。プロジェクトは Discord 誘導でありバグ報告を GitHub issues に頂きたくない場合、明示的に方針を明記する必要がある。
+- `description`: `Flutter plugin for Sora powered by libwebrtc-c.` は 47 文字 (文字数、ピリオド込み) で、pub.dev 上の説明として短い。目安 60-180 文字 (pana の推奨とされる範囲。一次資料未確認のため厳密な閾値ではなく目安として扱う) を下回る。
+- `topics`: `webrtc`, `flutter` のみ。`0066` で `sora` 除外が確定済み (Sorani Kurdish や OpenAI Sora 関連との混同回避) のため現状維持とする。
+- `issue_tracker`: 明示指定なし。プロジェクトは Discord 誘導であり (`README.md` 505-511 行目「Discord のみで受け付ける」「バグ報告は Discord へ」)、GitHub issues でのバグ報告を受け付けていない。
 
 ## 設計方針
 
-- `description` を 60〜180 文字程度に拡張する。以下相当:
-  - WebRTC SFU Sora 向け Flutter SDK。libwebrtc-c ベースで iOS/macOS/Android/Windows/Linux に対応する。
-  - 正確な文言はプロジェクトオーナー確認の上で決定する。
-- `topics` に `sora` を追加する。`webrtc-sfu` など追加候補があれば併せて検討する。
-- `issue_tracker` 方針:
-  - **A. 現状維持**: 明示せず、pub.dev が repository から自動推定する。バグ報告方針は README で Discord へ誘導する。
-  - **B. Discord URL を書く**: pub.dev のフィールドは Web URL 前提のため Discord の招待 URL を書く。
-  - **C. GitHub Discussions URL を書く**: 段階的移行。
-  - 選択と `CODEBASE.md` への方針記載を合わせて行う。
-- pubspec の他フィールド（`repository`, `homepage`）と整合を取る。
+- `description` を英語のまま 60-180 文字程度に拡張する。確定文言は以下とする (110 文字):
+  - `Flutter plugin for WebRTC SFU Sora powered by libwebrtc-c, supporting iOS, macOS, Android, Windows, and Linux.`
+  - 対応プラットフォームは `README.md` 456-464 行目の対応表と一致する。
+- `topics` は変更しない (`0066` 決着を維持する)。
+- `issue_tracker` 方針は A. 現状維持 (明示せず、バグ報告方針は README の Discord 誘導で足りる) とする。Discord 招待 URL や GitHub Discussions URL の記載は行わない。
+- `repository` / `homepage` (`0065` で確定済み) は変更せず、値の存在確認のみ行う。
+- 挙動変更なし。`pubspec.yaml` のみの修正。
 
 ## 完了条件
 
-- [ ] `pubspec.yaml` の `description` が 60〜180 文字に拡張されている。
-- [ ] `topics` に `sora` が含まれている。
-- [ ] `issue_tracker` の方針が決定され、必要に応じて記載されている。
-- [ ] `CODEBASE.md` の関連節と整合が取れている。
-- [ ] `flutter analyze` と関連テストが成功する。
+- [ ] `pubspec.yaml` の `description` が上記確定文言に更新されている (文字数は `wc -m` 等で確認する)。
+- [ ] `topics` が `webrtc` / `flutter` のまま変更されていない。
+- [ ] `issue_tracker` が記載されていない (A. 現状維持)。
+- [ ] `repository` / `homepage` が存在している (値の変更は行わない)。
+- [ ] `flutter pub publish --dry-run` の出力に topics / description 関連のエラーや警告がない (CHANGELOG のバージョン警告は `0063` の範囲であり対象外)。

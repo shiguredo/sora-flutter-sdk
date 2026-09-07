@@ -3,7 +3,7 @@
 - Created: 2026-09-01
 - Completed: {YYYY-MM-DD}
 - Branch: feature/add-pubdev-examples
-- Polished: {YYYY-MM-DD}
+- Polished: 2026-09-07
 
 ## 目的
 
@@ -37,10 +37,13 @@ example/
 └── messaging/
 ```
 
-`basic` は `sendrecv` と役割が重複するため追加しない。
+`example/README.md` は 2 アプリの目的、前提条件、起動方法を示す索引とする。
 
-`example/README.md` は 2 アプリの目的、前提条件、起動方法を示す索引とし、
-pub.dev の Example タブに表示できる構成にする。
+### pub.dev 公開版への依存
+
+各アプリの `pubspec.yaml` では、実装時点で pub.dev に公開されている
+`sora_sdk` の最新安定版を完全一致で指定する。安定版が存在しない場合は
+本 issue に着手しない。
 
 ### pub.dev 公開版への依存
 
@@ -61,7 +64,7 @@ pub.dev の Example タブに表示できる構成にする。
 
 `Sora.createConnection`、`SoraConnection.connect`、`localVideo`、
 `SoraLocalVideoWidget`、`SoraRemoteVideoWidget` を利用し、次を確認できる
-最小アプリにする。
+最小アプリにする (`role: sendrecv`)。
 
 - シグナリング URL、チャネル ID、認証 metadata の入力
 - カメラとマイクを利用した sendrecv 接続
@@ -72,6 +75,9 @@ pub.dev の Example タブに表示できる構成にする。
 ### messaging example
 
 音声と映像を無効化し、DataChannel シグナリングを利用する最小アプリにする。
+接続設定はルート `README.md` のメッセージング専用接続の正準例に準拠する
+(`role: sendonly`、`audio: false`、`video: false`、`dataChannelSignaling: true`、
+`dataChannels` に `#messaging`)。
 
 - シグナリング URL、チャネル ID、認証 metadata の入力
 - メッセージング専用接続
@@ -81,7 +87,7 @@ pub.dev の Example タブに表示できる構成にする。
 
 ### 接続情報
 
-シグナリング URL、認証 metadata、その他の接続情報は画面から入力し、
+シグナリング URL、チャネル ID、認証 metadata は画面から入力し、
 リポジトリへ実値を保存しない。README、ソースコード、テストにも実際の
 認証情報や内部エンドポイントを含めない。
 
@@ -89,10 +95,12 @@ pub.dev の Example タブに表示できる構成にする。
 
 - ルート `README.md` の構成とサンプル説明に `example/` を追加する。
 - `.pubignore` では `example/` を除外せず、公開パッケージに含める。
-- `.github/workflows/ci.yml` で両アプリの format、analyze、build を確認する。
+- `.github/workflows/ci.yml` の `paths` トリガーに `example/**` を追加し、
+  両アプリの format、analyze、macOS の build (代表プラットフォーム) を確認する。
 - `dart pub publish --dry-run` で `example/` が公開対象に含まれることを確認する。
-- 接続を必要とする自動テストのために認証情報を追加せず、実際の接続確認は
-  利用者が入力した接続情報で行う。
+  Example タブ表示自体は dry-run では確認できないため完了条件には含めない。
+- 送受信の動作確認は CI では行わず、実装者が実 Sora 環境で人手確認し、
+  結果を PR 本文に記録する。接続を必要とする自動テストのために認証情報を追加しない。
 
 ## 完了条件
 
@@ -107,4 +115,5 @@ pub.dev の Example タブに表示できる構成にする。
 - [ ] 接続情報や認証情報の実値がリポジトリに含まれていない。
 - [ ] ルート `README.md` から両アプリへ到達できる。
 - [ ] `dart pub publish --dry-run` の公開対象に `example/` が含まれている。
-- [ ] 両アプリの format、analyze、対応プラットフォームの build が CI で成功する。
+- [ ] 両アプリの format、analyze、macOS の build が CI で成功する。
+- [ ] 実 Sora 環境での人手確認結果が PR 本文に記録されている。

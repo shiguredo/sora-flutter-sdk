@@ -1,7 +1,7 @@
 # `MediaDevices.createAudioTrack` の空 `catch (_) {}` が全例外を握りつぶす
 
 - Created: 2026-08-27
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-07
 - Branch: feature/fix-create-audio-track-swallow-exception
 - Polished: 2026-09-07
 - Milestone: 2026.1.0
@@ -39,3 +39,7 @@
 - [ ] 想定外の例外（`TimeoutException` / `MissingPluginException` / その他の `PlatformException` / その他の `StateError` / その他の Dart `Error`）は握りつぶさず rethrow され、呼び出し側で検知できる。rethrow による Android 環境の挙動変更を許容し、`CHANGELOG.md` には記載しない（正式リリース前のため）。
 - [ ] 上記シナリオを exercise するユニットテストを追加する。テストは `setAudioInputDevice` の例外分類ロジックをテスト可能な純粋関数として分離して実施する（モックやスタブは使わない）。`PlatformException` / `StateError` / `TimeoutException` / `MissingPluginException` の実インスタンスを渡して分類を検証する。
 - [ ] `flutter analyze` と関連テストが成功する。
+
+## 解決方法
+
+`setAudioInputDevice` の失敗分類を `isAudioInputDeviceNotFoundError` 純粋関数に分離し、デバイス不存在のみ silent に無視して他は rethrow する。方針を dartdoc に明記し、例外分類のユニットテストを追加する。正式リリース前のため `CHANGELOG.md` には記載しない。

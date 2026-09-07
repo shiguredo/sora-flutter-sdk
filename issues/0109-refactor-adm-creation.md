@@ -3,7 +3,7 @@
 - Created: 2026-08-27
 - Completed: {YYYY-MM-DD}
 - Branch: feature/refactor-adm-creation
-- Polished: {YYYY-MM-DD}
+- Polished: 2026-09-07
 
 ## 目的
 
@@ -11,7 +11,7 @@
 
 ## 現状
 
-`lib/src/ffi/webrtc_client.dart` の `WebrtcClient._ensureSharedFactory` は、macOS / Windows / Linux × `useAudioDevice` (true/false) の 6 ブロックが「create → set → 既存 ADM release → `_sharedAdmRef` 代入 → `audioDeviceModuleInit`」の同一シーケンスを繰り返している。差分は:
+`lib/src/ffi/webrtc_client.dart` の `WebrtcClient._ensureSharedFactory` は、macOS / Windows / Linux × `useAudioDevice` (true/false) の 6 ブロックが「create → `pcFactoryDependenciesSetAdm(deps, adm)` → 既存 ADM release → `_sharedAdmRef` 代入 → `_initAudioDeviceModule` (失敗時は `throw StateError`)」の同一シーケンスを繰り返している。全体は try / catch 構造であり、catch で `_releaseSharedFactoryResources` による解放と static field リセットを行う (`0082` 決着後の形)。差分は:
 
 - macOS + useAudioDevice=true: `sharedLib.createAudioDeviceModule(env, kPlatformDefaultAudio)`
 - Windows + useAudioDevice=true: `sharedLib.soraCreateAudioDeviceModule(env, kPlatformDefaultAudio)`（setjmp/longjmp で abort 捕捉）
@@ -21,14 +21,15 @@
 
 ## 設計方針
 
-- `Pointer<WebrtcAudioDeviceModuleRefcounted> Function()` を引数に取る `_installAdm(builder)` を 1 本用意し、プラットフォーム分岐から呼び出す形にまとめる。
-- 差分は builder 関数 lambda に押し込む。ログ変数名は共通の `initRc` に統一する。
+- 6 ブロックを `_installAdm({required Pointer<WebrtcPeerConnectionFactoryDependencies> deps, required Pointer<WebrtcAudioDeviceModuleRefcounted>? Function() builder, required bool managesEnv})` 相当の単一ヘルパー呼び出しに置き換える。ヘルパー内で `pcFactoryDependenciesSetAdm`、既存 `_sharedAdmRef` の release、代入、`_initAudioDeviceModule` と失敗時 throw を行う。`adm == nullptr` 時は無操作とする。
+- `env` の生成・破棄 (`createEnvironment` / `environmentDelete`) は `managesEnv == true` の場合のみヘルパー側で行い、`useAudioDevice=false` 系 (env なし) と共用する。差分の生成関数は builder lambda に押し込む。ログ変数名は共通の `initRc` に統一する。
 - Windows の setjmp/longjmp 経路は builder 側で `soraCreateAudioDeviceModule` を呼ぶことで統合できる。
-- 別 issue の `_ensureSharedFactory` 途中 throw の leak 修正（0082）と連携する。leak 修正を先に完了させてから本 refactor を進めるのが安全。
-- 挙動変更はしない。既存の全プラットフォーム分岐で挙動が変わらないことをテストで担保する。
+- `0082` は closed 済みであり前提は満たされている。ヘルパー化後も `0082` の保証 (`_sharedAdmRef` 代入は init より前、catch 節の解放経路との連携) を維持し、順序を変えない。
+- Android 分岐 (`createAndroidAudioDeviceModule` 系の異型シーケンス) は対象外とし、変更しない。
+- 挙動変更はしない。
 
 ## 完了条件
 
-- [ ] `_ensureSharedFactory` の ADM 生成が単一ヘルパーで表現され、プラットフォーム分岐が簡潔になる。
-- [ ] 既存の全プラットフォームでの挙動が変わらない。
-- [ ] `flutter analyze` と関連テストが成功する。
+- [ ] 6 ブロックが単一ヘルパー呼び出しに置き換わり、`_installAdm` 相当以外の重複シーケンスが残っていない。
+- [ ] `0082` の保証 (代入順序・catch 解放経路) が維持されている。
+- [ ] `flutter analyze` と `flutter test test/webrtc_client_test.dart` が成功する。

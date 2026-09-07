@@ -756,6 +756,7 @@ class SoraConnection {
       _emitLogEvent('SIGNALING CONNECT MESSAGE', connectMessage);
       _emitDebugMessage('ws send: ${jsonEncode(connectMessage)}');
       _emitSignalingEvent('websocket', 'sent', connectMessage);
+      // 失敗時は外側 try/catch で接続失敗として扱うため、ここでは保護しない。
       channel.sink.add(jsonEncode(connectMessage));
 
       await _waitForConnected();
@@ -906,10 +907,36 @@ class SoraConnection {
     }
   }
 
+  /// WebSocket にテキストを送信する。
+  ///
+  /// [channel] が null の場合は [skippedLog] を残して false を返す。
+  /// 送信失敗時は [failedLog] に理由を付けて残し false を返す。
+  /// 成功時は true を返す。再送は行わない。
+  bool _trySendWebSocketText(
+    WebSocketChannel? channel,
+    String text, {
+    required String skippedLog,
+    required String failedLog,
+  }) {
+    if (channel == null) {
+      _emitDebugMessage(skippedLog);
+      return false;
+    }
+    try {
+      channel.sink.add(text);
+    } catch (error) {
+      _emitDebugMessage('$failedLog: $error');
+      return false;
+    }
+    return true;
+  }
+
   /// シグナリングチャネルの状態に応じてメッセージを送信する。
   ///
   /// [msgMap] は内部で JSON 文字列に変換される。
   /// WebSocket でのみ扱うメッセージタイプについてはこの関数を通す必要はない。
+  ///
+  /// 送信失敗時は debug ログに残すのみで、呼び出し元へ伝搬しない。
   void _sendSignalingMessage(Map<String, Object?> msgMap) {
     final text = jsonEncode(msgMap);
     if (_signalingState.signalingSwitched) {
@@ -928,9 +955,17 @@ class SoraConnection {
         _emitDebugMessage('dc(signaling) send failed: $error');
       }
     } else {
+      // 送信先がない場合と送信失敗時は debug ログに残る。再送は行わない。
+      if (!_trySendWebSocketText(
+        _signalingState.webSocketChannel,
+        text,
+        skippedLog: 'ws send skipped: no channel: $text',
+        failedLog: 'ws send failed',
+      )) {
+        return;
+      }
       _emitDebugMessage('ws send: $text');
       _emitSignalingEvent('websocket', 'sent', msgMap);
-      _signalingState.webSocketChannel?.sink.add(text);
     }
   }
 
@@ -1035,11 +1070,24 @@ class SoraConnection {
     } else {
       final channel = _signalingState.webSocketChannel;
       _signalingState.webSocketChannel = null;
-      if (channel != null) {
+      // 送信先がない場合と送信失敗時は debug ログに残る。再送は行わない。
+      final sent = _trySendWebSocketText(
+        channel,
+        text,
+        skippedLog: 'ws disconnect send skipped: no channel',
+        failedLog: 'ws disconnect send failed',
+      );
+      if (sent) {
         _emitDebugMessage('ws send: $text');
         _emitSignalingEvent('websocket', 'sent', disconnectMessage);
-        channel.sink.add(text);
-        await channel.sink.close();
+      }
+      if (channel != null) {
+        try {
+          await channel.sink.close();
+        } catch (error) {
+          // 切断競合時の close 失敗を記録する。後始末は継続する。
+          _emitDebugMessage('ws disconnect close failed: $error');
+        }
         await _waitForWebSocketCloseInfo();
       }
     }

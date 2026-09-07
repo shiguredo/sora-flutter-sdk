@@ -1216,4 +1216,110 @@ void main() {
       }
     });
   }, skip: ffiTestEnvironment.skipReason);
+
+  group('WebSocket 送信の skip ログ', () {
+    late WebrtcClient wc;
+
+    setUpAll(() {
+      // SoraConnection 生成には FFI の共有 factory が必要なため、
+      // 事前に WebrtcClient を生成して初期化する。
+      wc = WebrtcClient.create(config: {}, onEvent: (_, _) {});
+    });
+
+    tearDownAll(() {
+      wc.dispose();
+    });
+
+    SoraConnection createConnection() {
+      return SoraConnection.createForTest(
+        config: const SoraConnectionConfig(
+          signalingUrls: <String>['wss://example.com/signaling'],
+          channelId: 'test-channel',
+          role: SoraRole.recvonly,
+        ),
+        clientId: 1,
+        eventChannelName: 'test-event-channel',
+      );
+    }
+
+    Future<void> disposeConnection(SoraConnection connection) async {
+      try {
+        await connection.dispose();
+      } on MissingPluginException catch (_) {
+        // handler 未登録による通信失敗のみを想定内として無視する。
+      }
+    }
+
+    test('送信先なしの ping 応答で skip ログが残る', () async {
+      // channel 未注入の状態で pong 経路を通し、skip 分岐を検証する。
+      final connection = createConnection();
+      final debugMessages = <String>[];
+      final debugSub = connection.debugMessages.listen(debugMessages.add);
+      final zoneErrors = <Object>[];
+      try {
+        await runZonedGuarded(
+          () async {
+            await connection.enqueueWebSocketMessageForTest(
+              jsonEncode(<String, Object?>{'type': 'ping'}),
+            );
+            await pumpEventQueue();
+          },
+          (Object error, StackTrace stackTrace) {
+            zoneErrors.add(error);
+          },
+        );
+        await pumpEventQueue();
+        expect(
+          debugMessages,
+          contains('ws pong send skipped: no channel'),
+          reason: '送信先なしでは skip ログが残ること',
+        );
+        expect(
+          debugMessages.where((message) => message.startsWith('ws send: ')),
+          isEmpty,
+          reason: '送信なしでは成功ログが残らないこと',
+        );
+        expect(zoneErrors, isEmpty);
+      } finally {
+        await debugSub.cancel();
+        await disposeConnection(connection);
+      }
+    });
+
+    test('未接続の disconnect で skip ログが残り切断完了する', () async {
+      // channel なしの切断メッセージ送信で skip 分岐を通すことを検証する。
+      final connection = createConnection();
+      final debugMessages = <String>[];
+      final debugSub = connection.debugMessages.listen(debugMessages.add);
+      final disconnected = Completer<SoraDisconnectedState>();
+      final sub = connection.events.listen((event) {
+        if (event is SoraConnectionStateChangedEvent) {
+          final state = event.state;
+          if (state is SoraDisconnectedState && !disconnected.isCompleted) {
+            disconnected.complete(state);
+          }
+        }
+      });
+      try {
+        await connection.disconnect();
+        await disconnected.future.timeout(const Duration(seconds: 10));
+        // broadcast 配信の完了を待ってから検証する。
+        await pumpEventQueue();
+        expect(
+          debugMessages,
+          contains('ws disconnect send skipped: no channel'),
+          reason: '送信先なしでは skip ログが残ること',
+        );
+        expect(
+          debugMessages.where((message) => message.startsWith('ws send: ')),
+          isEmpty,
+          reason: '送信なしでは成功ログが残らないこと',
+        );
+      } finally {
+        await sub.cancel();
+        await debugSub.cancel();
+        await disposeConnection(connection);
+      }
+    });
+  }, skip: ffiTestEnvironment.skipReason);
 }

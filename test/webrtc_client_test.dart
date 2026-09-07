@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sora_sdk/src/ffi/bindings.dart';
 import 'package:sora_sdk/src/ffi/library_loader.dart';
 import 'package:sora_sdk/src/ffi/webrtc_client.dart';
+import 'package:sora_sdk/src/sora_media_devices.dart';
 
 import 'support/ffi_test_environment.dart';
 
@@ -301,6 +302,110 @@ void main() {
     test('open は data_channel_open へ変換される', () {
       final event = dcEventOn('data_channel_open', consts.dcStateOpen);
       expect(event['label'], 'signaling');
+    });
+  }, skip: ffiTestEnvironment.skipReason);
+
+  group('connect の disposed 時 ref 解放', () {
+    setUpAll(() {
+      // headless 環境で共有 factory 生成が音声デバイス初期化で失敗しないよう、
+      // 生成前に push ADM へ切り替える。audio track 自体の生成には影響しない。
+      MediaDevices.setUseAudioDevice(false);
+    });
+
+    test('audio のみ渡すと audio ref だけ解放される', () async {
+      // disposed 後に渡された owned ref が即時解放され、状態遷移しないことを検証する。
+      final events = <(String, Map<String, Object?>)>[];
+      final wc = WebrtcClient.create(
+        config: {},
+        onEvent: (eventType, data) {
+          events.add((eventType, data));
+        },
+      );
+      final audioTrack = await MediaDevices.createAudioTrack();
+      final audioRef = audioTrack.retainNativeTrackRefcounted();
+      try {
+        wc.dispose();
+        wc.connect(localAudioTrackRef: audioRef, sessionGeneration: 1);
+        expect(wc.disposedAudioTrackReleaseCountForTest, 1);
+        expect(wc.disposedVideoTrackReleaseCountForTest, 0);
+        expect(events, isEmpty, reason: 'disposed 経路では状態遷移しないこと');
+      } finally {
+        await audioTrack.dispose();
+        wc.dispose();
+      }
+    });
+
+    test('video のみ渡すと video ref だけ解放される', () async {
+      // disposed 後に渡された owned ref が即時解放され、状態遷移しないことを検証する。
+      final events = <(String, Map<String, Object?>)>[];
+      final wc = WebrtcClient.create(
+        config: {},
+        onEvent: (eventType, data) {
+          events.add((eventType, data));
+        },
+      );
+      final videoTrack = MediaDevices.createExternalVideoTrack();
+      final videoRef = videoTrack.retainNativeTrackRefcounted();
+      try {
+        wc.dispose();
+        wc.connect(localVideoTrackRef: videoRef, sessionGeneration: 1);
+        expect(wc.disposedAudioTrackReleaseCountForTest, 0);
+        expect(wc.disposedVideoTrackReleaseCountForTest, 1);
+        expect(events, isEmpty, reason: 'disposed 経路では状態遷移しないこと');
+      } finally {
+        await videoTrack.dispose();
+        wc.dispose();
+      }
+    });
+
+    test('両方渡すと両方解放される', () async {
+      // disposed 後に渡された両方の owned ref が解放されることを検証する。
+      final events = <(String, Map<String, Object?>)>[];
+      final wc = WebrtcClient.create(
+        config: {},
+        onEvent: (eventType, data) {
+          events.add((eventType, data));
+        },
+      );
+      final audioTrack = await MediaDevices.createAudioTrack();
+      final videoTrack = MediaDevices.createExternalVideoTrack();
+      final audioRef = audioTrack.retainNativeTrackRefcounted();
+      final videoRef = videoTrack.retainNativeTrackRefcounted();
+      try {
+        wc.dispose();
+        wc.connect(
+          localAudioTrackRef: audioRef,
+          localVideoTrackRef: videoRef,
+          sessionGeneration: 1,
+        );
+        expect(wc.disposedAudioTrackReleaseCountForTest, 1);
+        expect(wc.disposedVideoTrackReleaseCountForTest, 1);
+        expect(events, isEmpty, reason: 'disposed 経路では状態遷移しないこと');
+      } finally {
+        await audioTrack.dispose();
+        await videoTrack.dispose();
+        wc.dispose();
+      }
+    });
+
+    test('両方 null でも例外なく return する', () {
+      // ref なしでも disposed 分岐を通り、状態遷移しないことを検証する。
+      final events = <(String, Map<String, Object?>)>[];
+      final wc = WebrtcClient.create(
+        config: {},
+        onEvent: (eventType, data) {
+          events.add((eventType, data));
+        },
+      );
+      try {
+        wc.dispose();
+        wc.connect(sessionGeneration: 1);
+        expect(wc.disposedAudioTrackReleaseCountForTest, 0);
+        expect(wc.disposedVideoTrackReleaseCountForTest, 0);
+        expect(events, isEmpty, reason: 'disposed 経路では状態遷移しないこと');
+      } finally {
+        wc.dispose();
+      }
     });
   }, skip: ffiTestEnvironment.skipReason);
 }

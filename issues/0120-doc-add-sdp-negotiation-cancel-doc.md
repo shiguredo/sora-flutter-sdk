@@ -1,36 +1,40 @@
-# `SdpNegotiationCallbacks` の cancel 時の解放責務を dartdoc に明記する
+# `SdpNegotiationCallbacks` の cancel 時の解放責務を調査して dartdoc に明記する
 
 - Created: 2026-08-27
 - Completed: {YYYY-MM-DD}
 - Branch: feature/doc-add-sdp-negotiation-cancel-doc
-- Polished: {YYYY-MM-DD}
+- Polished: 2026-09-07
 - Milestone: 2026.1.0
 
 ## 目的
 
-`SdpNegotiationCallbacks` の各 callback で `_cancelled` チェックはあるが、`SetRemoteDescription` / `CreateAnswer` / `SetLocalDescription` のチェーンで cancel された場合の native リソース解放責務が dartdoc に明記されていない。読み手が「cancel 時に何を解放すべきか」を推測しなければならない状態を解消する。
+`SdpNegotiationCallbacks` の各 callback で `_cancelled` チェックはあるが、`SetRemoteDescription` / `CreateAnswer` / `SetLocalDescription` のチェーンで cancel された場合の native リソース解放責務が dartdoc に明記されていない。解放有無の調査を先行した上で、読み手が「cancel 時に何を解放すべきか」を推測しなくて済む状態にする。
 
 ## 現状
 
-`lib/src/ffi/callback_handlers.dart` の `SdpNegotiationCallbacks` の各 callback は `_cancelled` を確認する:
+`lib/src/ffi/callback_handlers.dart` の以下 4 callback は `_cancelled` を確認する (`@visibleForTesting` の public メンバー):
 
-- `onSetRemoteDescriptionComplete` cancel 時: 何も解放しない（native 側の自動 delete を前提としている）
+- `onSetRemoteDescriptionComplete` cancel 時: `return` のみで何も解放しない
 - `onCreateAnswerSuccess` cancel 時: `sessionDescriptionUniqueDelete(desc)` を呼ぶ
-- `onCreateAnswerFailure` cancel 時: 何もしない
-- `onSetLocalDescriptionComplete` cancel 時: 何もしない
+- `onCreateAnswerFailure` cancel 時: `return` のみで何もしない
+- `onSetLocalDescriptionComplete` cancel 時: `return` のみで何もしない
 
-「cancel 時の解放責務は native 側にある」または「Dart 側で明示解放する」の方針がまばらで、読み手が根拠を追う必要がある。
+cancel 時の早期 `return` は `rtcErrorMessage` (`lib/src/ffi/memory.dart`、成功・失敗いずれも末尾で `rtcErrorUniqueDelete` まで行う) に到達しないため、`RTCError_unique` の解放有無は未解明である。`desc` は `pcSetRemoteDescription` / `_setLocalDescription` 成功時に所有権が移譲される (115-116 行目相当のコメント)。`_setLocalDescription` は `_pcRef == null` 時に `sessionDescriptionUniqueDelete(desc)` して `return` する。
+
+対象ファイルは `// ignore_for_file: public_member_api_docs` であり、対象クラス・メソッドの説明は `//` で書かれている。
 
 ## 設計方針
 
-- `SdpNegotiationCallbacks` の class dartdoc に「cancel 時の解放責務は基本的に native 側にある」等の全体方針を明記する。
-- 各 callback の dartdoc に「cancel 時に何を解放するか / 解放しないか」を 1 行ずつ書く。
-- native 側の自動 delete を前提としている箇所は、その前提の根拠（libwebrtc-c の契約）を短く明記する。
-- 挙動変更なし。ドキュメントのみ。
-- 別 issue の `_pcRef == null` チェック（0085）や `sessionGeneration` 追加（0086）が挙動変更を伴う場合、そちらの完了後に整合を取って dartdoc を追記する。
+- `0085` / `0086` は対応不要として closed 済み (挙動変更なし確定) のため、本 issue は単独で実施する。待機条件は設けない。
+- まず cancel 時の `RTCError_unique` の解放有無を調査する。リークが確認された場合は挙動修正を別 issue に分離し、本 issue は調査結果の dartdoc 反映に留める。
+- `SdpNegotiationCallbacks` の class に `///` の dartdoc を新設し、リソースごとの責務を区別して明記する (`desc` は移譲済み / 明示 delete、`RTCError_unique` は調査結果に従う)。`onCreateAnswerSuccess` の明示解放を例外扱いとせず、リソースごとの一覧として書く。
+- 上記 4 callback に `///` の dartdoc を新設し、「cancel 時に何を解放するか / 解放しないか」を 1 行ずつ書く。`_createAnswer` / `_setLocalDescription` (private) には触れない。
+- `// ignore_for_file: public_member_api_docs` はファイル全体のため維持する。
+- 挙動変更は本 issue に含めない。調査 + ドキュメントのみ。
 
 ## 完了条件
 
+- [ ] cancel 時の `RTCError_unique` の解放有無の調査結果が issue または dartdoc に反映されている。
 - [ ] `SdpNegotiationCallbacks` の class dartdoc に cancel 時の解放責務方針が書かれている。
-- [ ] 各 callback の dartdoc に cancel 時挙動が 1 行ずつ書かれている。
-- [ ] `flutter analyze` と関連テストが成功する。
+- [ ] 上記 4 callback の dartdoc に cancel 時挙動が 1 行ずつ書かれている。
+- [ ] `flutter analyze` と `flutter test test/sdp_negotiation_test.dart` が成功する。

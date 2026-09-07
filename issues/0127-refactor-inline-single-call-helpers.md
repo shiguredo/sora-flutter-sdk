@@ -3,7 +3,7 @@
 - Created: 2026-08-27
 - Completed: {YYYY-MM-DD}
 - Branch: feature/refactor-inline-single-call-helpers
-- Polished: {YYYY-MM-DD}
+- Polished: 2026-09-07
 
 ## 目的
 
@@ -23,11 +23,12 @@
 ## 設計方針
 
 - 上記 4 ヘルパーを削除し、呼び出し側で inline に書き換える。
-- 意味付けを残したい場合は inline 化と同時に呼び出し側に短いコメントを添える。
+- inline 化と同時に呼び出し側へ短いコメントを必ず添える (意味ラベルの保持のため)。`_handleWebSocketTimeout` 呼び出し側には WebSocket タイムアウト時の処理である旨、`_optionalAudioConnectValue` / `_optionalVideoConnectValue` の doc (`connect メッセージ用の audio / video 値` 相当) は呼び出し側へ移設する。
+- `0060-add-opus-parameters` と `_optionalAudioConnectValue` 等の生成内容で編集範囲が重なるため、実装時は rebase で競合を整理する。
 - 挙動変更なし。API サーフェスは private なので影響なし。
 
 ## 完了条件
 
 - [ ] 上記 4 ヘルパーが削除されている。
-- [ ] 呼び出し側が inline に書き換わっている。
-- [ ] `flutter analyze` と関連テストが成功する。
+- [ ] 呼び出し側が inline に書き換わり、意味ラベルのコメントが残っている。
+- [ ] `flutter analyze` と `flutter test test/sora_connect_message_test.dart test/sora_connection_test.dart` が成功する。

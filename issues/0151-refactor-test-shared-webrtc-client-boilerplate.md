@@ -1,69 +1,47 @@
-# FFI 依存テスト group の `late WebrtcClient wc;` 実効ゼロパターンを整理する
+# FFI 依存テスト group の `late WebrtcClient wc;` 冗長パターンを削除する
 
 - Created: 2026-08-31
 - Completed: {YYYY-MM-DD}
 - Branch: feature/refactor-test-shared-webrtc-client-boilerplate
-- Polished: {YYYY-MM-DD}
+- Polished: 2026-09-07
 
 ## 目的
 
 FFI 依存テスト group が繰り返している `late WebrtcClient wc; setUpAll(() {
 wc = WebrtcClient.create(...); }); tearDownAll(() { wc.dispose(); });`
-パターンが実質的に何もしていない (`WebrtcClient.dispose()` は共有 factory
-を解放しない、`wc` はテスト本体で参照されない) 状態を整理し、意図が
-コードで正しく伝わるようにする。
+パターンが、共有 factory の事前用意という意図に対して効果が無い状態を整理する。
+`WebrtcClient.create` は Dart ラッパーの生成のみで共有 factory を初期化せず
+(共有 dylib ロードの副作用はある)、`wc` はテスト本体で参照されず、`wc.dispose()`
+は per-client のみ解放する。意図がコードで正しく伝わるようにする。
 
 ## 現状
 
-以下の複数 group で同じ boilerplate が繰り返されている。
+以下の 7 group で同型の boilerplate が繰り返されている:
 
-- `test/sora_media_stream_test.dart` の複数 group (LocalMediaStream の cache
-  検証 group 群、`LocalVideoTrack.dispose の非同期契約 (FFI)` group)
-- `test/sora_connection_test.dart` の複数 group
+- `test/sora_media_stream_test.dart`: `LocalMediaStream track cache の参照管理 (FFI)`、`LocalVideoTrack.dispose の非同期契約 (FFI)`
+- `test/sora_connection_test.dart`: `SoraConnection._handleWebrtcEvent の想定外イベント処理`、`SoraConnection.disconnect の _disconnecting / _abnormalTerminationStarted の finally リセット`、`SoraConnection._handleRedirectMessage の異常終了処理`、`SoraConnection WebSocket シグナリングメッセージ順序`、`SoraConnection._emitLocalVideo の null スキップ`
 
-各 group で:
+コメントの状況は group ごとに異なる。`共有 factory が必要なため事前に生成して初期化する` 旨の誤ったコメントの group と、`LocalVideoTrack.dispose の非同期契約 (FFI)` group のように lazy 生成を正しく説明しながら冗長コードが残る group が混在する。
 
-- `WebrtcClient.create(...)` は per-client の native client を生成する
-  だけで、共有 factory の lazy 初期化 (`WebrtcClient.sharedFactory` getter
-  経由) は行わない (`lib/src/ffi/webrtc_client.dart` の `create` と
-  `_ensureSharedFactory` を参照)。
-- `late WebrtcClient wc;` の `wc` はどの test 本体でも参照されていない。
-- `tearDownAll` の `wc.dispose()` は per-client のみ解放し、共有 factory /
-  ADM / thread は残る (`issues/0150-...md` 参照)。
-
-つまり `wc = WebrtcClient.create(...)` は「共有 factory を事前に用意する」
-意図で書かれているが、実際にはその効果はなく、共有 factory は
-`MediaDevices.createExternalVideoTrack()` などの初回呼び出しで lazy 生成
-される。setUpAll のコメントも実装と食い違っており、読者が混乱する。
+共有 factory は `MediaDevices.createExternalVideoTrack()` などの初回呼び出しで lazy 生成される。`0150` は polished 済み ((a) 明文化案採用) のため前提は満たされている。
 
 ## 設計方針
 
-以下から採用する方針を判断する。
-
-- (a) `late WebrtcClient wc;` パターンを削除し、共有 factory が lazy 生成
-  される事実を setUp コメントに 1 行残す。テスト本体の意図が変わらないこと
-  を確認する。
-- (b) `wc = WebrtcClient.create(...)` の代わりに `WebrtcClient.sharedFactory;`
-  を叩いて共有 factory を事前初期化する形に統一する (元々の意図がこれ
-  だった可能性)。
-- (c) test/support/ 配下に `setupSharedWebrtcForTest()` のような helper を
-  用意して、group 側の boilerplate を 1 行に減らす。
-
-0150 で `WebrtcClient.dispose()` の設計方針が確定した後に着手すると整合性が
-取りやすい。
+- (a) `late WebrtcClient wc;` パターンを 7 group から削除し、共有 factory が lazy 生成される事実を setUp コメントに 1 行残す。誤ったコメントは正しい記述に直し、正しいコメントは維持する。
+- (b) `sharedFactory` 事前初期化案は取らない (eager 化による初期化タイミングの変化は挙動変更になるため)。
+- (c) helper 抽出案は取らない (削除後に残る共通処理が無いため)。`test/support/` への影響は無い。
+- `0135` 確定までは現行の `test/` 配置に従う。
+- モックとスタブは使わない。
 
 ## 完了条件
 
-- [ ] FFI 依存テスト group から実効ゼロの boilerplate が整理されている
-      (削除 / 意図に合った初期化への差し替え / helper 抽出 のいずれか)。
-- [ ] setUpAll / tearDownAll のコメントが実装と一致している。
-- [ ] 既存テストの挙動が変わらないことを確認する (skip 条件と実行結果が
-      unchanged)。
-- [ ] `flutter analyze` と関連テストが成功する。
+- [ ] 7 group から実効の無い boilerplate が削除され、setUp コメントが実装と一致している。
+- [ ] FFI 有効・無効の両条件で実行し、skip 条件と実行結果が変更前と unchanged である。
+- [ ] `flutter analyze` と `flutter test test/sora_media_stream_test.dart test/sora_connection_test.dart` が成功する。
 
 ## 関連
 
 - `issues/0150-refactor-webrtc-client-test-teardown-shared-factory-leak.md`
-  (先に方針決定するのが望ましい)
+  (前提充足済み。テスト側の helper 整備は本 issue が所有する)
 - `issues/closed/0080-bug-fix-local-video-track-dispose-sync-throw.md`
   (本 issue の起点)

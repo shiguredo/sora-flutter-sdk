@@ -3,7 +3,7 @@
 - Created: 2026-08-27
 - Completed: {YYYY-MM-DD}
 - Branch: feature/fix-switched-message-unawaited-cleanup
-- Polished: 2026-09-04
+- Polished: 2026-09-07
 - Milestone: 2026.1.0
 
 ## 目的
@@ -21,15 +21,15 @@ DataChannel シグナリングへの切替（`type: switched`）で `ignoreDisco
 
 ## 設計方針
 
-- `_handleSwitchedMessage` を `Future<void>` に変更し、cancel / close を await する。呼び出し元は `type: switched` のハンドラ（`_handleWebSocketMessage` 内の 1 箇所のみ）で await を追加する。`_handleWebSocketMessage` の Future は `_enqueueWebSocketMessage` が await + try/catch で捕捉するため、await 化は「close 完了を待ってから後続の `_handleWebSocketMessage` 処理へ進む」ことで競合窓を縮める効果であり、独立した次回 `connect()` の完了待ちを保証するものではない。
-- `cancel()` / `sink.close()` の await は try/catch で包み、失敗時は `_emitDebugMessage` にログを残して zone unhandled error を防ぐ（0072 の redirect 経路の cancel / close 保護と同様の扱い）。
-- 完了ログを `_emitDebugMessage` に残す。
-- テストは dart:io の `HttpServer` + `WebSocketTransformer` による実 WebSocket（既存の `injectSignalingWebSocketForTest` の前例）を使い、switched メッセージ送信後の cleanup が完了し zone unhandled error にならないことを検証する。`cancel()` / `sink.close()` の失敗注入には、`teardownFailureForTest`（sora_connection.dart）や `forceAudioDeviceModuleInitFailureForTest`（webrtc_client.dart）の前例に倣った `@visibleForTesting` フックを使う（モックやスタブは使わない）。
+- `_handleSwitchedMessage` を `Future<void>` に変更し、cancel / close を await する。呼び出し元は `type: switched` のハンドラ（`_handleWebSocketMessage` 内の 1 箇所のみ）で await を追加する。`_handleWebSocketMessage` の Future は `_enqueueWebSocketMessage` が await + try/catch で捕捉するため、await 化は tail 経由の次メッセージが cleanup 完了後に開始することを保証し、独立した次回 `connect()` の完了待ちを保証するものではない。
+- `cancel()` と `sink.close()` は個別の try/catch で包み、失敗時は `_emitDebugMessage` にログを残して zone unhandled error を防ぐ（0072 の redirect 経路の cancel / close 保護と同様の扱い）。ログ文言は `switched: subscription cancel failed` と `switched: old channel close failed` とする。
+- 完了ログとして `_emitDebugMessage` に `switched: websocket cleanup done` を残す。cancel / close のいずれかが失敗しても catch 後に必ず出す。
+- テストは dart:io の `HttpServer` + `WebSocketTransformer` による実 WebSocket（既存の `injectSignalingWebSocketForTest` の前例）を使い、`enqueueWebSocketMessageForTest` で switched メッセージを投入する。zone unhandled error の有無は `runZonedGuarded` の error collector で判定し、cleanup 完了は投入 Future の完了と `debugMessages` の完了ログで観測する。`cancel()` / `sink.close()` の失敗注入には、`SoraConnection` に `@visibleForTesting Object? switchedCancelFailureForTest` と `@visibleForTesting Object? switchedCloseFailureForTest` を追加する。各々設定時は対応する実処理を行わず指定例外を throw し、参照は throw 時に 1 回で null に戻す（`teardownFailureForTest` の前例に倣う）。cancel 失敗と close 失敗は別テストで各フックを 1 回ずつ設定して exercise し、両方の catch 経路を通す。モックやスタブは使わない。
 
 ## 完了条件
 
 - [ ] `_handleSwitchedMessage` の subscription cancel と sink close の Future が discard されない。
-- [ ] `cancel()` / `sink.close()` が throw しても zone unhandled error にならない（`_emitDebugMessage` にログが残る。失敗注入は設計方針の `@visibleForTesting` フックを使う）。
-- [ ] `type: switched` のハンドラが `_handleSwitchedMessage` の完了を待つ（競合窓が縮小される）。
+- [ ] `cancel()` / `sink.close()` が throw しても zone unhandled error にならない（cancel 失敗テストで `switched: subscription cancel failed` が、`close` 失敗テストで `switched: old channel close failed` が `debugMessages` に残る。失敗注入は設計方針の各フックを各テストで 1 回ずつ設定する）。
+- [ ] `type: switched` のハンドラが `_handleSwitchedMessage` の完了を待つ（tail 経由の次メッセージが cleanup 完了ログの後に開始する）。
 - [ ] 上記シナリオを exercise するユニットテストを追加する。
 - [ ] `flutter analyze` と関連テストが成功する。

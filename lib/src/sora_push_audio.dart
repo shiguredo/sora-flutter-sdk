@@ -10,7 +10,7 @@ import 'ffi/webrtc_client.dart';
 
 /// PushAudioDevice で PCM データを送受信する API。
 abstract final class PushAudio {
-  /// Pre-allocated native buffer for PCM data. null if not initialized.
+  /// PCM データ用に事前確保したネイティブバッファ。未初期化のときは `null`。
   static Pointer<Int16>? _buffer;
   static int _bufferLength = 0;
 

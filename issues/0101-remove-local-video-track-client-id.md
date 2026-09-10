@@ -4,7 +4,6 @@
 - Completed: {YYYY-MM-DD}
 - Branch: feature/remove-local-video-track-client-id
 - Polished: 2026-09-07
-- Milestone: 2026.1.0
 
 ## 目的
 

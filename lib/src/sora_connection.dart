@@ -1900,6 +1900,13 @@ class SoraConnection {
     return _handleRedirectMessage(payload);
   }
 
+  /// テスト専用に `_buildConnectMessage` を呼び出すラッパー。
+  ///
+  /// 通常接続と redirect が共用する connect メッセージの内容を、
+  /// 実 WebSocket を介さず検証するために使う。
+  @visibleForTesting
+  Map<String, Object?> buildConnectMessageForTest() => _buildConnectMessage();
+
   /// テスト専用に、redirect 起動前のシグナリング WebSocket 状態を注入する。
   ///
   /// 実 WebSocket サーバー相手に確立した channel を `_signalingState` に

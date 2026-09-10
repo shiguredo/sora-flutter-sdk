@@ -1,7 +1,7 @@
 # 音声ストリーミングの言語コード指定に対応する
 
 - Created: 2026-08-03
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-10
 - Branch: feature/add-audio-streaming-language-code
 - Polished: 2026-09-10
 
@@ -44,3 +44,7 @@ Sora Flutter SDK の接続設定から `audio_streaming_language_code` を指定
 - [ ] 設定値のシリアライズと connect メッセージを検証するテストが追加されている
 - [ ] モックやスタブを使用していない
 - [ ] `flutter analyze` と関連するテストが成功する
+
+## 解決方法
+
+`SoraConnectionConfig` に `String? audioStreamingLanguageCode` と DartDoc を追加し、`toMap()` へ `audioStreamingLanguageCode` キーで含めた。`_buildConnectMessage` では `config.audio != false` かつ非 null の場合に connect メッセージのトップレベルへ `audio_streaming_language_code` を設定し、`audio: false` と未指定ではキーを含めない。redirect 経路は `_buildConnectMessage` を共用するため同じ値が維持される。`README.md` の設定例へ追記し、優先実装一覧から削除した。`toMap()` の既存期待値を更新し、シリアライズと connect メッセージ（指定時 / `audio: false` / 未指定）のテストを追加した。正式リリース前のため `CHANGELOG.md` には記載しない。

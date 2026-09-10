@@ -666,6 +666,13 @@ extension _SoraConnectionSignaling on SoraConnection {
     if (_optionalAudioConnectValue() case final v?) {
       message['audio'] = v;
     }
+    // 音声が無効な場合は言語コードを送っても音声ストリーミングの
+    // 対象にならないため、キー自体を含めない。
+    if (config.audio != false) {
+      if (config.audioStreamingLanguageCode case final languageCode?) {
+        message['audio_streaming_language_code'] = languageCode;
+      }
+    }
     if (config.clientId case final clientId?) {
       message['client_id'] = clientId;
     }

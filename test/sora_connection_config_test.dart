@@ -23,6 +23,7 @@ void main() {
         'role': 'recvonly',
         'video': null,
         'audio': false,
+        'audioStreamingLanguageCode': null,
         'clientId': 'client-1',
         'bundleId': null,
         'metadata': <String, Object?>{'foo': 'bar'},
@@ -62,6 +63,7 @@ void main() {
       'role': 'recvonly',
       'video': null,
       'audio': null,
+      'audioStreamingLanguageCode': null,
       'clientId': null,
       'bundleId': null,
       'metadata': null,
@@ -85,6 +87,17 @@ void main() {
       'forwardingFilters': null,
       'useAudioDevice': true,
     });
+  });
+
+  test('audioStreamingLanguageCode を設定 Map に保存する', () {
+    const config = SoraConnectionConfig(
+      signalingUrls: <String>['wss://example.com/signaling'],
+      channelId: 'test-channel',
+      role: SoraRole.sendrecv,
+      audioStreamingLanguageCode: 'ja-JP',
+    );
+
+    expect(config.toMap()['audioStreamingLanguageCode'], 'ja-JP');
   });
 
   test('ビットレートを kbps のまま設定 Map に保存する', () {

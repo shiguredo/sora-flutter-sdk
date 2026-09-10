@@ -325,6 +325,7 @@ class LocalMediaStream implements MediaStream {
   }
 
   /// dispose 済み利用を防ぐ。
+  @internal
   void ensureNotDisposed() {
     if (_disposed) {
       throw StateError('Disposed LocalMediaStream cannot be used.');
@@ -346,6 +347,7 @@ abstract class LocalMediaStreamTrack implements MediaStreamTrack {
   Pointer<WebrtcMediaStreamTrackInterface> get _nativeTrack =>
       WebrtcClient.sharedLib.mediaStreamTrackRefcountedGet(_mediaTrackRef);
 
+  @internal
   int get nativeTrackAddress => _nativeTrack.address;
 
   /// track の ID を返す。
@@ -400,6 +402,7 @@ abstract class LocalMediaStreamTrack implements MediaStreamTrack {
   bool get isDisposed => _disposed;
 
   /// dispose 済み利用を防ぐ。
+  @internal
   void ensureNotDisposed() {
     if (_disposed) {
       throw StateError('Disposed LocalMediaStreamTrack cannot be used.');

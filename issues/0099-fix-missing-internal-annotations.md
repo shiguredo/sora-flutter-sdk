@@ -1,7 +1,7 @@
 # `LocalMediaStream` / `LocalMediaStreamTrack` の `@internal` 付与漏れ 3 箇所を修正する
 
 - Created: 2026-08-27
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-10
 - Branch: feature/fix-missing-internal-annotations
 - Polished: 2026-09-07
 - Milestone: 2026.1.0
@@ -36,3 +36,10 @@
 - [ ] `LocalMediaStream.ensureNotDisposed()`、`LocalMediaStreamTrack.nativeTrackAddress`、`LocalMediaStreamTrack.ensureNotDisposed()` に `@internal` が付いている。
 - [ ] 3 メンバーが公開 dartdoc に現れない。
 - [ ] `flutter analyze` が成功する。コメント・アノテーションのみの変更のため専用の関連テストはなし。
+
+## 解決方法
+
+- `lib/src/sora_media_stream.dart` の `LocalMediaStream.ensureNotDisposed()`、`LocalMediaStreamTrack.nativeTrackAddress`、`LocalMediaStreamTrack.ensureNotDisposed()` に `@internal` を付与した。
+- `dart doc` の生成結果から 3 メンバーが除外されることを確認した。
+- `// ignore_for_file: public_member_api_docs` は、外すと `public_member_api_docs` が 11 件発生して `flutter analyze --fatal-infos` が clean にならないため残した。
+- `flutter analyze --fatal-infos lib test` 成功、`flutter test` 137 件成功（FFI 依存は環境変数未指定で skip）。

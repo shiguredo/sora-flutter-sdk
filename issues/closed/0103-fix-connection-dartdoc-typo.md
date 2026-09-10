@@ -1,7 +1,7 @@
 # `SoraConnection._currentAudioTrack` / `_currentVideoTrack` の dartdoc の日本語文法誤字を修正する
 
 - Created: 2026-08-27
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-10
 - Branch: feature/fix-connection-dartdoc-typo
 - Polished: 2026-09-07
 - Milestone: 2026.1.0
@@ -36,3 +36,8 @@ LocalVideoTrack? _currentVideoTrack;
 
 - [ ] 該当 2 箇所の dartdoc が文法的に正しい。
 - [ ] `flutter analyze` が成功する。コメントのみの修正のため専用の関連テストはなし。
+
+## 解決方法
+
+- `lib/src/sora_connection.dart` の `_currentAudioTrack` / `_currentVideoTrack` の dartdoc 「現在保持しているのローカル…」から「の」を削除し、「現在保持しているローカル…」に修正した。
+- `flutter analyze --fatal-infos lib test` 成功。

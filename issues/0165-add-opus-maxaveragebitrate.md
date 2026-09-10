@@ -22,16 +22,24 @@ Sora Flutter SDK の接続設定から Opus の `maxaveragebitrate` を指定し
 - Sora 実装が connect メッセージの `opus_params` で `maxaveragebitrate` を受理するようになった時点で対応する
 - `SoraConnectionConfig` に `audioOpusParamsMaxaveragebitrate` (int?) を追加し、connect メッセージの `audio.opus_params.maxaveragebitrate` へ反映する
 - 範囲は SIGNALING_TYPE に合わせて 6000-510000 (bps) とし、`SoraConnectionConfig.toMap()` の実行時に検証する
-- `codec_type: OPUS` の併記、`audio: false` の扱い、`ptime` の非検証などは Opus 詳細パラメーターの既存実装に合わせる
+- `codec_type: OPUS` の併記、`audio: false` の扱い、`ptime` の非検証、DartDoc の実験的機能の明記、README の設定例への追記などは Opus 詳細パラメーターの既存実装に合わせる
 
 ## 完了条件
 
 - [ ] `audioOpusParamsMaxaveragebitrate` を指定できる
 - [ ] 指定時に connect メッセージの `audio.opus_params.maxaveragebitrate` へ反映される
 - [ ] 6000-510000 の境界値と範囲外を検証するテストが追加されている
-- [ ] 対象の Sora バージョンが connect メッセージの `maxaveragebitrate` を受理することを確認している
+- [ ] 対象の Sora バージョンで connect メッセージの `audio.opus_params.maxaveragebitrate` が (1) 検証を通過し、(2) `convert_opus_params` で `#opus_params` に取り込まれ、(3) 生成 SDP の `maxaveragebitrate` に反映されることを確認している
+- [ ] 追加したオプションの DartDoc に実験的機能であること（事前にサポートへの連絡が必要、`role` が `sendrecv` / `sendonly` の場合のみ有効）が記載されている
+- [ ] `README.md` の「SoraConnectionConfig の設定」セクションの設定例に `audioOpusParamsMaxaveragebitrate` が追加されている
 - [ ] モックやスタブを使用していない
 - [ ] `flutter analyze` と関連するテストが成功する
+
+## pending にする理由
+
+Sora 実装が connect メッセージの `opus_params` で `maxaveragebitrate` を受理していないため、SDK 側を実装しても接続が拒否される。`sora/src/sora_media_audio_opus.erl` の `validate_param` に `maxaveragebitrate` の節が無く、Sora 2025.1.0 / 2026.1.2 / 2026.2.0-canary のいずれでも同じである。加えて `convert_opus_params` も `maxaveragebitrate` を取り込まず、`sora_sdp.erl` は SDP の `maxaveragebitrate` を `bit_rate` から生成するため、仮に検証を通過しても指定が反映されない。
+
+Sora 実装が connect メッセージの `maxaveragebitrate` を検証・反映するようになり、対象バージョンで確認できた時点で reopened にして対応する。
 
 ## 関連
 

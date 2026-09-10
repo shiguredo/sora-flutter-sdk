@@ -43,6 +43,14 @@ void main() {
         'videoH264Params': null,
         'videoH265Params': null,
         'videoAv1Params': null,
+        'audioOpusParamsChannels': null,
+        'audioOpusParamsMaxplaybackrate': null,
+        'audioOpusParamsMinptime': null,
+        'audioOpusParamsPtime': null,
+        'audioOpusParamsStereo': null,
+        'audioOpusParamsSpropStereo': null,
+        'audioOpusParamsUseinbandfec': null,
+        'audioOpusParamsUsedtx': null,
         'dataChannels': null,
         'forwardingFilters': null,
         'useAudioDevice': true,
@@ -83,6 +91,14 @@ void main() {
       'videoH264Params': null,
       'videoH265Params': null,
       'videoAv1Params': null,
+      'audioOpusParamsChannels': null,
+      'audioOpusParamsMaxplaybackrate': null,
+      'audioOpusParamsMinptime': null,
+      'audioOpusParamsPtime': null,
+      'audioOpusParamsStereo': null,
+      'audioOpusParamsSpropStereo': null,
+      'audioOpusParamsUseinbandfec': null,
+      'audioOpusParamsUsedtx': null,
       'dataChannels': null,
       'forwardingFilters': null,
       'useAudioDevice': true,
@@ -204,5 +220,115 @@ void main() {
 
     expect(config.audioBitRate, isNull);
     expect(config.videoBitRate, isNull);
+  });
+
+  test('Opus 詳細パラメーターを設定 Map に保存する', () {
+    const config = SoraConnectionConfig(
+      signalingUrls: <String>['wss://example.com/signaling'],
+      channelId: 'test-channel',
+      role: SoraRole.sendrecv,
+      audioOpusParamsChannels: 2,
+      audioOpusParamsMaxplaybackrate: 48000,
+      audioOpusParamsMinptime: 10,
+      audioOpusParamsPtime: 20,
+      audioOpusParamsStereo: true,
+      audioOpusParamsSpropStereo: false,
+      audioOpusParamsUseinbandfec: true,
+      audioOpusParamsUsedtx: false,
+    );
+
+    final map = config.toMap();
+    expect(map['audioOpusParamsChannels'], 2);
+    expect(map['audioOpusParamsMaxplaybackrate'], 48000);
+    expect(map['audioOpusParamsMinptime'], 10);
+    expect(map['audioOpusParamsPtime'], 20);
+    expect(map['audioOpusParamsStereo'], true);
+    expect(map['audioOpusParamsSpropStereo'], false);
+    expect(map['audioOpusParamsUseinbandfec'], true);
+    expect(map['audioOpusParamsUsedtx'], false);
+  });
+
+  test('Opus 詳細パラメーターの境界値を受け入れる', () {
+    const minimumConfig = SoraConnectionConfig(
+      signalingUrls: <String>['wss://example.com/signaling'],
+      channelId: 'test-channel',
+      role: SoraRole.sendrecv,
+      audioOpusParamsChannels: 1,
+      audioOpusParamsMaxplaybackrate: 8000,
+      audioOpusParamsMinptime: 3,
+    );
+    const maximumConfig = SoraConnectionConfig(
+      signalingUrls: <String>['wss://example.com/signaling'],
+      channelId: 'test-channel',
+      role: SoraRole.sendrecv,
+      audioOpusParamsChannels: 8,
+      audioOpusParamsMaxplaybackrate: 48000,
+      audioOpusParamsMinptime: 120,
+    );
+
+    expect(minimumConfig.toMap()['audioOpusParamsChannels'], 1);
+    expect(maximumConfig.toMap()['audioOpusParamsChannels'], 8);
+    expect(minimumConfig.toMap()['audioOpusParamsMaxplaybackrate'], 8000);
+    expect(maximumConfig.toMap()['audioOpusParamsMaxplaybackrate'], 48000);
+    expect(minimumConfig.toMap()['audioOpusParamsMinptime'], 3);
+    expect(maximumConfig.toMap()['audioOpusParamsMinptime'], 120);
+  });
+
+  test('範囲外の Opus 詳細パラメーターに RangeError を送出する', () {
+    for (final value in <int>[0, 9]) {
+      final config = SoraConnectionConfig(
+        signalingUrls: <String>['wss://example.com/signaling'],
+        channelId: 'test-channel',
+        role: SoraRole.sendrecv,
+        audioOpusParamsChannels: value,
+      );
+
+      expect(() => config.toMap(), throwsRangeError);
+    }
+
+    for (final value in <int>[7999, 48001]) {
+      final config = SoraConnectionConfig(
+        signalingUrls: <String>['wss://example.com/signaling'],
+        channelId: 'test-channel',
+        role: SoraRole.sendrecv,
+        audioOpusParamsMaxplaybackrate: value,
+      );
+
+      expect(() => config.toMap(), throwsRangeError);
+    }
+
+    for (final value in <int>[2, 121]) {
+      final config = SoraConnectionConfig(
+        signalingUrls: <String>['wss://example.com/signaling'],
+        channelId: 'test-channel',
+        role: SoraRole.sendrecv,
+        audioOpusParamsMinptime: value,
+      );
+
+      expect(() => config.toMap(), throwsRangeError);
+    }
+  });
+
+  test('範囲が定義されていない ptime は検証せず送信する', () {
+    const config = SoraConnectionConfig(
+      signalingUrls: <String>['wss://example.com/signaling'],
+      channelId: 'test-channel',
+      role: SoraRole.sendrecv,
+      audioOpusParamsPtime: 999,
+    );
+
+    expect(config.toMap()['audioOpusParamsPtime'], 999);
+  });
+
+  test('audio が false でも Opus 詳細パラメーターを検証する', () {
+    final config = SoraConnectionConfig(
+      signalingUrls: <String>['wss://example.com/signaling'],
+      channelId: 'test-channel',
+      role: SoraRole.sendrecv,
+      audio: false,
+      audioOpusParamsChannels: 9,
+    );
+
+    expect(() => config.toMap(), throwsRangeError);
   });
 }

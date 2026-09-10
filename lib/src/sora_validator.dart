@@ -22,7 +22,7 @@ Uri? parseSignalingUrl(String url) {
 ///
 /// `null` は未指定として許可する。
 void validateAudioBitRate(int? value) {
-  _validateOptionalBitRate(
+  _validateOptionalIntInRange(
     value,
     minimum: 6,
     maximum: 510,
@@ -34,7 +34,7 @@ void validateAudioBitRate(int? value) {
 ///
 /// `null` は未指定として許可する。
 void validateVideoBitRate(int? value) {
-  _validateOptionalBitRate(
+  _validateOptionalIntInRange(
     value,
     minimum: 1,
     maximum: 50000,
@@ -42,8 +42,37 @@ void validateVideoBitRate(int? value) {
   );
 }
 
-/// 任意指定のビットレートを指定された範囲内か検証する。
-void _validateOptionalBitRate(
+/// Opus 詳細パラメーターのうち範囲が定義されている数値を検証する。
+///
+/// `null` は未指定として許可する。
+/// `ptime` は Sora の仕様に範囲が定義されていないため検証対象に含めない。
+void validateAudioOpusParams({
+  int? channels,
+  int? maxplaybackrate,
+  int? minptime,
+}) {
+  _validateOptionalIntInRange(
+    channels,
+    minimum: 1,
+    maximum: 8,
+    name: 'audioOpusParamsChannels',
+  );
+  _validateOptionalIntInRange(
+    maxplaybackrate,
+    minimum: 8000,
+    maximum: 48000,
+    name: 'audioOpusParamsMaxplaybackrate',
+  );
+  _validateOptionalIntInRange(
+    minptime,
+    minimum: 3,
+    maximum: 120,
+    name: 'audioOpusParamsMinptime',
+  );
+}
+
+/// 任意指定の整数を指定された範囲内か検証する。
+void _validateOptionalIntInRange(
   int? value, {
   required int minimum,
   required int maximum,

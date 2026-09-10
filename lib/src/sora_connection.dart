@@ -1194,13 +1194,14 @@ class SoraConnection {
   }
 
   /// WebRTC 統計情報を取得する
-  // W3C WebRTC の `RTCPeerConnection.getStats()` と
-  // 名前をそろえるため、`get` をあえて残している。
-  //
-  // 孤立 request が上限に達している場合は `StateError` で失敗する。
-  // 上限到達後はコールバック到着による自然減まで失敗が続く。
-  // 自然減が起きない場合は接続の再生成が必要になる。
-  // PC 未生成で上限未達の場合は null を返す。
+  ///
+  /// W3C WebRTC の `RTCPeerConnection.getStats()` と
+  /// 名前をそろえるため、`get` をあえて残している。
+  ///
+  /// 孤立 request が上限に達している場合は `StateError` で失敗する。
+  /// 上限到達後はコールバック到着による自然減まで失敗が続く。
+  /// 自然減が起きない場合は接続の再生成が必要になる。
+  /// PC 未生成で上限未達の場合は null を返す。
   Future<String?> getStats() async {
     _ensureNotDisposed();
     return _webrtcClient.getStats();

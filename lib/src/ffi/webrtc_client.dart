@@ -1185,16 +1185,16 @@ class WebrtcClient {
   }
 
   /// WebRTC 統計情報を取得する。
-  //
-  // 公開 API の `RTCPeerConnection.getStats()` 互換を保つため、
-  // `get` をあえて残している。
-  //
-  // 孤立 request が `maxOrphanedStatsRequests` に達している場合は、
-  // 新規発行せず同期的に `StateError` を throw する。上限到達時は PC 未生成か
-  // 否かにかかわらず throw し、上限未達で PC 未生成の場合は null を返す。
-  // 進行中の request がある場合はそちらの future を返す。
-  // 上限到達後はコールバック到着による自然減まで拒否が続く。
-  // 自然減が起きない場合はクライアント再生成が必要になる。
+  ///
+  /// 公開 API の `RTCPeerConnection.getStats()` 互換を保つため、
+  /// `get` をあえて残している。
+  ///
+  /// 孤立 request が `maxOrphanedStatsRequests` に達している場合は、
+  /// 新規発行せず同期的に `StateError` を throw する。上限到達時は PC 未生成か
+  /// 否かにかかわらず throw し、上限未達で PC 未生成の場合は null を返す。
+  /// 進行中の request がある場合はそちらの future を返す。
+  /// 上限到達後はコールバック到着による自然減まで拒否が続く。
+  /// 自然減が起きない場合はクライアント再生成が必要になる。
   Future<String?> getStats() {
     if (_disposed) {
       return Future<String?>.value(null);

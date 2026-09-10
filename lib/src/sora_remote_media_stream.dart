@@ -56,8 +56,10 @@ final class MutableRemoteMediaStream implements RemoteMediaStream {
     _videoTrack = track;
   }
 
-  // W3C Media Capture and Streams の `MediaStream.getTracks()` と
-  // 名前をそろえるため、`get` をあえて残している。
+  /// ストリームに含まれる全トラックを返す。
+  ///
+  /// W3C Media Capture and Streams の `MediaStream.getTracks()` と
+  /// 名前をそろえるため、`get` をあえて残している。
   @override
   List<MediaStreamTrack> getTracks() {
     final audio = _audioTrack;

@@ -77,4 +77,37 @@ void main() {
       expect(() => validateAudioOpusParams(minptime: 121), throwsRangeError);
     });
   });
+
+  group('validateSignalingUrls', () {
+    test('空でないリストは許可する', () {
+      expect(
+        () => validateSignalingUrls(<String>['wss://example.com/signaling']),
+        returnsNormally,
+      );
+    });
+
+    test('空リストは name 付きの ArgumentError を送出する', () {
+      expect(
+        () => validateSignalingUrls(<String>[]),
+        throwsA(
+          isA<ArgumentError>().having((e) => e.name, 'name', 'signalingUrls'),
+        ),
+      );
+    });
+  });
+
+  group('validateChannelId', () {
+    test('空でない文字列は許可する', () {
+      expect(() => validateChannelId('test-channel'), returnsNormally);
+    });
+
+    test('空文字列は name 付きの ArgumentError を送出する', () {
+      expect(
+        () => validateChannelId(''),
+        throwsA(
+          isA<ArgumentError>().having((e) => e.name, 'name', 'channelId'),
+        ),
+      );
+    });
+  });
 }

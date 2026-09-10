@@ -5,6 +5,11 @@ import 'sora_timeout_options.dart';
 import 'sora_validator.dart';
 
 /// Sora 接続設定のデータクラス
+///
+/// フィールドの検証は `toMap()` の実行時に行う。`const` コンストラクタを
+/// 維持するため、コンストラクタでは検証しない。`signalingUrls` /
+/// `channelId` の空検証と数値の範囲検証は `toMap()` で行い、各 URL 要素の
+/// 形式検証は接続開始時に行う。
 class SoraConnectionConfig {
   /// @nodoc
   const SoraConnectionConfig({
@@ -205,6 +210,8 @@ class SoraConnectionConfig {
   /// connect メッセージの payload へ変換する。
   Map<String, Object?> toMap() {
     // const コンストラクターを維持するため、接続設定の利用時に検証する。
+    validateSignalingUrls(signalingUrls);
+    validateChannelId(channelId);
     validateAudioBitRate(audioBitRate);
     validateVideoBitRate(videoBitRate);
     validateAudioOpusParams(

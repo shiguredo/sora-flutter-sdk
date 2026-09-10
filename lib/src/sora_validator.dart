@@ -71,6 +71,20 @@ void validateAudioOpusParams({
   );
 }
 
+/// シグナリング URL のリストが空でないことを検証する。
+void validateSignalingUrls(List<String> urls) {
+  if (urls.isEmpty) {
+    throw ArgumentError.value(urls, 'signalingUrls', 'must not be empty');
+  }
+}
+
+/// チャネル ID が空でないことを検証する。
+void validateChannelId(String channelId) {
+  if (channelId.isEmpty) {
+    throw ArgumentError.value(channelId, 'channelId', 'must not be empty');
+  }
+}
+
 /// 任意指定の整数を指定された範囲内か検証する。
 void _validateOptionalIntInRange(
   int? value, {

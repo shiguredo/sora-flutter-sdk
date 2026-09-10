@@ -331,4 +331,43 @@ void main() {
 
     expect(() => config.toMap(), throwsRangeError);
   });
+
+  test('signalingUrls が空の場合 toMap() が ArgumentError を送出する', () {
+    final config = SoraConnectionConfig(
+      signalingUrls: <String>[],
+      channelId: 'test-channel',
+      role: SoraRole.recvonly,
+    );
+
+    expect(
+      () => config.toMap(),
+      throwsA(
+        isA<ArgumentError>().having((e) => e.name, 'name', 'signalingUrls'),
+      ),
+    );
+  });
+
+  test('channelId が空の場合 toMap() が ArgumentError を送出する', () {
+    final config = SoraConnectionConfig(
+      signalingUrls: <String>['wss://example.com/signaling'],
+      channelId: '',
+      role: SoraRole.recvonly,
+    );
+
+    expect(
+      () => config.toMap(),
+      throwsA(isA<ArgumentError>().having((e) => e.name, 'name', 'channelId')),
+    );
+  });
+
+  test('signalingUrls の形式検証は toMap() では行わない', () {
+    // 空検証は toMap()、各 URL 要素の形式検証は接続開始時に分担する。
+    final config = SoraConnectionConfig(
+      signalingUrls: <String>['not-a-url'],
+      channelId: 'test-channel',
+      role: SoraRole.recvonly,
+    );
+
+    expect(config.toMap()['signalingUrls'], <String>['not-a-url']);
+  });
 }

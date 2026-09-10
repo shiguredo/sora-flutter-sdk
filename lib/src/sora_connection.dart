@@ -198,10 +198,10 @@ class SoraConnection {
   /// ローカルの `MediaStream`
   LocalMediaStream? _localStream;
 
-  /// 現在保持しているのローカル音声トラック
+  /// 現在保持しているローカル音声トラック
   LocalAudioTrack? _currentAudioTrack;
 
-  /// 現在保持しているのローカル映像トラック
+  /// 現在保持しているローカル映像トラック
   LocalVideoTrack? _currentVideoTrack;
 
   /// 進行中の映像キャプチャ切り替えを識別する世代。

@@ -1,7 +1,7 @@
 # `SoraConnectionConfig` の `signalingUrls` / `channelId` 空検証を早期化する
 
 - Created: 2026-08-27
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-10
 - Branch: feature/add-connection-config-validation
 - Polished: 2026-08-27
 - Milestone: 2026.1.0
@@ -34,3 +34,11 @@
 - [ ] 既存の bit rate 検証との検証責務分担が dartdoc に明記される。
 - [ ] 0059 の設計方針（コンストラクタ検証）が本 issue の決定（`toMap()` 検証）と整合するよう更新される。
 - [ ] `flutter analyze` と関連テストが成功する。
+
+## 解決方法
+
+- `lib/src/sora_validator.dart` に `validateSignalingUrls` / `validateChannelId` を追加した。
+- `SoraConnectionConfig.toMap()` で両者を呼び、`signalingUrls` が空または `channelId` が空の場合に `ArgumentError` を送出するようにした。
+- `SoraConnectionConfig` のクラス DartDoc に検証責務の分担（空検証・数値範囲は `toMap()`、各 URL 要素の形式検証は接続開始時）を追記した。
+- `0059` の設計方針は先に `toMap()` 検証へ更新済みであり、本 issue の決定と整合する。
+- `flutter analyze --fatal-infos lib test` 成功、`flutter test` 152 件成功（FFI 依存は環境変数未指定で skip）。

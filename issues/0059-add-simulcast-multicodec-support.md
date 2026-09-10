@@ -3,7 +3,7 @@
 - Created: 2026-08-03
 - Completed: {YYYY-MM-DD}
 - Branch: feature/add-simulcast-multicodec-support
-- Polished: 2026-08-03
+- Polished: 2026-09-10
 
 ## 目的
 
@@ -25,10 +25,10 @@ Sora Flutter SDK からサイマルキャストマルチコーデックを要求
 ### 設定とシグナリング
 
 - `SoraConnectionConfig` に `bool? simulcastMulticodec` を追加する。DartDoc に実験的機能であることを明記する
-- 指定値を `SoraConnectionConfig.toMap` と connect メッセージの `simulcast_multicodec` に反映する
-- `SoraConnectionConfig` のコンストラクタで `simulcastMulticodec: true` が指定されているのに `simulcast: true` でない場合、`ArgumentError` を送出する
-- `_buildConnectMessage` で `config.simulcastMulticodec` が非 null の場合は `message['simulcast_multicodec']` に設定する
-- offer メッセージの `simulcast_multicodec` フラグ（Sora が認証成功時の払い出しとして offer に含める場合）が `true` の場合も、クライアントからの明示指定と同様に扱う。このフラグの取得場所は `handleOffer` 内で `message['simulcast_multicodec']` から読み取る
+- 指定値を `SoraConnectionConfig.toMap` と connect メッセージの `simulcast_multicodec` に反映する。`toMap()` の完全一致を検証する既存テストの期待値を更新する
+- `SoraConnectionConfig` の `const` コンストラクタは維持し、`toMap()` の実行時に `simulcastMulticodec: true` かつ `simulcast: true` でない場合に `ArgumentError` を送出する（0091 の「検証場所は `toMap()` に統一する」方針に従う）
+- `_buildConnectMessage` で `config.simulcastMulticodec` が非 null の場合は `message['simulcast_multicodec']` に設定する。`_buildConnectMessage` は 0162 で `sora_connect_message.dart` の純関数へ切り出す予定のため、0162 が先にマージされた場合は純関数側へ追加する
+- offer メッセージの `simulcast_multicodec` フラグ（Sora が認証成功時の払い出しとして offer に含める場合）も適用条件に含める。`handleOffer` 内で `message['simulcast_multicodec']` を読み取り、`_applySimulcastEncodings` へ引数として渡す。`config.simulcastMulticodec == true` または offer のフラグが `true` の場合のみ `encodings[].codec` を適用し、通常のサイマルキャスト encodings 適用は従来どおり行う
 
 ### FFI バインディング追加
 
@@ -50,11 +50,11 @@ offer の `encodings[].codec` を `webrtc_RtpCodec` へ変換する手順:
 
 ### 不正な codec の検出
 
-以下のいずれかに該当する `codec` を「不正」とみなし、`error` イベントを通知する:
+以下のいずれかに該当する `codec` を「不正」とみなし、理由が分かる非致命の通知を出す。0061 と同じく、`emitState` の error type は `connect()` の失敗を意味するため使わず、`_applySimulcastEncodings` が既に使っている debug メッセージ（`_emitDebug`）と同じ非致命経路で通知する。不正が 1 件でもある場合は適用処理全体を中断して `rtpSenderSetParameters` を呼ばず既存の encoding を維持し、接続とネゴシエーションは継続する:
 - `mimeType` が空文字列または形式不正（`'/'` を含まない）
 - `mimeType` の先頭が `"video/"` でない（サイマルキャストは映像のみが対象）
 - `clockRate` が指定されていない
-- `mimeType` から抽出したコーデック名が既存の `supportedVideoCodecTypes` に含まれない
+- `mimeType` から抽出したコーデック名が `VideoCodecType.fromValue` で解決できない（`supportedVideoCodecTypes` はプラットフォームのデコーダ能力の一覧であり、送信コーデックの判定には使わない）
 - `rtpSenderSetParameters` が失敗した場合
 
 ### その他
@@ -66,16 +66,23 @@ offer の `encodings[].codec` を `webrtc_RtpCodec` へ変換する手順:
 
 - [ ] `SoraConnectionConfig.simulcastMulticodec` が公開されており、DartDoc に実験的機能であることが記載されている
 - [ ] `simulcastMulticodec: true` が connect メッセージの `simulcast_multicodec: true` に変換される
-- [ ] `simulcastMulticodec: true` かつ `simulcast` が `true` 以外の場合、`ArgumentError` が送出される
-- [ ] offer の `simulcast_multicodec` フラグも適用条件として認識される（handleOffer 内で読み取り）
+- [ ] `SoraConnectionConfig.toMap` に `simulcastMulticodec` が含まれ、既存テストの期待値が更新されている
+- [ ] `simulcastMulticodec: true` かつ `simulcast` が `true` 以外の場合、`toMap()` で `ArgumentError` が送出される
+- [ ] offer の `simulcast_multicodec` フラグも適用条件として認識される（`handleOffer` 内で読み取り、`_applySimulcastEncodings` へ渡す）
 - [ ] `bindings.dart` に `webrtc_RtpCodec_*`、`webrtc_RtpEncodingParameters_set_codec`、`std_map_string_string_set` のバインディングが追加されている
 - [ ] `codec.mimeType` から `kind` と `name` が正しく抽出される（`video/VP8` → kind=1, name=VP8）
 - [ ] `codec.clockRate` と `codec.sdpFmtpLine` が `webrtc_RtpCodec` に正しく設定される
 - [ ] `webrtc_RtpCodec` が `rtpSenderSetParameters` 完了後に解放される（use-after-free がない）
-- [ ] 不正な codec（空の mimeType、形式不正、video/ 以外、未対応コーデック名、clockRate 欠如）で接続エラーが通知される
+- [ ] 不正な codec（空の mimeType、形式不正、video/ 以外、未対応コーデック名、clockRate 欠如）で理由が分かる非致命の通知が出て、接続は失敗しない
 - [ ] コーデックを含まない既存の `encodings` が従来どおり処理される
 - [ ] `README.md` に実験的機能であることと Sora 側の有効化が必要なことが明記されている
 - [ ] 実際の libwebrtc-c を利用してコーデック適用を検証するテストが追加されている
 - [ ] サイマルキャストマルチコーデックを有効にした Sora との E2E テストが追加されている
 - [ ] モックやスタブを使用していない
 - [ ] `flutter analyze` と関連するテストが成功する
+
+## 関連
+
+- `issues/0091-add-connection-config-validation.md`（検証場所を `toMap()` に統一する方針）
+- `issues/0061-add-simulcast-advanced-encoding-parameters.md`（不正 encoding 時の非致命通知と適用中断の規約）
+- `issues/0162-refactor-connect-message-pure-function.md`（`_buildConnectMessage` の純関数化と編集範囲の重複）

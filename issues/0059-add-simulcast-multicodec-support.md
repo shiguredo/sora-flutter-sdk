@@ -86,3 +86,9 @@ offer の `encodings[].codec` を `webrtc_RtpCodec` へ変換する手順:
 - `issues/0091-add-connection-config-validation.md`（検証場所を `toMap()` に統一する方針）
 - `issues/0061-add-simulcast-advanced-encoding-parameters.md`（不正 encoding 時の非致命通知と適用中断の規約）
 - `issues/0162-refactor-connect-message-pure-function.md`（`_buildConnectMessage` の純関数化と編集範囲の重複）
+
+## pending にする理由
+
+macOS 用の libwebrtc-c が本リポジトリに無く、`lib/src/ffi/bindings.dart` へ追加する `webrtc_RtpCodec_*` と `codec` 適用の動作をローカルで検証できない。CI の Linux FFI テストでしか確認できず、マルチコーデックを有効化した Sora サーバーとの E2E も本リポジトリの環境変数だけでは制御できない。
+
+`codec` 適用の動作を実サーバーまたは FFI テストで確認できる検証手段が整ってから実装を再開する。着手時に書いた未検証の実装は破棄し、保留する。

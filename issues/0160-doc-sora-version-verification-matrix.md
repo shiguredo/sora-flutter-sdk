@@ -4,6 +4,7 @@
 - Completed: {YYYY-MM-DD}
 - Branch: feature/doc-sora-version-verification-matrix
 - Polished: {YYYY-MM-DD}
+- Milestone: 2026.1.0
 - Updated: 2026-09-10
 
 ## 目的

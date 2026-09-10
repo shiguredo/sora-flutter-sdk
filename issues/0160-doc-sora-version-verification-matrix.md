@@ -4,6 +4,7 @@
 - Completed: {YYYY-MM-DD}
 - Branch: feature/doc-sora-version-verification-matrix
 - Polished: {YYYY-MM-DD}
+- Updated: 2026-09-10
 
 ## 目的
 
@@ -11,7 +12,7 @@
 
 ## 現状
 
-`README.md` の対応 WebRTC SFU Sora 節はバージョン番号のみであり、E2E 検証に使った Sora バージョン、シグナリング仕様の対応範囲、非対応機能との対応関係が文書化されていない。`README.md` の優先実装節にある Opus 詳細パラメータと `audioStreamingLanguageCode` が未対応である旨も対応表にない。
+`README.md` の対応 WebRTC SFU Sora 節はバージョン番号のみであり、E2E 検証に使った Sora バージョン、シグナリング仕様の対応範囲、非対応機能との対応関係が文書化されていない。`README.md` の優先実装節にある Opus 詳細パラメータが未対応である旨も対応表にない。
 
 ## 設計方針
 

@@ -4,6 +4,7 @@ library;
 
 import 'package:meta/meta.dart';
 
+import 'sora_codec_type.dart';
 import 'sora_connection_config.dart';
 
 /// connect メッセージ用の `audio` 値を構築する。
@@ -24,6 +25,12 @@ Object? buildOptionalAudioConnectValue(SoraConnectionConfig config) {
       if (config.audioBitRate case final value?) {
         audio['bit_rate'] = value;
       }
+      if (_buildAudioOpusParams(config) case final opusParams?) {
+        // opus_params は codec_type: OPUS と併記しないと Sora が
+        // invalid_audio_format で接続を拒否する。
+        audio['codec_type'] = AudioCodecType.opus.value;
+        audio['opus_params'] = opusParams;
+      }
       if (audio.isEmpty) {
         return null;
       }
@@ -40,11 +47,54 @@ Object _audioConnectValueWhenExplicitlyOn(SoraConnectionConfig config) {
   if (config.audioBitRate case final value?) {
     audio['bit_rate'] = value;
   }
+  if (_buildAudioOpusParams(config) case final opusParams?) {
+    // opus_params は codec_type: OPUS と併記しないと Sora が
+    // invalid_audio_format で接続を拒否する。
+    audio['codec_type'] = AudioCodecType.opus.value;
+    audio['opus_params'] = opusParams;
+  }
 
   if (audio.isEmpty) {
     return true;
   }
   return audio;
+}
+
+/// connect メッセージ用の `audio.opus_params` を構築する。
+///
+/// 指定された項目だけを含む Map を返す。全項目が未指定の場合は `null` を返し、
+/// connect メッセージへ `opus_params` を含めない。
+Map<String, Object?>? _buildAudioOpusParams(SoraConnectionConfig config) {
+  final opusParams = <String, Object?>{};
+  if (config.audioOpusParamsChannels case final value?) {
+    opusParams['channels'] = value;
+  }
+  if (config.audioOpusParamsMaxplaybackrate case final value?) {
+    opusParams['maxplaybackrate'] = value;
+  }
+  if (config.audioOpusParamsMinptime case final value?) {
+    opusParams['minptime'] = value;
+  }
+  if (config.audioOpusParamsPtime case final value?) {
+    opusParams['ptime'] = value;
+  }
+  if (config.audioOpusParamsStereo case final value?) {
+    opusParams['stereo'] = value;
+  }
+  if (config.audioOpusParamsSpropStereo case final value?) {
+    opusParams['sprop_stereo'] = value;
+  }
+  if (config.audioOpusParamsUseinbandfec case final value?) {
+    opusParams['useinbandfec'] = value;
+  }
+  if (config.audioOpusParamsUsedtx case final value?) {
+    opusParams['usedtx'] = value;
+  }
+
+  if (opusParams.isEmpty) {
+    return null;
+  }
+  return opusParams;
 }
 
 /// connect メッセージ用の `video` 値を構築する。

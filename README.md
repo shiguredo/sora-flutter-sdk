@@ -247,6 +247,18 @@ final config = SoraConnectionConfig(
   videoH264Params: <String, Object?>{},
   videoH265Params: <String, Object?>{},
   videoAv1Params: <String, Object?>{},
+  // Opus 詳細パラメーター (Sora の実験的機能)
+  // Sora の対応状況を確認し、利用には事前にサポートへの連絡が必要
+  // role が sendrecv / sendonly の場合のみ有効
+  // usedtx を有効にすると録画がおかしくなる
+  audioOpusParamsChannels: 2,
+  audioOpusParamsMaxplaybackrate: 48000,
+  audioOpusParamsMinptime: 10,
+  audioOpusParamsPtime: 20,
+  audioOpusParamsStereo: true,
+  audioOpusParamsSpropStereo: false,
+  audioOpusParamsUseinbandfec: true,
+  audioOpusParamsUsedtx: false,
   // 転送フィルター
   forwardingFilters: <Map<String, Object?>>[],
   // タイムアウト
@@ -489,11 +501,7 @@ Ubuntu 24.04 (x86_64) をサポートします。
 
 優先実装とは Sora のライセンスを契約頂いているお客様限定で Sora Flutter SDK の実装予定機能を有償にて前倒しで実装することです。
 
-### 優先実装が可能な対応一覧
-
 **詳細は Discord やメールなどでお気軽にお問い合わせください**
-
-- Opus 詳細パラメータ対応 (`audioOpusParamsChannels` / `audioOpusParamsStereo` / `audioOpusParamsUseinbandfec` 等)
 
 ## サポートについて
 

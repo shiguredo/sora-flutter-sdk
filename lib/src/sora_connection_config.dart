@@ -34,6 +34,14 @@ class SoraConnectionConfig {
     this.videoH264Params,
     this.videoH265Params,
     this.videoAv1Params,
+    this.audioOpusParamsChannels,
+    this.audioOpusParamsMaxplaybackrate,
+    this.audioOpusParamsMinptime,
+    this.audioOpusParamsPtime,
+    this.audioOpusParamsStereo,
+    this.audioOpusParamsSpropStereo,
+    this.audioOpusParamsUseinbandfec,
+    this.audioOpusParamsUsedtx,
     this.dataChannels,
     this.forwardingFilters,
     this.timeoutOptions = const SoraTimeoutOptions(),
@@ -141,6 +149,48 @@ class SoraConnectionConfig {
   /// Map の有効キーは Sora の connect メッセージ仕様に従う。
   final Map<String, Object?>? videoAv1Params;
 
+  /// Opus の `channels` (1 〜 8)。connect メッセージの audio.opus_params に対応する。
+  ///
+  /// Sora の実験的機能のため、利用には事前に Sora のサポートへの連絡が必要。
+  final int? audioOpusParamsChannels;
+
+  /// Opus の `maxplaybackrate` (8000 〜 48000 Hz)。connect メッセージの audio.opus_params に対応する。
+  ///
+  /// Sora の実験的機能のため、利用には事前に Sora のサポートへの連絡が必要。
+  final int? audioOpusParamsMaxplaybackrate;
+
+  /// Opus の `minptime` (3 〜 120 ms)。connect メッセージの audio.opus_params に対応する。
+  ///
+  /// Sora の実験的機能のため、利用には事前に Sora のサポートへの連絡が必要。
+  final int? audioOpusParamsMinptime;
+
+  /// Opus の `ptime` (ms)。connect メッセージの audio.opus_params に対応する。
+  ///
+  /// Sora の仕様に範囲が定義されていないため、SDK 側では範囲検証しない。
+  /// Sora の実験的機能のため、利用には事前に Sora のサポートへの連絡が必要。
+  final int? audioOpusParamsPtime;
+
+  /// Opus の `stereo`。connect メッセージの audio.opus_params に対応する。
+  ///
+  /// Sora の実験的機能のため、利用には事前に Sora のサポートへの連絡が必要。
+  final bool? audioOpusParamsStereo;
+
+  /// Opus の `sprop_stereo`。connect メッセージの audio.opus_params に対応する。
+  ///
+  /// Sora の実験的機能のため、利用には事前に Sora のサポートへの連絡が必要。
+  final bool? audioOpusParamsSpropStereo;
+
+  /// Opus の `useinbandfec`。connect メッセージの audio.opus_params に対応する。
+  ///
+  /// Sora の実験的機能のため、利用には事前に Sora のサポートへの連絡が必要。
+  final bool? audioOpusParamsUseinbandfec;
+
+  /// Opus の `usedtx`。connect メッセージの audio.opus_params に対応する。
+  ///
+  /// 有効にすると録画がおかしくなる。
+  /// Sora の実験的機能のため、利用には事前に Sora のサポートへの連絡が必要。
+  final bool? audioOpusParamsUsedtx;
+
   /// カスタム DataChannel 設定のリスト。connect メッセージの data_channels に対応する。
   /// 各要素には `label`、`direction`、`compress` のキーを持つ Map を指定する。
   final List<Map<String, Object?>>? dataChannels;
@@ -157,6 +207,11 @@ class SoraConnectionConfig {
     // const コンストラクターを維持するため、接続設定の利用時に検証する。
     validateAudioBitRate(audioBitRate);
     validateVideoBitRate(videoBitRate);
+    validateAudioOpusParams(
+      channels: audioOpusParamsChannels,
+      maxplaybackrate: audioOpusParamsMaxplaybackrate,
+      minptime: audioOpusParamsMinptime,
+    );
 
     return <String, Object?>{
       'signalingUrls': signalingUrls,
@@ -184,6 +239,14 @@ class SoraConnectionConfig {
       'videoH264Params': videoH264Params,
       'videoH265Params': videoH265Params,
       'videoAv1Params': videoAv1Params,
+      'audioOpusParamsChannels': audioOpusParamsChannels,
+      'audioOpusParamsMaxplaybackrate': audioOpusParamsMaxplaybackrate,
+      'audioOpusParamsMinptime': audioOpusParamsMinptime,
+      'audioOpusParamsPtime': audioOpusParamsPtime,
+      'audioOpusParamsStereo': audioOpusParamsStereo,
+      'audioOpusParamsSpropStereo': audioOpusParamsSpropStereo,
+      'audioOpusParamsUseinbandfec': audioOpusParamsUseinbandfec,
+      'audioOpusParamsUsedtx': audioOpusParamsUsedtx,
       'dataChannels': dataChannels,
       'forwardingFilters': forwardingFilters,
       'useAudioDevice': useAudioDevice,

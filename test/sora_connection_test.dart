@@ -562,6 +562,70 @@ void main() {
       return channel;
     }
 
+    test('redirect 後の connect メッセージでも audio.opus_params を維持する', () async {
+      // redirect 先の WebSocket で受信した connect メッセージを捕捉する。
+      // redirect 経路も通常接続と同じ `_buildConnectMessage()` を使うため、
+      // 設定した Opus 詳細パラメーターが維持されることを検証する。
+      final receivedConnectMessage = Completer<Map<String, Object?>>();
+      final redirectServer = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      redirectServer.listen((request) async {
+        if (!WebSocketTransformer.isUpgradeRequest(request)) {
+          request.response.statusCode = HttpStatus.badRequest;
+          await request.response.close();
+          return;
+        }
+        final socket = await WebSocketTransformer.upgrade(request);
+        socket.listen((message) {
+          if (message is! String) {
+            return;
+          }
+          final decoded = jsonDecode(message);
+          if (decoded is Map<String, Object?> &&
+              decoded['type'] == 'connect' &&
+              !receivedConnectMessage.isCompleted) {
+            receivedConnectMessage.complete(decoded);
+          }
+        });
+      });
+      final redirectUrl =
+          'ws://${redirectServer.address.host}:${redirectServer.port}';
+
+      final connection = SoraConnection.createForTest(
+        config: SoraConnectionConfig(
+          signalingUrls: <String>[acceptUrl],
+          channelId: 'test-channel',
+          role: SoraRole.sendrecv,
+          audio: true,
+          audioOpusParamsChannels: 2,
+          audioOpusParamsStereo: true,
+        ),
+        clientId: 1,
+        eventChannelName: 'test-event-channel',
+      );
+      try {
+        final initialChannel = await establishInitialChannel();
+        connection.injectSignalingWebSocketForTest(initialChannel);
+        await connection.handleRedirectMessageForTest(<String, Object?>{
+          'location': redirectUrl,
+        });
+
+        final connectMessage = await receivedConnectMessage.future.timeout(
+          const Duration(seconds: 5),
+        );
+        expect(connectMessage['redirect'], isTrue);
+        expect(connectMessage['audio'], <String, Object?>{
+          'codec_type': 'OPUS',
+          'opus_params': <String, Object?>{'channels': 2, 'stereo': true},
+        });
+      } finally {
+        await disposeConnection(connection);
+        await redirectServer.close(force: true);
+      }
+    });
+
     Future<void> verifyAbnormalTermination({
       required SoraConnection connection,
       required Map<String, Object?> payload,

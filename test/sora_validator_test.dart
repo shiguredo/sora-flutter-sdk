@@ -34,4 +34,47 @@ void main() {
       expect(parseSignalingUrl(''), isNull);
     });
   });
+
+  group('validateAudioOpusParams', () {
+    test('範囲内と未指定を受け入れる', () {
+      expect(
+        () => validateAudioOpusParams(
+          channels: 1,
+          maxplaybackrate: 8000,
+          minptime: 3,
+        ),
+        returnsNormally,
+      );
+      expect(
+        () => validateAudioOpusParams(
+          channels: 8,
+          maxplaybackrate: 48000,
+          minptime: 120,
+        ),
+        returnsNormally,
+      );
+      expect(validateAudioOpusParams, returnsNormally);
+    });
+
+    test('範囲外の channels に RangeError を送出する', () {
+      expect(() => validateAudioOpusParams(channels: 0), throwsRangeError);
+      expect(() => validateAudioOpusParams(channels: 9), throwsRangeError);
+    });
+
+    test('範囲外の maxplaybackrate に RangeError を送出する', () {
+      expect(
+        () => validateAudioOpusParams(maxplaybackrate: 7999),
+        throwsRangeError,
+      );
+      expect(
+        () => validateAudioOpusParams(maxplaybackrate: 48001),
+        throwsRangeError,
+      );
+    });
+
+    test('範囲外の minptime に RangeError を送出する', () {
+      expect(() => validateAudioOpusParams(minptime: 2), throwsRangeError);
+      expect(() => validateAudioOpusParams(minptime: 121), throwsRangeError);
+    });
+  });
 }

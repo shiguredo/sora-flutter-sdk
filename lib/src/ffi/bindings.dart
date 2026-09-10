@@ -2823,6 +2823,8 @@ class LibWebrtcC {
         )
       >('webrtc_MediaStreamInterface_GetVideoTracks');
 
+  // native 呼び出しの返り値 `0` を Dart 側で失敗として扱う。
+  // 失敗時は `LocalMediaStream.addTrack` が `StateError` を投げる。
   late final mediaStreamAddTrackWithAudioTrack = _lib
       .lookupFunction<
         Int8 Function(
@@ -2835,6 +2837,8 @@ class LibWebrtcC {
         )
       >('webrtc_MediaStreamInterface_AddTrackWithAudioTrack');
 
+  // native 呼び出しの返り値 `0` を Dart 側で失敗として扱う。
+  // 失敗時は `LocalMediaStream.addTrack` が `StateError` を投げる。
   late final mediaStreamAddTrackWithVideoTrack = _lib
       .lookupFunction<
         Int8 Function(
@@ -2847,6 +2851,8 @@ class LibWebrtcC {
         )
       >('webrtc_MediaStreamInterface_AddTrackWithVideoTrack');
 
+  // native 呼び出しの返り値 `0` を Dart 側で失敗として扱う。
+  // 失敗時は `LocalMediaStream.removeTrack` が `StateError` を投げる。
   late final mediaStreamRemoveTrackWithAudioTrack = _lib
       .lookupFunction<
         Int8 Function(
@@ -2859,6 +2865,8 @@ class LibWebrtcC {
         )
       >('webrtc_MediaStreamInterface_RemoveTrackWithAudioTrack');
 
+  // native 呼び出しの返り値 `0` を Dart 側で失敗として扱う。
+  // 失敗時は `LocalMediaStream.removeTrack` が `StateError` を投げる。
   late final mediaStreamRemoveTrackWithVideoTrack = _lib
       .lookupFunction<
         Int8 Function(

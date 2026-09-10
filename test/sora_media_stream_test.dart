@@ -20,7 +20,12 @@ void main() {
         Uint8List(stride * height);
 
     // 有効なフレームを作るヘルパー。
-    ExternalVideoFrame validFrame({int width = 640, int height = 480}) {
+    ExternalVideoFrame validFrame({
+      int width = 640,
+      int height = 480,
+      int rotation = 0,
+      int? timestampUs,
+    }) {
       final yStride = width;
       final uvStride = (width + 1) ~/ 2;
       return ExternalVideoFrame(
@@ -32,11 +37,105 @@ void main() {
         yStride: yStride,
         uStride: uvStride,
         vStride: uvStride,
+        rotation: rotation,
+        timestampUs: timestampUs,
       );
     }
 
     test('有効なフレームは例外を投げない', () {
       expect(() => validateExternalVideoFrame(validFrame()), returnsNormally);
+    });
+
+    // ---- rotation ----
+
+    test('rotation が 0 / 90 / 180 / 270 の場合は例外を投げない', () {
+      for (final rotation in <int>[0, 90, 180, 270]) {
+        expect(
+          () => validateExternalVideoFrame(validFrame(rotation: rotation)),
+          returnsNormally,
+          reason: 'rotation=$rotation',
+        );
+      }
+    });
+
+    test('rotation が 0 / 90 / 180 / 270 以外の場合に StateError を投げる', () {
+      for (final rotation in <int>[-90, 45, 360]) {
+        expect(
+          () => validateExternalVideoFrame(validFrame(rotation: rotation)),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              'ExternalVideoFrame rotation must be 0, 90, 180, or 270.',
+            ),
+          ),
+          reason: 'rotation=$rotation',
+        );
+      }
+    });
+
+    // ---- width / height の上限 ----
+
+    test('width が上限 8192 の場合は例外を投げない', () {
+      expect(
+        () => validateExternalVideoFrame(validFrame(width: 8192, height: 2)),
+        returnsNormally,
+      );
+    });
+
+    test('width が上限 8192 を超える場合に StateError を投げる', () {
+      expect(
+        () => validateExternalVideoFrame(validFrame(width: 8193, height: 2)),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            'ExternalVideoFrame width and height must be at most 8192.',
+          ),
+        ),
+      );
+    });
+
+    test('height が上限 8192 の場合は例外を投げない', () {
+      expect(
+        () => validateExternalVideoFrame(validFrame(width: 2, height: 8192)),
+        returnsNormally,
+      );
+    });
+
+    test('height が上限 8192 を超える場合に StateError を投げる', () {
+      expect(
+        () => validateExternalVideoFrame(validFrame(width: 2, height: 8193)),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            'ExternalVideoFrame width and height must be at most 8192.',
+          ),
+        ),
+      );
+    });
+
+    // ---- timestampUs ----
+
+    test('timestampUs が 0 の場合は例外を投げない', () {
+      expect(
+        () => validateExternalVideoFrame(validFrame(timestampUs: 0)),
+        returnsNormally,
+      );
+    });
+
+    test('timestampUs が負の場合に StateError を投げる', () {
+      expect(
+        () => validateExternalVideoFrame(validFrame(timestampUs: -1)),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            'ExternalVideoFrame timestampUs must be non-negative.',
+          ),
+        ),
+      );
     });
 
     // ---- width / height <= 0 ----

@@ -1,7 +1,7 @@
 # `ExternalVideoFrame` の validation を追加する
 
 - Created: 2026-08-27
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-10
 - Branch: feature/add-external-video-frame-validation
 - Polished: 2026-08-27
 - Milestone: 2026.1.0
@@ -31,3 +31,10 @@
 - [ ] rotation 無効値・width/height 上限超過 (8192 超)・timestampUs 負値が確実に例外化する。
 - [ ] 上記シナリオを exercise するユニットテストを追加する。
 - [ ] `flutter analyze` と関連テストが成功する。
+
+## 解決方法
+
+- `lib/src/sora_media_stream.dart` の `validateExternalVideoFrame` に rotation (0 / 90 / 180 / 270 のみ)・width / height の上限 8192・timestampUs の非負検証を追加した。
+- 上限 8192 は `_maxExternalVideoFrameDimension` として定義し、dartdoc に根拠 (4K の 2 倍を超え 8K を包含する防御的上限) を明記した。
+- `ExternalVideoFrame` の width / height / rotation / timestampUs の dartdoc に `writeFrame` 時の `StateError` を追記した。
+- `test/sora_media_stream_test.dart` に rotation・width / height の上限境界・timestampUs のテストを追加した。`flutter analyze --fatal-infos lib test` 成功、`flutter test` 145 件成功 (FFI 依存は環境変数未指定で skip)。

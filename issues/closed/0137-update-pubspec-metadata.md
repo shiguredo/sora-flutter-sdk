@@ -1,7 +1,7 @@
 # `pubspec.yaml` の description 拡張と `issue_tracker` 方針確定
 
 - Created: 2026-08-27
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-10
 - Branch: feature/update-pubspec-metadata
 - Polished: 2026-09-07
 - Milestone: 2026.1.0
@@ -33,3 +33,11 @@
 - [ ] `issue_tracker` が記載されていない (A. 現状維持)。
 - [ ] `repository` / `homepage` が存在している (値の変更は行わない)。
 - [ ] `flutter pub publish --dry-run` の出力に topics / description 関連のエラーや警告がない (CHANGELOG のバージョン警告は `0063` の範囲であり対象外)。
+
+## 解決方法
+
+- `pubspec.yaml` の `description` を 110 文字の確定文言 `Flutter plugin for WebRTC SFU Sora powered by libwebrtc-c, supporting iOS, macOS, Android, Windows, and Linux.` に更新した。
+- `topics` は `webrtc` / `flutter` のまま変更していない。
+- `issue_tracker` は追加していない (現状維持)。
+- `repository` / `homepage` は変更していない。
+- `dart pub publish --dry-run` で topics / description 関連の警告・エラーが無いことを確認した (CHANGELOG のバージョン警告は `0063` の範囲)。

@@ -1,7 +1,7 @@
 # `sora_push_audio.dart` の英語 dartdoc を日本語化する
 
 - Created: 2026-08-27
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-10
 - Branch: feature/fix-push-audio-dartdoc-japanese
 - Polished: 2026-09-07
 - Milestone: 2026.1.0
@@ -31,3 +31,9 @@ AGENTS.md 「コメントは全て日本語にすること」に反して英語�
 
 - [ ] `sora_push_audio.dart` 13 行目の dartdoc が日本語で書かれている。
 - [ ] `flutter analyze` が成功する。コメントのみの変更のため専用の関連テストはなし。
+
+## 解決方法
+
+- `lib/src/sora_push_audio.dart` の `PushAudio._buffer` の英語 dartdoc を「PCM データ用に事前確保したネイティブバッファ。未初期化のときは `null`。」に日本語化した。
+- 他の private メンバーへの dartdoc 追加は行っていない（設計方針どおり）。
+- `flutter analyze --fatal-infos lib test` 成功。

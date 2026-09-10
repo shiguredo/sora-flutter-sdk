@@ -1,7 +1,7 @@
 # `LocalMediaStream.addTrack` / `removeTrack` の native 戻り値の契約を dartdoc に追記する
 
 - Created: 2026-08-27
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-10
 - Branch: feature/doc-add-addtrack-return-value-dartdoc
 - Polished: 2026-09-07
 - Milestone: 2026.1.0
@@ -30,3 +30,9 @@
 - [ ] `LocalMediaStream.addTrack` と `removeTrack` の dartdoc に返り値契約が書かれている。
 - [ ] `bindings.dart` の該当 4 箇所にも契約コメントがある。
 - [ ] `flutter analyze` と `flutter test test/sora_media_stream_test.dart` が成功する。
+
+## 解決方法
+
+- `lib/src/sora_media_stream.dart` の `LocalMediaStream.addTrack` / `removeTrack` の dartdoc に、native 呼び出しの返り値 `0` を失敗として扱い `StateError` を投げる契約を追記した。
+- `lib/src/ffi/bindings.dart` の対象 4 バインディングの直上に、同じ契約コメント (返り値 `0` は `LocalMediaStream` の `addTrack` / `removeTrack` が `StateError` を投げる) を追記した。
+- `flutter analyze --fatal-infos lib test` 成功、`flutter test test/sora_media_stream_test.dart` 28 件成功、`flutter test` 156 件成功 (FFI 依存は環境変数未指定で skip)。

@@ -126,6 +126,9 @@ class LocalMediaStream implements MediaStream {
   /// native の `MediaStreamInterface` に track を追加するのみで、
   /// `PeerConnection` への `RtpSender` 作成は行わない。
   /// `RtpSender` の管理は `SoraConnection` 側の責務。
+  ///
+  /// native 呼び出しの返り値 `0` を失敗として扱い、失敗した場合は
+  /// `StateError` を投げる。
   void addTrack(LocalMediaStreamTrack track) {
     ensureNotDisposed();
     track.ensureNotDisposed();
@@ -185,6 +188,9 @@ class LocalMediaStream implements MediaStream {
   /// native の `MediaStreamInterface` から track を削除するのみで、
   /// `PeerConnection` の `RtpSender` 破棄は行わない。
   /// `RtpSender` の管理は `SoraConnection` 側の責務。
+  ///
+  /// native 呼び出しの返り値 `0` を失敗として扱い、失敗した場合は
+  /// `StateError` を投げる。
   void removeTrack(LocalMediaStreamTrack track) {
     ensureNotDisposed();
     track.ensureNotDisposed();

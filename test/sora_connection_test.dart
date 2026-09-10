@@ -183,6 +183,98 @@ void main() {
     });
   }, skip: ffiTestEnvironment.skipReason);
 
+  group('SoraConnection._buildConnectMessage の音声ストリーミング言語コード', () {
+    late WebrtcClient wc;
+
+    setUpAll(() {
+      // SoraConnection 生成には FFI の共有 factory が必要なため、
+      // 事前に WebrtcClient を生成して初期化する。
+      wc = WebrtcClient.create(config: {}, onEvent: (_, _) {});
+    });
+
+    tearDownAll(() {
+      wc.dispose();
+    });
+
+    Future<void> disposeConnection(SoraConnection connection) async {
+      try {
+        await connection.dispose();
+      } on MissingPluginException catch (_) {
+        // handler 未登録による通信失敗のみを想定内として無視する。
+      }
+    }
+
+    SoraConnection createConnection(SoraConnectionConfig config) {
+      return SoraConnection.createForTest(
+        config: config,
+        clientId: 1,
+        eventChannelName: 'test-event-channel',
+      );
+    }
+
+    test('audioStreamingLanguageCode 指定時に connect メッセージへ設定する', () async {
+      final connection = createConnection(
+        const SoraConnectionConfig(
+          signalingUrls: <String>['wss://example.com/signaling'],
+          channelId: 'test-channel',
+          role: SoraRole.sendrecv,
+          audioStreamingLanguageCode: 'ja-JP',
+        ),
+      );
+      try {
+        expect(
+          connection
+              .buildConnectMessageForTest()['audio_streaming_language_code'],
+          'ja-JP',
+        );
+      } finally {
+        await disposeConnection(connection);
+      }
+    });
+
+    test('audio が false の場合は audio_streaming_language_code を含めない', () async {
+      final connection = createConnection(
+        const SoraConnectionConfig(
+          signalingUrls: <String>['wss://example.com/signaling'],
+          channelId: 'test-channel',
+          role: SoraRole.sendrecv,
+          audio: false,
+          audioStreamingLanguageCode: 'ja-JP',
+        ),
+      );
+      try {
+        expect(
+          connection.buildConnectMessageForTest().containsKey(
+            'audio_streaming_language_code',
+          ),
+          isFalse,
+        );
+      } finally {
+        await disposeConnection(connection);
+      }
+    });
+
+    test('audioStreamingLanguageCode 未指定の場合は connect メッセージへ含めない', () async {
+      final connection = createConnection(
+        const SoraConnectionConfig(
+          signalingUrls: <String>['wss://example.com/signaling'],
+          channelId: 'test-channel',
+          role: SoraRole.sendrecv,
+        ),
+      );
+      try {
+        expect(
+          connection.buildConnectMessageForTest().containsKey(
+            'audio_streaming_language_code',
+          ),
+          isFalse,
+        );
+      } finally {
+        await disposeConnection(connection);
+      }
+    });
+  }, skip: ffiTestEnvironment.skipReason);
+
   group(
     'SoraConnection.disconnect の _disconnecting / _abnormalTerminationStarted の finally リセット',
     () {

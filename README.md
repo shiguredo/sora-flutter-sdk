@@ -223,6 +223,8 @@ final config = SoraConnectionConfig(
   bundleId: 'bundle-1',
   metadata: <String, Object?>{'access_token': '...'},
   signalingNotifyMetadata: <String, Object?>{},
+  // 音声ストリーミング (Sora は文字列をそのまま言語コードとして扱う)
+  audioStreamingLanguageCode: 'ja-JP',
   // DataChannel シグナリング
   dataChannelSignaling: true,
   ignoreDisconnectWebSocket: true,
@@ -492,7 +494,6 @@ Ubuntu 24.04 (x86_64) をサポートします。
 **詳細は Discord やメールなどでお気軽にお問い合わせください**
 
 - Opus 詳細パラメータ対応 (`audioOpusParamsChannels` / `audioOpusParamsStereo` / `audioOpusParamsUseinbandfec` 等)
-- `audioStreamingLanguageCode` 対応
 
 ## サポートについて
 

@@ -13,6 +13,7 @@ class SoraConnectionConfig {
     required this.role,
     this.video,
     this.audio,
+    this.audioStreamingLanguageCode,
     this.useAudioDevice = true,
     this.clientId,
     this.bundleId,
@@ -53,6 +54,16 @@ class SoraConnectionConfig {
 
   /// 音声の有効 (null の場合は connect メッセージに audio キーを含めない)。
   final bool? audio;
+
+  /// 音声ストリーミングの言語コード。
+  ///
+  /// 指定すると connect メッセージの `audio_streaming_language_code` に設定する。
+  /// 未指定の場合はキーを送信しない。
+  /// `audio` が `false` の場合は音声が無効なため送信しない。
+  ///
+  /// Sora は指定された文字列をそのまま言語コードとして扱うため、
+  /// SDK 側での形式検証や長さ制限は行わない。
+  final String? audioStreamingLanguageCode;
 
   /// 音声デバイスを利用するかどうか。
   ///
@@ -153,6 +164,7 @@ class SoraConnectionConfig {
       'role': role.value,
       'video': video,
       'audio': audio,
+      'audioStreamingLanguageCode': audioStreamingLanguageCode,
       'clientId': clientId,
       'bundleId': bundleId,
       'metadata': metadata,

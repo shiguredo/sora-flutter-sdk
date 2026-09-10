@@ -6,6 +6,27 @@ import 'package:sora_sdk/src/media/sora_media_device_platform.dart'
     as media_device_platform;
 
 void main() {
+  group('videoInputFormatFromPlatformMap', () {
+    test('非整数の maxFrameRate は四捨五入して int にする', () {
+      // Windows 等が返す 29.97 fps を 30 に丸める。
+      final format = media_device_platform.videoInputFormatFromPlatformMap(
+        <String, Object?>{'width': 1280, 'height': 720, 'maxFrameRate': 29.97},
+      );
+
+      expect(format.maxFrameRate, 30);
+      expect(format.maxFrameRate, isA<int>());
+    });
+
+    test('int の maxFrameRate はそのまま int として扱う', () {
+      final format = media_device_platform.videoInputFormatFromPlatformMap(
+        <String, Object?>{'width': 1280, 'height': 720, 'maxFrameRate': 30},
+      );
+
+      expect(format.maxFrameRate, 30);
+      expect(format.maxFrameRate, isA<int>());
+    });
+  });
+
   group('isAudioInputDeviceNotFoundError の例外分類', () {
     test('iOS と Android のデバイス不存在は無視対象になる', () {
       // MethodChannel 経路のデバイス不存在コードを検証する。

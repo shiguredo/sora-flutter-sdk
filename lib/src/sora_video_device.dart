@@ -37,9 +37,11 @@ class VideoInputFormat {
   final int height;
 
   /// 最大フレームレート (fps)。
-  final double maxFrameRate;
+  ///
+  /// `GetUserMediaOptions.videoFrameRate` と同じ `int` 型である。
+  /// プラットフォームが非整数 (29.97 等) を返した場合は四捨五入して整数化する。
+  final int maxFrameRate;
 
   @override
-  String toString() =>
-      '${width}x$height @${maxFrameRate.toStringAsFixed(0)}fps';
+  String toString() => '${width}x$height @${maxFrameRate}fps';
 }

@@ -1,7 +1,7 @@
 # `VideoInputFormat.maxFrameRate` (double) と `videoFrameRate` (int) の型不整合を解消する
 
 - Created: 2026-08-27
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-10
 - Branch: feature/change-video-frame-rate-type
 - Polished: 2026-08-27
 - Milestone: 2026.1.0
@@ -30,3 +30,12 @@
 - [ ] 利用者が enumerate → getUserMedia の経路で追加変換を挟まずに済む。
 - [ ] 後方互換への影響が CHANGELOG に CHANGE として明記される。
 - [ ] `flutter analyze` と関連テストが成功する。
+
+## 解決方法
+
+- `lib/src/sora_video_device.dart` の `VideoInputFormat.maxFrameRate` を `double` から `int` に変更し、`GetUserMediaOptions.videoFrameRate` と型を揃えた。
+- `lib/src/media/sora_media_device_platform.dart` で、プラットフォームが返す `maxFrameRate` を `round()` で整数化する純関数 `videoInputFormatFromPlatformMap` を切り出した。
+- `toString()` を `int` に合わせて簡素化し、DartDoc に丸め仕様を追記した。
+- `test/sora_video_device_test.dart` と `test/sora_media_device_platform_test.dart` に型と丸めのテストを追加した。
+- 後方互換のない変更だが、正式リリース前のため `CHANGELOG.md` には記載せず、正式リリース時に `[CHANGE]` として集約する。
+- `flutter analyze --fatal-infos lib test` 成功、`flutter test` 156 件成功（FFI 依存は環境変数未指定で skip）。

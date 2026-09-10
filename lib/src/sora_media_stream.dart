@@ -488,10 +488,12 @@ class ExternalVideoFrame {
     this.timestampUs,
   });
 
-  /// 映像の幅 (ピクセル)。
+  /// 映像の幅 (ピクセル)。正の値で、上限は 8192。これに反する値は
+  /// `writeFrame` 時に `StateError` になる。
   final int width;
 
-  /// 映像の高さ (ピクセル)。
+  /// 映像の高さ (ピクセル)。正の値で、上限は 8192。これに反する値は
+  /// `writeFrame` 時に `StateError` になる。
   final int height;
 
   /// Y プレーンの生データ。
@@ -512,10 +514,12 @@ class ExternalVideoFrame {
   /// V プレーンの 1 行あたりバイト数。
   final int vStride;
 
-  /// フレームの回転角度 (0, 90, 180, 270)。
+  /// フレームの回転角度 (0, 90, 180, 270)。これ以外の値は `writeFrame` 時に
+  /// `StateError` になる。
   final int rotation;
 
   /// フレームのタイムスタンプ (マイクロ秒)。null の場合は現在時刻を使用する。
+  /// 負の値は `writeFrame` 時に `StateError` になる。
   final int? timestampUs;
 }
 
@@ -937,14 +941,41 @@ class LocalVideoTrack extends LocalMediaStreamTrack {
   }
 }
 
+/// external video frame の幅・高さの防御的な上限。
+///
+/// libwebrtc の `I420Buffer` 自体に寸法上限は無い。SDK 側の防御的な
+/// ポリシー上限として、4K (3840x2160) の 2 倍 (7680) を超え、8K
+/// (7680x4320) を包含する 8192 を採用する。FFI の `Int32` の上限
+/// (2,147,483,647) とは別の値である。
+const int _maxExternalVideoFrameDimension = 8192;
+
 /// external video frame の前提整合性を検証する。
 ///
-/// 幅・高さが正であること、各ストライドが最小幅を満たすこと、
-/// 各プレーンバッファ長がストライド×高さを満たすことを確認する。
+/// 回転角度が 0 / 90 / 180 / 270 のいずれかであること、幅・高さが正で
+/// [ExternalVideoFrame] の防御的な上限以下であること、`timestampUs` が
+/// null か非負であること、各ストライドが最小幅を満たすこと、各プレーン
+/// バッファ長がストライド×高さを満たすことを確認する。
 @internal
 void validateExternalVideoFrame(ExternalVideoFrame frame) {
+  if (frame.rotation != 0 &&
+      frame.rotation != 90 &&
+      frame.rotation != 180 &&
+      frame.rotation != 270) {
+    throw StateError('ExternalVideoFrame rotation must be 0, 90, 180, or 270.');
+  }
   if (frame.width <= 0 || frame.height <= 0) {
     throw StateError('ExternalVideoFrame width and height must be positive.');
+  }
+  if (frame.width > _maxExternalVideoFrameDimension ||
+      frame.height > _maxExternalVideoFrameDimension) {
+    throw StateError(
+      'ExternalVideoFrame width and height must be at most '
+      '$_maxExternalVideoFrameDimension.',
+    );
+  }
+  final timestampUs = frame.timestampUs;
+  if (timestampUs != null && timestampUs < 0) {
+    throw StateError('ExternalVideoFrame timestampUs must be non-negative.');
   }
   if (frame.yStride < frame.width) {
     throw StateError('ExternalVideoFrame yStride is too small.');

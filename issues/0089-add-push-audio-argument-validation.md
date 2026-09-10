@@ -4,7 +4,6 @@
 - Completed: {YYYY-MM-DD}
 - Branch: feature/add-push-audio-argument-validation
 - Polished: 2026-08-27
-- Milestone: 2026.1.0
 
 ## 目的
 

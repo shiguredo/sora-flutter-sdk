@@ -1,7 +1,7 @@
 # `SdpNegotiationCallbacks` の cancel 時の解放責務を調査して dartdoc に明記する
 
 - Created: 2026-08-27
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-10
 - Branch: feature/doc-add-sdp-negotiation-cancel-doc
 - Polished: 2026-09-07
 - Milestone: 2026.1.0
@@ -38,3 +38,13 @@ cancel 時の早期 `return` は `rtcErrorMessage` (`lib/src/ffi/memory.dart`、
 - [ ] `SdpNegotiationCallbacks` の class dartdoc に cancel 時の解放責務方針が書かれている。
 - [ ] 上記 4 callback の dartdoc に cancel 時挙動が 1 行ずつ書かれている。
 - [ ] `flutter analyze` と `flutter test test/sdp_negotiation_test.dart` が成功する。
+
+## 解決方法
+
+- `SdpNegotiationCallbacks` の class に `///` dartdoc を追加し、cancel 時のリソース解放責務を明記した。
+- 対象 4 callback に `///` dartdoc を追加し、cancel 時の解放有無を 1 行ずつ記載した。
+  - `onSetRemoteDescriptionComplete` / `onCreateAnswerFailure` / `onSetLocalDescriptionComplete` は `error` を解放しない。
+  - `onCreateAnswerSuccess` は `desc` を `sessionDescriptionUniqueDelete` で解放する。
+- 調査結果: `RTCError_unique` は `WEBRTC_DECLARE_UNIQUE` の `_unique_delete` と observer ヘッダの `webrtc_RTCError_unique*` 引数、`rtcErrorMessage` が常に delete することから、所有権は callback 側にある。cancel による早期 return では `rtcErrorMessage` を通らないため `RTCError_unique` が解放されず、解放漏れとなる。
+- 挙動修正は本 issue に含めず、別途対応する。
+- `flutter analyze --fatal-infos lib test` 成功、`flutter test` 156 件成功 (`sdp_negotiation_test.dart` は FFI 依存のためローカルでは skip、CI の Linux で実行)。

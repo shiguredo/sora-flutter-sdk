@@ -16,11 +16,20 @@ import 'memory.dart';
 // SDP ネゴシエーションコールバック
 // ---------------------------------------------------------------------------
 
-// SDP ネゴシエーションの非同期コールバック連鎖を管理する。
-//
-// `SetRemoteDescription -> CreateAnswer -> SetLocalDescription` の順に
-// observer を作り直しながら進め、途中で失敗した場合は Dart 側イベントへ
-// エラーを返す。
+/// SDP ネゴシエーションの非同期コールバック連鎖を管理する。
+///
+/// `SetRemoteDescription -> CreateAnswer -> SetLocalDescription` の順に
+/// observer を作り直しながら進め、途中で失敗した場合は Dart 側イベントへ
+/// エラーを返す。
+///
+/// [cancel] された場合、以降のコールバックは早期 return してイベント送出や
+/// 状態変更を行わない。cancel 時を含むリソースの解放責務は次のとおり。
+///
+/// - native へ移譲した `SessionDescriptionInterface_unique` (`desc`) は
+///   移譲先が解放する。移譲しなかった `desc` は生成または受け取った側が
+///   `sessionDescriptionUniqueDelete` で解放する。
+/// - `RTCError_unique` (`error`) は受け取ったコールバックが所有権を持つが、
+///   cancel による早期 return 時は解放していない (解放漏れとなる)。
 class SdpNegotiationCallbacks {
   final LibWebrtcC _lib;
   final WebrtcConstants _consts;
@@ -143,10 +152,12 @@ class SdpNegotiationCallbacks {
     }
   }
 
-  // `SetRemoteDescription` 完了後の分岐を処理する。
-  //
-  // 失敗時は即座に error を通知し、成功時は必要ならローカルトラック追加と
-  // simulcast parameters 適用を行ってから `CreateAnswer` へ進む。
+  /// `SetRemoteDescription` 完了後の分岐を処理する。
+  ///
+  /// 失敗時は即座に error を通知し、成功時は必要ならローカルトラック追加と
+  /// simulcast parameters 適用を行ってから `CreateAnswer` へ進む。
+  ///
+  /// cancel 時は `error` を解放せずに return する。
   @visibleForTesting
   void onSetRemoteDescriptionComplete(Pointer<WebrtcRTCErrorUnique> error) {
     if (_cancelled) return;
@@ -243,7 +254,9 @@ class SdpNegotiationCallbacks {
     }
   }
 
-  // `CreateAnswer` 失敗時に error を通知する。
+  /// `CreateAnswer` 失敗時に error を通知する。
+  ///
+  /// cancel 時は `error` を解放せずに return する。
   @visibleForTesting
   void onCreateAnswerFailure(Pointer<WebrtcRTCErrorUnique> error) {
     if (_cancelled) return;
@@ -251,7 +264,9 @@ class SdpNegotiationCallbacks {
     emitState('error', 'create_answer_failed', errMsg ?? '');
   }
 
-  // `CreateAnswer` 成功時に SDP 文字列を退避し、`SetLocalDescription` を開始する。
+  /// `CreateAnswer` 成功時に SDP 文字列を退避し、`SetLocalDescription` を開始する。
+  ///
+  /// cancel 時は `desc` を `sessionDescriptionUniqueDelete` で解放して return する。
   @visibleForTesting
   void onCreateAnswerSuccess(
     Pointer<WebrtcSessionDescriptionInterfaceUnique> desc,
@@ -337,10 +352,12 @@ class SdpNegotiationCallbacks {
     }
   }
 
-  // `SetLocalDescription` 完了後に answer SDP を Dart 側へ通知する。
-  //
-  // `_pendingAnswerSdp` は `CreateAnswer` 成功時にだけ入るため、
-  // null でないときだけシグナリングメッセージを emit する。
+  /// `SetLocalDescription` 完了後に answer SDP を Dart 側へ通知する。
+  ///
+  /// `_pendingAnswerSdp` は `CreateAnswer` 成功時にだけ入るため、
+  /// null でないときだけシグナリングメッセージを emit する。
+  ///
+  /// cancel 時は `error` を解放せずに return する。
   @visibleForTesting
   void onSetLocalDescriptionComplete(Pointer<WebrtcRTCErrorUnique> error) {
     if (_cancelled) return;

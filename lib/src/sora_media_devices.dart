@@ -117,8 +117,8 @@ abstract final class MediaDevices {
 
   /// ローカルの LocalMediaStream を生成する。
   ///
-  // W3C Media Capture and Streams の `MediaDevices.getUserMedia()` と
-  // 名前をそろえるため、`get` をあえて残している。
+  /// W3C Media Capture and Streams の `MediaDevices.getUserMedia()` と
+  /// 名前をそろえるため、`get` をあえて残している。
   static Future<LocalMediaStream> getUserMedia(
     GetUserMediaOptions options,
   ) async {

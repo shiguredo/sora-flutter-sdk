@@ -12,8 +12,8 @@ abstract class MediaStream {
 
   /// ストリームに含まれる全トラックを返す。
   ///
-  // W3C Media Capture and Streams の `MediaStream.getTracks()` と
-  // 名前をそろえるため、`get` をあえて残している。
+  /// W3C Media Capture and Streams の `MediaStream.getTracks()` と
+  /// 名前をそろえるため、`get` をあえて残している。
   List<MediaStreamTrack> getTracks();
 }
 

@@ -48,8 +48,8 @@ class LocalMediaStream implements MediaStream {
 
   /// 現在の全 track を audio -> video の順で返す。
   ///
-  // W3C Media Capture and Streams の `MediaStream.getTracks()` と
-  // 名前をそろえるため、`get` をあえて残している。
+  /// W3C Media Capture and Streams の `MediaStream.getTracks()` と
+  /// 名前をそろえるため、`get` をあえて残している。
   @override
   List<LocalMediaStreamTrack> getTracks() {
     ensureNotDisposed();
@@ -58,8 +58,8 @@ class LocalMediaStream implements MediaStream {
 
   /// 現在の audio track 一覧を snapshot として返す。
   ///
-  // W3C Media Capture and Streams の `MediaStream.getAudioTracks()` と
-  // 名前をそろえるため、`get` をあえて残している。
+  /// W3C Media Capture and Streams の `MediaStream.getAudioTracks()` と
+  /// 名前をそろえるため、`get` をあえて残している。
   List<LocalAudioTrack> getAudioTracks() {
     ensureNotDisposed();
     final lib = WebrtcClient.sharedLib;
@@ -90,8 +90,8 @@ class LocalMediaStream implements MediaStream {
 
   /// 現在の video track 一覧を snapshot として返す。
   ///
-  // W3C Media Capture and Streams の `MediaStream.getVideoTracks()` と
-  // 名前をそろえるため、`get` をあえて残している。
+  /// W3C Media Capture and Streams の `MediaStream.getVideoTracks()` と
+  /// 名前をそろえるため、`get` をあえて残している。
   List<LocalVideoTrack> getVideoTracks() {
     ensureNotDisposed();
     final lib = WebrtcClient.sharedLib;

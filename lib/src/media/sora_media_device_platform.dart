@@ -33,14 +33,27 @@ Future<List<VideoInputFormat>> getVideoInputFormats(String deviceId) async {
   if (result == null) {
     return <VideoInputFormat>[];
   }
-  return result.map((Object? item) {
-    final map = Map<String, Object?>.from(item! as Map);
-    return VideoInputFormat(
-      width: map['width']! as int,
-      height: map['height']! as int,
-      maxFrameRate: (map['maxFrameRate']! as num).toDouble(),
-    );
-  }).toList();
+  return result
+      .map(
+        (Object? item) => videoInputFormatFromPlatformMap(
+          Map<String, Object?>.from(item! as Map),
+        ),
+      )
+      .toList();
+}
+
+/// プラットフォーム実装が返す映像入力フォーマットの map を
+/// [VideoInputFormat] に変換します。
+///
+/// MethodChannel 経路の境界で使います。`maxFrameRate` はプラットフォームが
+/// 非整数 (29.97 等) を返し得るため、`round()` で丸めて `int` にします。
+@internal
+VideoInputFormat videoInputFormatFromPlatformMap(Map<String, Object?> map) {
+  return VideoInputFormat(
+    width: map['width']! as int,
+    height: map['height']! as int,
+    maxFrameRate: (map['maxFrameRate']! as num).round(),
+  );
 }
 
 /// 音声入力デバイス一覧をプラットフォーム実装から取得します。

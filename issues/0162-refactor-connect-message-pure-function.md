@@ -3,7 +3,7 @@
 - Created: 2026-09-10
 - Completed: {YYYY-MM-DD}
 - Branch: feature/refactor-connect-message-pure-function
-- Polished: {YYYY-MM-DD}
+- Polished: 2026-09-10
 
 ## 目的
 
@@ -21,7 +21,8 @@ connect メッセージの構築ロジックを FFI 非依存でテストでき�
 - `lib/src/sora_connect_message.dart` に connect メッセージ全体を構築する純関数を追加する。環境名（`macos` / `ios` 等）は引数で受け取り、`Platform` に依存させない。
 - `_buildConnectMessage` はその純関数へ委譲する。通常接続と redirect が同じ関数を使い続けるようにする。
 - 対応するテストを `test/sora_connect_message_test.dart` へ追加し、FFI 非依存にする。
-- `SoraConnection.buildConnectMessageForTest` と `test/sora_connection_test.dart` の FFI 依存 connect メッセージ group は、純関数テストへ置き換えたうえで削除する。
+- `SoraConnection.buildConnectMessageForTest` と `test/sora_connection_test.dart` の FFI 依存 connect メッセージ group は、純関数テストへ置き換えたうえで削除する。削除する group が検証している `audioStreamingLanguageCode` の 3 ケース（指定時の設定、`audio: false` 時のキー除外、未指定時のキー除外）は純関数テストへ移行する。
+- `_buildConnectMessage` が使う `_optionalAudioConnectValue` / `_optionalVideoConnectValue` は `buildOptionalAudioConnectValue` / `buildOptionalVideoConnectValue` へ委譲するだけのラッパーであり、`0127-refactor-inline-single-call-helpers` が削除対象としている。純関数化に伴い未参照になるため本 issue で削除し、`0127` が先にマージされた場合はそちらの結果に合わせる。
 - connect メッセージの出力内容は変更しない。既存のキー・値を維持する。
 - ソースコード本体・コメント・テスト名に issue 番号を持ち込まない。
 
@@ -32,7 +33,14 @@ connect メッセージの構築ロジックを FFI 非依存でテストでき�
 - [ ] `test/sora_connect_message_test.dart` に FFI 非依存の connect メッセージ検証テストが追加されている。
 - [ ] `SoraConnection.buildConnectMessageForTest` が削除されている。
 - [ ] `test/sora_connection_test.dart` の FFI 依存 connect メッセージ group が削除されている。
+- [ ] 削除する FFI 依存 group の `audioStreamingLanguageCode` 3 ケース（指定時の設定、`audio: false` 時のキー除外、未指定時のキー除外）が純関数テストへ移行されている。
+- [ ] 新規純関数テストで、代表的な `SoraConnectionConfig` に対する connect メッセージの全キーを期待 Map と完全一致でアサートしている（`sora_client` / `libwebrtc` の期待値は `SoraSDKVersionGen` を参照して組み立てる）。
+- [ ] `_optionalAudioConnectValue` / `_optionalVideoConnectValue` が残っていない。
 - [ ] `SORA_FFI_TEST_LIBRARY_PATH` を指定しない `flutter test` で新しいテストが実行され成功する。
-- [ ] connect メッセージの出力内容が変更前と一致する。
 - [ ] モックやスタブを使用していない。
 - [ ] `flutter analyze` と関連するテストが成功する。
+
+## 関連
+
+- `issues/0127-refactor-inline-single-call-helpers.md`（`_optionalAudioConnectValue` / `_optionalVideoConnectValue` の削除対象。先にマージされた側で整理する）
+- `issues/0164-change-audio-streaming-language-code-empty.md`（`_buildConnectMessage` の `audio_streaming_language_code` 分岐を編集するため、先にマージされた場合は純関数側で扱う）

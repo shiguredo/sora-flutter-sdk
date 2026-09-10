@@ -1,7 +1,7 @@
 # README に `archive` / `hooks` のビルド用依存の説明を追加する
 
 - Created: 2026-08-27
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-10
 - Branch: feature/doc-add-readme-build-dependencies
 - Polished: 2026-09-07
 - Milestone: 2026.1.0
@@ -36,3 +36,11 @@
 
 - [ ] README の「Dart パッケージ(ビルド・スクリプト用)」節に `archive` と `hooks` の項目が追加されている。
 - [ ] 当該節がビルド用の 4 件 (`archive` / `crypto` / `hooks` / `path`) の名前と用途を過不足なく記載している (バージョン番号の転記は行わない)。
+
+## 解決方法
+
+- `README.md` の「### Dart パッケージ(ビルド・スクリプト用)」節に `archive` と `hooks` の項目を追加した。
+- `archive` は「アーカイブ展開パッケージ。依存取得スクリプト (`scripts/fetch_native_deps.dart`) でネイティブ依存の `.tar.gz` / `.zip` 展開に利用する」と記載した。
+- `hooks` は「Dart Team 提供の、Dart build hooks の実行基盤パッケージ。`hook/build.dart` でバージョン生成スクリプト等を実行するために利用する」と記載した。
+- `archive` の pub.dev publisher は loki3d.com のため「Dart Team 提供の、」は付けず、dart.dev 提供の `hooks` には付けた。
+- 当該節は `pubspec.yaml` のビルド用 dependencies 4 件 (`archive` / `crypto` / `hooks` / `path`) と名前・用途が一致する。

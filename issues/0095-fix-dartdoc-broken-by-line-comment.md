@@ -1,7 +1,7 @@
 # `///` に続く `//` で dartdoc が公開ドキュメントから落ちる 7 箇所を修正する
 
 - Created: 2026-08-27
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-10
 - Branch: feature/fix-dartdoc-broken-by-line-comment
 - Polished: 2026-09-07
 - Milestone: 2026.1.0
@@ -42,3 +42,10 @@ W3C API 命名理由の「名前をそろえるため、`get` をあえて残し
 - [ ] 上記 7 箇所すべてで補足が `///` のみで構成されている。
 - [ ] `///` の直後行または空 `///` の次行に `//` が続く箇所が `lib/` 配下に残っていない。
 - [ ] `flutter analyze` が成功する。コメントのみの変更のため専用の関連テストはなし。
+
+## 解決方法
+
+- `lib/src/sora_media_stream_track_base.dart` / `sora_media_stream.dart` / `sora_media_devices.dart` / `sora_connection.dart` / `sora_remote_media_stream.dart` の 7 箇所で `//` の補足を `///` に統一した。
+- `sora_remote_media_stream.dart` の `getTracks()` には `MediaStream.getTracks()` と同文言の dartdoc を新規追加した。
+- 完了条件「`///` の直後行または空 `///` の次行に `//` が続く箇所が `lib/` 配下に残っていない」を満たすため、`lib/src/ffi/webrtc_client.dart` の `getStats()` に残っていた同パターン (0155 で追加された説明) も `///` に統一した。
+- `flutter analyze --fatal-infos lib test` 成功、`flutter test` 156 件成功 (FFI 依存は環境変数未指定で skip)。

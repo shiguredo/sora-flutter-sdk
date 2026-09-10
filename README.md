@@ -86,9 +86,17 @@ Google Dart Team 提供の、Dart 標準の WebSocket をラップしたパッ�
 
 ### Dart パッケージ(ビルド・スクリプト用)
 
+#### archive
+
+アーカイブ展開パッケージ。依存取得スクリプト (`scripts/fetch_native_deps.dart`) でネイティブ依存の `.tar.gz` / `.zip` 展開に利用する
+
 #### crypto
 
 Dart Team 提供の、暗号計算パッケージ。依存取得スクリプトで取得したネイティブ依存ライブラリのダイジェスト計算に利用する
+
+#### hooks
+
+Dart Team 提供の、Dart build hooks の実行基盤パッケージ。`hook/build.dart` でバージョン生成スクリプト等を実行するために利用する
 
 #### path
 

@@ -3,7 +3,7 @@
 - Created: 2026-08-03
 - Completed: {YYYY-MM-DD}
 - Branch: feature/add-audio-streaming-language-code
-- Polished: 2026-08-03
+- Polished: 2026-09-10
 
 ## 目的
 

@@ -3,7 +3,7 @@
 - Created: 2026-08-03
 - Completed: {YYYY-MM-DD}
 - Branch: feature/add-opus-parameters
-- Polished: 2026-08-03
+- Polished: 2026-09-10
 
 ## 目的
 
@@ -16,23 +16,23 @@ Sora Flutter SDK の接続設定から Opus の詳細パラメーターを指定
 ## 現状
 
 - `SoraConnectionConfig` には `audioCodecType` と `audioBitRate` しかなく、Opus 詳細パラメーターの指定経路がない
-- `lib/src/sora_connection_signaling.dart` の `_optionalAudioConnectValue` と `_audioConnectValueWhenExplicitlyOn` は `codec_type` と `bit_rate` だけを生成する
+- `lib/src/sora_connect_message.dart` の `buildOptionalAudioConnectValue` と `_audioConnectValueWhenExplicitlyOn` は `codec_type` と `bit_rate` だけを生成する。`lib/src/sora_connection_signaling.dart` の `_optionalAudioConnectValue` は `buildOptionalAudioConnectValue` へ委譲するだけである
 - `README.md` では `audioOpusParamsChannels`、`audioOpusParamsStereo`、`audioOpusParamsUseinbandfec` などを優先実装が可能な機能として記載している
 - 認証ウェブフックから値を払い出せない環境では、クライアントから Opus の動作を調整できない
 
 ## 設計方針
 
-- `SoraConnectionConfig` に次の型付きオプションを追加する
-  - `audioOpusParamsChannels` (int)
-  - `audioOpusParamsMaxplaybackrate` (int)
-  - `audioOpusParamsMaxaveragebitrate` (int)
-  - `audioOpusParamsMinptime` (int)
-  - `audioOpusParamsPtime` (int)
-  - `audioOpusParamsStereo` (bool)
-  - `audioOpusParamsSpropStereo` (bool)
-  - `audioOpusParamsUseinbandfec` (bool)
-  - `audioOpusParamsUsedtx` (bool)
-- 指定された項目だけを `audio.opus_params` に含める
+- `SoraConnectionConfig` に次の nullable な型付きオプションを追加する。未指定は null として扱い、`audio.opus_params` へ含めない
+  - `audioOpusParamsChannels` (int?)
+  - `audioOpusParamsMaxplaybackrate` (int?)
+  - `audioOpusParamsMaxaveragebitrate` (int?)
+  - `audioOpusParamsMinptime` (int?)
+  - `audioOpusParamsPtime` (int?)
+  - `audioOpusParamsStereo` (bool?)
+  - `audioOpusParamsSpropStereo` (bool?)
+  - `audioOpusParamsUseinbandfec` (bool?)
+  - `audioOpusParamsUsedtx` (bool?)
+- 指定された項目だけを `audio.opus_params` に含める。`audio.opus_params` の構築は `lib/src/sora_connect_message.dart` の `buildOptionalAudioConnectValue` と `_audioConnectValueWhenExplicitlyOn` に追加し、`test/sora_connect_message_test.dart` で検証する
 - 全項目が未指定の場合は `opus_params` を送信せず、既存の connect メッセージを維持する
 - `audio: false` の場合は従来どおり `audio: false` を優先し、`opus_params` は送信しない。範囲検証は 0057 の `audioBitRate` / `videoBitRate` と同様に、`audio: false` でも行う（無効時でも不正な値を検出することで、設定の意図しない誤指定を防ぐ）
 - `audio: true` 明示時も未指定時も、Opus パラメーターが指定されていれば `audio` オブジェクトを生成して `opus_params` を含める
@@ -42,9 +42,9 @@ Sora Flutter SDK の接続設定から Opus の詳細パラメーターを指定
   - `maxaveragebitrate`: 6000-510000 (bps)。SIGNALING_TYPE の型定義にのみ範囲が定義されている
   - `minptime`: 3-120 (ms)
   - `ptime`: WEBSOCKET_SIGNALING の opus_params 一覧に含まれず、SIGNALING_TYPE にも範囲の定義がないため、範囲検証しない
-- 検証ロジックは `lib/src/sora_validator.dart` にテスト可能な関数として追加し、connect メッセージの構築時に呼び出す。範囲外の値は `ArgumentError` を送出する
+- 検証ロジックは `lib/src/sora_validator.dart` にテスト可能な関数として追加し、`SoraConnectionConfig.toMap()` の実行時に呼び出す（0057 のビットレート検証と 0091 の「検証場所は `toMap()` に統一する」方針に合わせ、ネイティブへ渡す前に fail-fast する）。範囲外の値は既存の `_validateOptionalBitRate` と同じく `RangeError` を送出する
 - 不正な値を黙って無視せず、利用者が原因を特定できる例外にする
-- Sora の仕様では `role` が `sendrecv` または `sendonly` の場合のみ Opus の設定を指定できる。`recvonly` では Sora 側で無視されるため、SDK 側では制限せずそのまま送信する（既存の `audioCodecType` / `audioBitRate` と同じ扱い）
+- Sora の仕様では `role` が `sendrecv` または `sendonly` の場合のみ Opus の設定を指定できると記載されている。`recvonly` 時の挙動は一次資料に記載がないため、既存の `audioCodecType` / `audioBitRate` と同じく SDK 側では制限せずそのまま送信する（`recvonly` で Sora が受理するかは実機確認していない）
 - `SoraConnectionConfig.toMap` に各設定値を含める（ネイティブ側への設定伝達とテストで使用される）。キーは既存の `audioBitRate` 等と同じフラットキー（`audioOpusParamsChannels` 等）で追加する
 - 追加したオプションの DartDoc に実験的機能であることを明記する
 - 実験的機能であること、Sora 側の対応状況、利用には事前にサポートへの連絡が必要であること、`usedtx` 有効時に録画がおかしくなること、`role` が `sendrecv` / `sendonly` の場合のみ有効であることを `README.md` の「SoraConnectionConfig の設定」セクションの設定例コードに明記し、優先実装一覧から削除する
@@ -59,7 +59,7 @@ Sora Flutter SDK の接続設定から Opus の詳細パラメーターを指定
 - [ ] `audio: false` の場合は `audio: false` が維持される
 - [ ] `audio: false` でも範囲検証が有効である
 - [ ] 範囲が定義されている数値項目 (`channels` / `maxplaybackrate` / `maxaveragebitrate` / `minptime`) の境界値と範囲外を検証するテストが追加されている
-- [ ] 範囲外の `ptime` が例外にならず送信されるテストが追加されている
+- [ ] 範囲が定義されていない `ptime` に任意の値を指定しても例外にならず送信されるテストが追加されている
 - [ ] boolean 項目の `true` と `false` が欠落せず送信される
 - [ ] redirect 後の connect メッセージでも設定が維持される
 - [ ] `SoraConnectionConfig.toMap` の既存テストの期待値が更新されている

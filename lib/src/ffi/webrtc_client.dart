@@ -749,16 +749,17 @@ class WebrtcClient {
   ///
   /// 解放順序:
   /// 1. DataChannel の Observer 解除と解放
-  /// 2. リモートビデオトラックのシンク解除と参照解放
-  /// 3. 進行中の getStats の Dart 側追跡解除
+  /// 2. 進行中の getStats の Dart 側追跡解除
   ///    (native callback リソースは `_handleStatsDelivered` が自己解放)
-  /// 4. ローカルビデオトラックの解放
-  /// 5. PeerConnection の解放
-  /// 6. C コールバックブリッジの破棄
-  /// 7. NativeCallable の解放
+  /// 3. ローカルビデオトラックの解放
+  /// 4. PeerConnection の解放
+  /// 5. C コールバックブリッジの破棄
+  /// 6. NativeCallable の解放
   ///
-  /// リモートビデオトラックは PeerConnection の Release 前に解放する。
-  /// PeerConnection 破棄後だと VideoTrack のデストラクタが
+  /// リモートビデオトラックは呼び出し元が本メソッドの前に解放する
+  /// (例: `SoraConnection._teardownNativeSession` は
+  /// `RemoteTrackManager.detachAllRemoteVideoTracks` を先に実行する)。
+  /// PeerConnection の Release 後だと VideoTrack のデストラクタが
   /// 無効な VideoSource に対して UnregisterObserver を呼んでクラッシュする。
   ///
   /// 進行中の getStats は Dart 側追跡だけを外し、native 資源は孤立保持する
@@ -1853,8 +1854,8 @@ class WebrtcClient {
 
   // offer の encodings を RtpSender に適用する (simulcast 用)
   //
-  // JS SDK と同じく setRemoteDescription の前後で 2 回呼ぶ。
-  // active フラグは setRemoteDescription 後でないと反映されないため。
+  // active フラグは setRemoteDescription 後でないと反映されないため、
+  // setRemoteDescription 完了後に 1 回だけ呼ぶ。
   // 引数で encodings を受け取り、_pendingEncodings への上書き競合を避ける。
   void _applySimulcastEncodings(List<Map<String, Object?>>? encodings) {
     if (encodings == null || encodings.isEmpty) return;

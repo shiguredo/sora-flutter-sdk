@@ -400,7 +400,6 @@ sora-flutter-sdk/
 ├── android/            # Android プラグイン (Kotlin)
 ├── linux/              # Linux プラグイン (C++)
 ├── windows/            # Windows プラグイン (C++)
-├── docs/               # ドキュメント
 ├── e2e_test_app/       # E2E テストアプリ（recvonly / sendonly / sendrecv / 2 クライアント疎通）
 ├── devtools/           # 開発用サンプルアプリ
 └── scripts/            # ネイティブ依存取得スクリプト
@@ -435,28 +434,15 @@ flutter test integration_test/video_codec_e2e_test.dart -d macos
 
 ## ビルド
 
-### 前提条件
+Flutter 3.44.0 以上、Dart SDK 3.10.0 以上が必要です。iOS は Xcode (iOS 16.0 以上)、macOS は Xcode (macOS 15.0 以上) が必要です。
 
-- Flutter 3.44.0 以上
-- Dart SDK 3.10.0 以上
-- iOS: Xcode (iOS 16.0 以上)
-- macOS: Xcode (macOS 15.0 以上)
-- Android: Android Studio / Android NDK
-- Windows: Visual Studio 2022 (MSVC v143) / Build Tools for Visual Studio 2022
-- Linux: clang / cmake / ninja / GTK 3 / PulseAudio / libjpeg-turbo
+Android / Windows / Linux の動作環境とビルド手順は次のドキュメントを参照してください。
 
-ネイティブ依存 (libwebrtc) は iOS / macOS では Swift Package Manager、Android では Gradle の
-`fetchNativeDeps` task から自動取得されます。Android 向け取得対象のバージョン・配布元 URL・SHA-256 は
-[`scripts/native_deps.json`](scripts/native_deps.json) で管理しています。
+- [Android](https://sora-flutter-sdk.shiguredo.jp/android.html)
+- [Windows](https://sora-flutter-sdk.shiguredo.jp/windows.html)
+- [Linux](https://sora-flutter-sdk.shiguredo.jp/linux.html)
 
-Windows では CMake ビルド時に `scripts/fetch_native_deps.dart windows_x86_64` が自動実行され、libwebrtc-c / webrtc を `third_party/libwebrtc-c/` にダウンロード・展開します。
-
-Linux では cmake configure 時に `scripts/fetch_native_deps.dart linux_ubuntu_24_04_x86_64` が自動実行され、libwebrtc-c / webrtc を `third_party/libwebrtc-c/` にダウンロード・展開します。Ubuntu 24.04 向けのビルドに必要なシステムパッケージは以下の通りです。
-
-```bash
-sudo apt-get install -y clang cmake ninja-build pkg-config \
-  libgtk-3-dev liblzma-dev libpulse-dev libjpeg-dev
-```
+ネイティブ依存 (libwebrtc) は iOS / macOS では Swift Package Manager が、Android / Windows / Linux では各ビルド時に `scripts/fetch_native_deps.dart` が自動取得します。取得対象は [`scripts/native_deps.json`](scripts/native_deps.json) で管理しています。
 
 iOS / macOS 向けの `libwebrtc_c.xcframework.zip` の version は [`scripts/native_deps.json`](scripts/native_deps.json) の `libwebrtc_c.version`、URL / checksum は `libwebrtc_c.apple_xcframework` を正本として管理しています。
 
@@ -504,33 +490,13 @@ Sora 2025.1.0 以降のシグナリング仕様を対象に、`e2e_test_app` の
 
 ## 対応プラットフォーム
 
-| プラットフォーム | 状態 |
+| プラットフォーム | 対応バージョン |
 | --- | --- |
-| iOS | 対応 |
-| macOS | 対応 |
-| Android | 対応 |
-| Windows | 対応 (x86_64) |
-| Linux | 対応 (x86_64, Ubuntu 24.04) |
-
-### iOS の対応バージョン
-
-iOS 16.0 以上をサポートします。
-
-### macOS の対応バージョン
-
-macOS 15 以上をサポートします。
-
-### Android の対応バージョン
-
-Android 10 (API 29) 以上をサポートします。
-
-### Windows の対応バージョン
-
-Windows 10 20H2 以上 (x86_64) をサポートします。
-
-### Linux の対応バージョン
-
-Ubuntu 24.04 (x86_64) をサポートします。
+| iOS | 16.0 以上 |
+| macOS | 15 以上 |
+| Android | Android 10 (API 29) 以上 |
+| Windows | Windows 10 20H2 以上 (x86_64) |
+| Linux | Ubuntu 24.04 (x86_64) |
 
 ## 優先実装
 

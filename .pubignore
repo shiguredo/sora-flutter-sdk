@@ -10,9 +10,6 @@ issues/
 # LLM 用スキル
 skills/
 
-# 開発者向けドキュメント
-docs/
-
 # 開発用ツール設定
 prek.toml
 

@@ -37,6 +37,10 @@ camera パッケージはプレビュー・撮影・`CameraImage` ストリー�
 - [ ] SDK として camera パッケージ連携をサポートするか、対応プラットフォームを含む方針が決まっている
 - [ ] 方針に応じた follow-up issue が起票されている
 
+## pending にする理由
+
+devtools の検証用機能で camera パッケージの映像を external video track として送信できるところまでは実装されているが、実機での性能計測が未実施で、pure Dart 変換のままで実用に耐えるかが確認できていない。加えて、SDK として camera パッケージ連携をサポートするか、サポートする場合の変換方式 (pure Dart / libyuv 等のネイティブ変換) と対応プラットフォームの設計判断が必要になる。計測と方針決定に着手する時点で reopened にする。
+
 ## 関連
 
 - `issues/closed/0088-add-external-video-frame-validation.md` (external video frame の validation)

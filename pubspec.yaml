@@ -1,6 +1,6 @@
 name: sora_sdk
 description: Flutter plugin for WebRTC SFU Sora powered by libwebrtc-c, supporting iOS, macOS, Android, Windows, and Linux.
-version: 2026.1.0-canary.0
+version: 2026.1.0-canary.1
 repository: https://github.com/shiguredo/sora-flutter-sdk
 homepage: https://sora-flutter-sdk.shiguredo.jp/
 topics:

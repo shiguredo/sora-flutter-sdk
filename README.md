@@ -23,7 +23,7 @@ iOS / macOS / Android / Windows / Linux に対応した WebRTC SFU Sora 向け�
 
 WebRTC ライブラリには [libwebrtc](https://webrtc.googlesource.com/src/) を採用しています。
 WebRTC のコアロジック (PeerConnection、SDP 処理、ICE、DataChannel) は `dart:ffi` 経由で
-libwebrtc を直接呼び出して Dart 側に実装しており、プラットフォーム側 (iOS / macOS / Android / Windows) は
+libwebrtc を直接呼び出して Dart 側に実装しており、プラットフォーム側 (iOS / macOS / Android / Windows / Linux) は
 カメラキャプチャと映像レンダリングのみを担当します。
 
 ## 特徴

@@ -15,7 +15,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   // Initialize COM, so that it is available for use in the library and/or
   // plugins.
-  ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  // libwebrtc の Windows CoreAudio ADM は呼び出しスレッドに MTA を要求する。
+  // Dart の FFI 呼び出しはこのスレッドで実行されるため、実音声デバイスを
+  // 使うテストでは Flutter テンプレート既定の STA ではなく MTA で初期化する。
+  ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 
   flutter::DartProject project(L"data");
 

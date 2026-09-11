@@ -640,6 +640,48 @@ class WebrtcClient {
     }
   }
 
+  // Windows で実 ADM を使う際の PeerConnection 作成直後の補正を行う。
+  //
+  // libwebrtc は PeerConnection 作成時に MediaEngine を初期化し、
+  // `WebRtcVoiceEngine::Init()` から `adm_helpers::Init()` と初期
+  // AudioOptions の適用を行う。Windows の CoreAudio ADM ではこれにより
+  // 次の 2 点が発生する。
+  //
+  // 1. Windows 内蔵 AEC (CWMAudioAEC DMO) が有効化され、APM のソフトウェア
+  //    エコーキャンセラが無効化される。内蔵 AEC は再生開始済みであることを
+  //    録音開始の前提とするため、受信ストリームが無い sendonly や、再生開始
+  //    前に送信を開始した接続では録音が開始されず音声が送信されない。
+  //    内蔵 AEC を無効化して録音と再生の依存を解消する。
+  // 2. 再生デバイスに既定通信デバイス (eCommunications) が選ばれる。Windows
+  //    の既定通信デバイスが 2ch 非対応 (4ch のみ等) の場合、ADM の
+  //    `InitPlayout()` が対応フォーマットを見つけられず失敗し、受信音声を
+  //    再生できない。メディア向けの既定デバイス (eConsole) へ切り替える。
+  //
+  // 補正に失敗しても接続処理は継続する。push audio device など実 ADM を
+  // 使わない場合や ADM 未生成の場合は何もしない。
+  static void _configureWindowsAudioDeviceAfterPeerConnection() {
+    if (!Platform.isWindows || !_useAudioDevice) {
+      return;
+    }
+    final admRef = _sharedAdmRef;
+    if (admRef == null) {
+      // ADM 生成に失敗した場合は Sora の接続処理側で検知される。
+      return;
+    }
+    final adm = sharedLib.audioDeviceModuleRefcountedGet(admRef);
+
+    // 内蔵 AEC を無効化する。録音初期化済みなどで失敗しても、その場合は
+    // 既に録音が開始されているか内蔵 AEC が使われていないため無視する。
+    sharedLib.audioDeviceModuleEnableBuiltInAEC(adm, 0);
+
+    // 再生デバイスをメディア向け既定デバイスへ切り替える。既に再生が初期化
+    // 済みなどで失敗しても、その場合は再生デバイスが確定済みのため無視する。
+    sharedLib.audioDeviceModuleSetPlayoutDeviceWithWindowsDeviceType(
+      adm,
+      sharedConsts.kWindowsDefaultDevice,
+    );
+  }
+
   // `_ensureSharedFactory` が途中で失敗した場合に、作成済みの thread / deps /
   // ADM / simulcast factory を解放して static field をリセットする。
   //
@@ -1751,6 +1793,12 @@ class WebrtcClient {
       _cleanupNativeCallablesFromRegistries(
         List<NativeCallable<dynamic>>.from(_nativeCallables),
       );
+    }
+
+    // Windows では PeerConnection 作成時の MediaEngine 初期化が ADM の
+    // 音声デバイス設定を既定値へ書き換えるため、作成直後に補正する。
+    if (errMsg == null && _pcRef != null) {
+      _configureWindowsAudioDeviceAfterPeerConnection();
     }
 
     calloc.free(pcRefPtr);

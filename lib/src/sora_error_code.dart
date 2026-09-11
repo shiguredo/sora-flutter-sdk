@@ -86,7 +86,10 @@ abstract final class SoraErrorCode {
   static const String unexpectedNativeEvent = 'unexpected_native_event';
 }
 
-/// Sora に送信する `disconnect` メッセージの理由コード
+/// 切断理由コード
+///
+/// Sora へ送信する `disconnect` メッセージの理由コードと、SDK 内部で切断を
+/// 分類するために native から受け取る受信側の理由タグの両方を含む。
 abstract final class SoraDisconnectReason {
   /// 正常切断
   static const String noError = 'NO-ERROR';
@@ -96,4 +99,19 @@ abstract final class SoraDisconnectReason {
 
   /// WebSocket の onerror による切断
   static const String websocketOnError = 'WEBSOCKET-ONERROR';
+
+  /// サーバー主導の切断
+  ///
+  /// Sora から `disconnect` メッセージを受信したときに native から通知される。
+  static const String serverDisconnect = 'server_disconnect';
+
+  /// PeerConnection 由来の切断 (RTCPeerConnectionState が failed)
+  ///
+  /// native の PeerConnection observer が `failed` を通知したときに使われる。
+  static const String peerConnectionFailed = 'peer_connection_failed';
+
+  /// PeerConnection 由来の切断 (RTCPeerConnectionState が closed)
+  ///
+  /// native の PeerConnection observer が `closed` を通知したときに使われる。
+  static const String peerConnectionClosed = 'peer_connection_closed';
 }

@@ -1017,7 +1017,7 @@ class WebrtcClient {
     if (_disposed) return;
     _emitState(
       'disconnected',
-      'server_disconnect',
+      SoraDisconnectReason.serverDisconnect,
       null,
       sessionGeneration: _sessionGeneration,
     );
@@ -1996,14 +1996,14 @@ class WebrtcClient {
       // closed と同じ disconnected 型で通知し、reason で区別する。
       _emitState(
         'disconnected',
-        'peer_connection_failed',
+        SoraDisconnectReason.peerConnectionFailed,
         null,
         sessionGeneration: sessionGeneration,
       );
     } else if (newState == _consts.pcStateClosed) {
       _emitState(
         'disconnected',
-        'peer_connection_closed',
+        SoraDisconnectReason.peerConnectionClosed,
         null,
         sessionGeneration: sessionGeneration,
       );

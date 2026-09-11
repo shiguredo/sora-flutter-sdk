@@ -473,7 +473,34 @@ dart run scripts/update_apple_native_binary.dart
 
 ## 対応 WebRTC SFU Sora
 
-- Sora 2025.1.0 以降
+Sora 2025.1.0 以降に対応しています。
+
+### 検証状況
+
+Sora 2025.1.0 以降のシグナリング仕様を対象に、`e2e_test_app` の `integration_test` で
+検証しています。CI (`.github/workflows/e2e-test.yml`) は macOS / Windows / Ubuntu 24.04
+(x86_64) の 3 環境で、`TEST_SIGNALING_URLS` が指す検証用 Sora に接続して実行します。
+検証項目と実行条件は [e2e_test_app/README.md](e2e_test_app/README.md) を参照してください。
+
+### 対応範囲
+
+| 機能 | 状態 |
+| --- | --- |
+| シグナリング (WebSocket / DataChannel) | 対応 |
+| リアルタイムメッセージング / RPC | 対応 |
+| シグナリング通知 / リダイレクト / 複数シグナリング URL (フェイルオーバー) | 対応 |
+| メタデータ認証 / シグナリング通知メタデータ | 対応 |
+| マルチストリーム / サイマルキャスト / スポットライト | 対応 |
+| 転送フィルター | 対応 |
+| 接続・切断・シグナリングの各種タイムアウト | 対応 |
+| コーデック (VP8 / VP9 / AV1 / H.264 / H.265 / Opus) | 対応 (詳細は「対応コーデック」節を参照) |
+| Flutter Texture によるローカル / リモート映像レンダリング | 対応 |
+| Opus 詳細パラメーター (`audioOpusParams*`) | 実験的機能。Sora の対応状況を確認し、利用には事前にサポートへの連絡が必要 |
+
+### 未対応
+
+- Sora 2025.1.0 より前のバージョン
+- サイマルキャストマルチコーデック (Sora の実験的機能)
 
 ## 対応プラットフォーム
 

@@ -2213,18 +2213,6 @@ class SoraConnection {
       _emitLogEvent('ONCONNECTIONSTATECHANGE CONNECTIONSTATE', stateName);
       return;
     }
-    // Timeout イベント
-    if (type == 'timeout') {
-      _emitLogEvent('DISCONNECT', 'Signaling connection timeout');
-      _emitTimelineEvent(
-        const SoraTimelineEvent(
-          type: 'signaling-connection-timeout',
-          logType: SoraTimelineEventLogType.peerconnection,
-        ),
-      );
-      _emitTimeoutEvent();
-      return;
-    }
     // リモートトラック追加イベント
     // remote track 系イベントは必須フィールド欠落や Sora フォーマット外の
     // trackId が来ると _require* が StateError を投げるため、silent drop せず
@@ -2287,19 +2275,6 @@ class SoraConnection {
         );
         return;
       }
-    }
-    // 全リモート映像トラック削除イベント
-    // 切断時の発火を想定
-    if (type == 'remote_video_all_removed') {
-      unawaited(
-        _remoteTrackManager.detachAllRemoteVideoTracks().catchError((
-          Object e,
-          StackTrace st,
-        ) {
-          _emitDebugMessage('remote_track detach all failed: $e');
-        }),
-      );
-      return;
     }
     // シグナリングメッセージ受信イベント
     // native SdpNegotiationCallbacks.emitSignalingMessage から転送された

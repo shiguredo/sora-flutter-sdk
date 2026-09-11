@@ -855,7 +855,7 @@ class WebrtcClient {
     if (sdp == null) {
       _emitState(
         'error',
-        'offer_invalid',
+        SoraErrorCode.offerInvalid,
         'Offer SDP is null.',
         sessionGeneration: _sessionGeneration,
       );
@@ -887,7 +887,7 @@ class WebrtcClient {
     if (_pcRef == null) {
       _emitState(
         'error',
-        'offer_invalid',
+        SoraErrorCode.offerInvalid,
         'PeerConnection is not available.',
         sessionGeneration: _sessionGeneration,
       );
@@ -920,7 +920,7 @@ class WebrtcClient {
     if (sdp == null) {
       _emitState(
         'error',
-        'reoffer_invalid',
+        SoraErrorCode.reofferInvalid,
         'Re-offer SDP is null.',
         sessionGeneration: _sessionGeneration,
       );
@@ -929,7 +929,7 @@ class WebrtcClient {
     if (_pcRef == null) {
       _emitState(
         'error',
-        'reoffer_invalid',
+        SoraErrorCode.reofferInvalid,
         'PeerConnection is not available.',
         sessionGeneration: _sessionGeneration,
       );
@@ -1662,7 +1662,7 @@ class WebrtcClient {
     if (errMsg != null) {
       _emitState(
         'error',
-        'create_peer_connection_failed',
+        SoraErrorCode.createPeerConnectionFailed,
         errMsg,
         sessionGeneration: _sessionGeneration,
       );
@@ -1671,7 +1671,7 @@ class WebrtcClient {
       if (errMsg == null) {
         _emitState(
           'error',
-          'create_peer_connection_failed',
+          SoraErrorCode.createPeerConnectionFailed,
           'PeerConnection creation returned null.',
           sessionGeneration: _sessionGeneration,
         );
@@ -1741,7 +1741,7 @@ class WebrtcClient {
     if (errMsg != null) {
       _emitState(
         'error',
-        'add_audio_track_failed',
+        SoraErrorCode.addAudioTrackFailed,
         'Failed to add audio track: $errMsg',
         sessionGeneration: _sessionGeneration,
       );
@@ -1757,7 +1757,7 @@ class WebrtcClient {
     } else if (errMsg == null) {
       _emitState(
         'error',
-        'add_audio_track_failed',
+        SoraErrorCode.addAudioTrackFailed,
         'Failed to get audio sender after pcAddTrack.',
         sessionGeneration: _sessionGeneration,
       );
@@ -1800,7 +1800,7 @@ class WebrtcClient {
     if (errMsg != null) {
       _emitState(
         'error',
-        'add_video_track_failed',
+        SoraErrorCode.addVideoTrackFailed,
         'Failed to add video track: $errMsg',
         sessionGeneration: _sessionGeneration,
       );
@@ -1817,7 +1817,7 @@ class WebrtcClient {
     } else if (errMsg == null) {
       _emitState(
         'error',
-        'add_video_track_failed',
+        SoraErrorCode.addVideoTrackFailed,
         'Failed to get video sender after pcAddTrack.',
         sessionGeneration: _sessionGeneration,
       );

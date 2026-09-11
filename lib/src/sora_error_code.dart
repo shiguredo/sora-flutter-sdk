@@ -30,6 +30,54 @@ abstract final class SoraErrorCode {
   /// カメラオープン失敗
   static const String cameraOpenError = 'camera_open_error';
 
+  /// offer が不正
+  ///
+  /// Sora から受け取った offer の SDP が null、または PeerConnection を
+  /// 用意できないときに emit される。
+  static const String offerInvalid = 'offer_invalid';
+
+  /// re-offer が不正
+  ///
+  /// Sora から受け取った re-offer の SDP が null、または再利用する
+  /// PeerConnection が無いときに emit される。
+  static const String reofferInvalid = 'reoffer_invalid';
+
+  /// リモート SDP の設定に失敗
+  ///
+  /// `setRemoteDescription` が失敗したときに emit される。
+  static const String setRemoteDescriptionFailed =
+      'set_remote_description_failed';
+
+  /// answer の生成に失敗
+  ///
+  /// `createAnswer` が失敗したときに emit される。
+  static const String createAnswerFailed = 'create_answer_failed';
+
+  /// ローカル SDP の設定に失敗
+  ///
+  /// answer を `setLocalDescription` で設定する処理が失敗したときに
+  /// emit される。
+  static const String setLocalDescriptionFailed =
+      'set_local_description_failed';
+
+  /// PeerConnection の生成に失敗
+  ///
+  /// `createPeerConnection` が失敗、または null を返したときに emit される。
+  static const String createPeerConnectionFailed =
+      'create_peer_connection_failed';
+
+  /// audio トラックの追加に失敗
+  ///
+  /// `pcAddTrack` によるローカル audio トラックの追加、または追加後の
+  /// sender 取得に失敗したときに emit される。
+  static const String addAudioTrackFailed = 'add_audio_track_failed';
+
+  /// video トラックの追加に失敗
+  ///
+  /// `pcAddTrack` によるローカル video トラックの追加、または追加後の
+  /// sender 取得に失敗したときに emit される。
+  static const String addVideoTrackFailed = 'add_video_track_failed';
+
   /// native から想定外のイベントが届いた
   ///
   /// remote track 系イベントの必須フィールド欠落や Sora フォーマット外の

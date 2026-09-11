@@ -9,6 +9,7 @@ import 'dart:ffi';
 import 'package:ffi/ffi.dart';
 import 'package:meta/meta.dart';
 
+import '../sora_error_code.dart';
 import 'bindings.dart';
 import 'memory.dart';
 
@@ -163,7 +164,7 @@ class SdpNegotiationCallbacks {
     if (_cancelled) return;
     final errMsg = rtcErrorMessage(_lib, error);
     if (errMsg != null) {
-      emitState('error', 'set_remote_description_failed', errMsg);
+      emitState('error', SoraErrorCode.setRemoteDescriptionFailed, errMsg);
       return;
     }
     emitDebug('native: set_remote_description_succeeded');
@@ -261,7 +262,7 @@ class SdpNegotiationCallbacks {
   void onCreateAnswerFailure(Pointer<WebrtcRTCErrorUnique> error) {
     if (_cancelled) return;
     final errMsg = rtcErrorMessage(_lib, error);
-    emitState('error', 'create_answer_failed', errMsg ?? '');
+    emitState('error', SoraErrorCode.createAnswerFailed, errMsg ?? '');
   }
 
   /// `CreateAnswer` 成功時に SDP 文字列を退避し、`SetLocalDescription` を開始する。
@@ -363,7 +364,7 @@ class SdpNegotiationCallbacks {
     if (_cancelled) return;
     final errMsg = rtcErrorMessage(_lib, error);
     if (errMsg != null) {
-      emitState('error', 'set_local_description_failed', errMsg);
+      emitState('error', SoraErrorCode.setLocalDescriptionFailed, errMsg);
       return;
     }
     if (_pendingAnswerSdp != null) {

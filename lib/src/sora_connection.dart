@@ -223,15 +223,6 @@ class SoraConnection {
   /// 初期画面キャプチャの開始完了まで connected 通知を保留するかどうか。
   bool _delayConnectedStateEvent = false;
 
-  /// signaling からの disconnect メッセージ受信による切断
-  static const _disconnectReasonServerDisconnect = 'server_disconnect';
-
-  /// native PeerConnection observer 由来の切断 (ICE failure 等)
-  static const _disconnectReasonPeerConnectionClosed = 'peer_connection_closed';
-
-  /// native PeerConnection observer 由来の切断 (RTCPeerConnectionState failed)
-  static const _disconnectReasonPeerConnectionFailed = 'peer_connection_failed';
-
   /// `_teardownNativeSession()` 経由で native disconnect を開始したかどうか
   /// `_handleWebrtcEvent` からの重複 disconnected を抑制するために使う
   bool _disconnecting = false;
@@ -2046,7 +2037,7 @@ class SoraConnection {
         // これにより signaling switch 後に PeerConnection が切断されても、
         // replaceTrack / removeTrack 系 API が適切に拒否される。
         _peerConnectionConnected = false;
-        if (code == _disconnectReasonPeerConnectionFailed) {
+        if (code == SoraDisconnectReason.peerConnectionFailed) {
           // RTCPeerConnectionState failed は disconnect メッセージを送信
           // しない異常終了として共通の異常終了処理へ委譲する。
           // teardown 例外は debug message のみに限定して受け止める。
@@ -2072,8 +2063,8 @@ class SoraConnection {
           // cleanup を実行したうえで state をリセットする。
           // disconnect() 経由 (closed) の場合は _disconnectBody() 側で
           // cleanup 済みのためここでは実行しない。
-          if (code == _disconnectReasonServerDisconnect ||
-              code == _disconnectReasonPeerConnectionClosed) {
+          if (code == SoraDisconnectReason.serverDisconnect ||
+              code == SoraDisconnectReason.peerConnectionClosed) {
             final existingDisconnect = _ongoingDisconnect;
             if (existingDisconnect != null) {
               await existingDisconnect;

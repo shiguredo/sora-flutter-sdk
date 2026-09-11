@@ -1,7 +1,7 @@
 # `SoraDisconnectReason` に PeerConnection 由来コードを列挙する
 
 - Created: 2026-08-27
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-11
 - Branch: feature/add-sora-disconnect-reason-pc
 - Polished: 2026-08-27
 - Milestone: 2026.1.0
@@ -40,3 +40,9 @@
 - [ ] `SoraConnection` の private 定数が廃止され、enum 経由で比較している。
 - [ ] 追加した値の dartdoc に発火状況が明記されている。
 - [ ] `flutter analyze` と関連テストが成功する。
+
+## 解決方法
+
+- `lib/src/sora_error_code.dart` の `SoraDisconnectReason` に `serverDisconnect` / `peerConnectionFailed` / `peerConnectionClosed` を発火状況の dartdoc 付きで追加し、クラスドキュメントを「切断理由コード全般」に拡張した。
+- `lib/src/sora_connection.dart` の private 定数 3 つを削除し、`SoraDisconnectReason` の値と直接比較するようにした。
+- `lib/src/ffi/webrtc_client.dart` の emit 側リテラル (`handleDisconnect` / `_onConnectionChange`) も `SoraDisconnectReason` 経由に統一した。

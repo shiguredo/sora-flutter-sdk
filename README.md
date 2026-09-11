@@ -473,11 +473,11 @@ dart run scripts/update_apple_native_binary.dart
 
 ## 対応 WebRTC SFU Sora
 
-Sora 2025.1.0 以降に対応しています。
+Sora 2025.2.0 以降に対応しています。
 
 ### 検証状況
 
-Sora 2025.1.0 以降のシグナリング仕様を対象に、`e2e_test_app` の `integration_test` で
+Sora 2025.2.0 以降のシグナリング仕様を対象に、`e2e_test_app` の `integration_test` で
 検証しています。CI (`.github/workflows/e2e-test.yml`) は macOS / Windows / Ubuntu 24.04
 (x86_64) の 3 環境で、`TEST_SIGNALING_URLS` が指す検証用 Sora に接続して実行します。
 検証項目と実行条件は [e2e_test_app/README.md](e2e_test_app/README.md) を参照してください。
@@ -499,7 +499,7 @@ Sora 2025.1.0 以降のシグナリング仕様を対象に、`e2e_test_app` の
 
 ### 未対応
 
-- Sora 2025.1.0 より前のバージョン
+- Sora 2025.2.0 より前のバージョン
 - サイマルキャストマルチコーデック (Sora の実験的機能)
 
 ## 対応プラットフォーム

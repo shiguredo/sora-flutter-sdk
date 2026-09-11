@@ -1,6 +1,7 @@
 # Sora Flutter SDK
 
 [![pub.dev](https://img.shields.io/pub/v/sora_sdk.svg)](https://pub.dev/packages/sora_sdk)
+[![libwebrtc](https://img.shields.io/badge/libwebrtc-150.7871-blue.svg)](https://chromium.googlesource.com/external/webrtc/+/branch-heads/7871)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![GitHub Actions](https://github.com/shiguredo/sora-flutter-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/shiguredo/sora-flutter-sdk/actions/workflows/ci.yml)
 [![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?logo=discord&logoColor=white)](https://discord.gg/shiguredo)
@@ -17,486 +18,66 @@ Please read <https://github.com/shiguredo/oss/blob/master/README.en.md> before u
 
 利用前に <https://github.com/shiguredo/oss> をお読みください。
 
-## Sora Flutter SDK について
-
-iOS / macOS / Android / Windows / Linux に対応した WebRTC SFU Sora 向けの Flutter SDK です。
-
-WebRTC ライブラリには [libwebrtc](https://webrtc.googlesource.com/src/) を採用しています。
-WebRTC のコアロジック (PeerConnection、SDP 処理、ICE、DataChannel) は `dart:ffi` 経由で
-libwebrtc を直接呼び出して Dart 側に実装しており、プラットフォーム側 (iOS / macOS / Android / Windows / Linux) は
-カメラキャプチャと映像レンダリングのみを担当します。
-
 ## 特徴
 
-- マルチストリーム対応
-- サイマルキャスト対応
-- スポットライト対応
-- DataChannel シグナリング対応
-- リアルタイムメッセージング対応
-- RPC 対応
-- 転送フィルター対応
-- シグナリング通知対応
-- シグナリングリダイレクト対応
-- 複数シグナリング URL 対応 (フェイルオーバー)
-- メタデータ認証対応
-- シグナリング通知メタデータ対応
-- 接続・切断・シグナリングの各種タイムアウト対応
-- VP8 / VP9 / AV1 / H.264 / H.265 対応
-- Flutter Texture によるローカル / リモート映像レンダリング対応
-- カメラデバイス選択 / 解像度・フレームレート指定対応
-- カメラ切り替え (`replaceVideoTrack`) 対応
+- [libwebrtc](https://webrtc.googlesource.com/src/) を利用し、 iOS / macOS / Android / Windows / Linux に対応
+  - WebRTC のコアロジック (PeerConnection、SDP 処理、ICE、DataChannel) は `dart:ffi` 経由で libwebrtc を直接呼び出す Dart 側実装
+  - プラットフォーム側はカメラキャプチャと映像レンダリングを担当
+- マルチストリームに対応
+- サイマルキャストに対応
+- スポットライトに対応
+- 転送フィルターに対応
+- DataChannel シグナリングに対応
+- リアルタイムメッセージングに対応
+- RPC に対応
+- シグナリング通知に対応
+- シグナリングリダイレクトに対応
+- 複数シグナリング URL に対応 (フェイルオーバー)
+- メタデータ認証に対応
+- シグナリング通知メタデータに対応
+- 接続・切断・シグナリングの各種タイムアウトに対応
+- 映像コーデック `VP8` / `VP9` / `AV1` / `H.264` / `H.265` に対応
+  - ソフトウェアコーデックで `VP8` / `VP9` / `AV1` に対応
+  - `H.264` / `H.265` は Apple Video Toolbox (iOS / macOS) と Android MediaCodec のハードウェアコーデックを利用
+  - Android では対応端末で `VP8` / `VP9` / `AV1` のハードウェアコーデックも利用可能
+  - ハードウェアコーデックの利用可否は端末・OS バージョンに依存
+- [WebRTC 統計情報](https://www.w3.org/TR/webrtc-stats/) の取得に対応
+- Flutter Texture によるローカル / リモート映像レンダリングに対応
+- カメラデバイスの選択、解像度・フレームレートの指定、カメラ切り替え (`replaceVideoTrack`) に対応
+- 音声入力デバイス / 音声出力デバイスの列挙に対応
+- カメラ以外の映像フレームを送信する外部映像入力に対応
+- iOS では ReplayKit を利用したアプリケーション内画面キャプチャに対応
+- 受信 PCM の取得と PCM の送信 (`PushAudio`) に対応
 
-## 対応コーデック
+## 条件
 
-ハードウェアエンコード/デコードの実際の対応状況は端末・OS バージョンに依存します。
-
-| バックエンド | 対応プラットフォーム | エンコード | デコード |
-| --- | --- | --- | --- |
-| ソフトウェア | 全プラットフォーム | VP8 / VP9 / AV1 | VP8 / VP9 / AV1 |
-| Apple VideoToolbox | iOS / macOS | H.264 / H.265 | H.264 / H.265 |
-| Android MediaCodec | Android | H.264 / H.265 / VP8 / VP9 / AV1 | H.264 / H.265 / VP8 / VP9 / AV1 |
-
-## 依存関係
-
-### Flutter / Dart SDK
-
-Flutter plugin 実行基盤、Dart 実行環境
-
-### WebRTC
-
-音声 / 映像 / DataChannel の WebRTC 通信基盤となるネイティブライブラリ
-
-### libwebrtc-c
-
-libwebrtc の C API ラッパーとなるネイティブライブラリ
-
-### Dart パッケージ
-
-#### ffi
-
-Google Dart Team 提供の、 native API 呼び出し用パッケージ
-
-#### meta
-
-Google Dart Team 提供の、アノテーションや API 補助のためのパッケージ。コード中にアノテーションを記述するために利用する
-
-#### web_socket_channel
-
-Google Dart Team 提供の、Dart 標準の WebSocket をラップしたパッケージ
-
-### Dart パッケージ(ビルド・スクリプト用)
-
-#### archive
-
-アーカイブ展開パッケージ。依存取得スクリプト (`scripts/fetch_native_deps.dart`) でネイティブ依存の `.tar.gz` / `.zip` 展開に利用する
-
-#### crypto
-
-Dart Team 提供の、暗号計算パッケージ。依存取得スクリプトで取得したネイティブ依存ライブラリのダイジェスト計算に利用する
-
-#### hooks
-
-Dart Team 提供の、Dart build hooks の実行基盤パッケージ。`hook/build.dart` でバージョン生成スクリプト等を実行するために利用する
-
-#### path
-
-Dart Team 提供の、ファイルパス操作用パッケージ。依存取得スクリプトでパス操作に利用する
+- WebRTC SFU Sora 2025.2.0 以降
+- Flutter 3.44.0 以上
+- Dart SDK 3.10.0 以上
+- iOS 16.0 以上
+- macOS 15 以上
+- Android 10 (API 29) 以上
+- Windows 10 20H2 以上 (x86_64)
+- Linux Ubuntu 24.04 (x86_64)
 
 ## 使い方
 
-### 依存関係の追加
-
-`pubspec.yaml` に以下を追加してください。
-
-```yaml
-dependencies:
-  flutter:
-    sdk: flutter
-  sora_sdk: <version>
-```
-
-iOS / macOS は Swift Package Manager が `libwebrtc_c.xcframework.zip` を自動取得し、Android は Gradle の `fetchNativeDeps` task が libwebrtc の配布物を自動取得するため、利用者側でネイティブ依存を手動で用意する必要はありません。
-
-### sendrecv で接続する
-
-映像・音声を送受信する例です。
-
-```dart
-import 'package:sora_sdk/sora_sdk.dart';
-
-Future<void> main() async {
-  // 1. ローカルメディアを取得する
-  final stream = await MediaDevices.getUserMedia(
-    const GetUserMediaOptions(audio: true, video: true),
-  );
-
-  // 2. SoraConnectionConfig で接続設定を組み立てる
-  final config = SoraConnectionConfig(
-    signalingUrls: const ['wss://sora.example.com/signaling'],
-    channelId: 'your-channel-id',
-    role: SoraRole.sendrecv,
-  );
-
-  // 3. SoraConnection を生成する
-  final connection = await Sora.createConnection(config);
-
-  // 4. イベントを購読する
-  connection.events.listen((event) {
-    switch (event) {
-      case SoraConnectionStateChangedEvent():
-        print('state: ${event.state}');
-      case SoraNotifyEvent():
-        print('notify: ${event.message}');
-      case SoraTrackEvent():
-        print('track added: ${event.track.trackId}');
-      default:
-        break;
-    }
-  });
-
-  // 5. ローカルメディアを渡して接続する
-  await connection.connect(stream);
-
-  // ...
-
-  // 6. 切断と後始末
-  await connection.disconnect();
-  await connection.dispose();
-}
-```
-
-### sendonly で接続する
-
-映像・音声を送信する例です。
-
-```dart
-import 'package:sora_sdk/sora_sdk.dart';
-
-Future<void> main() async {
-  final stream = await MediaDevices.getUserMedia(
-    const GetUserMediaOptions(audio: true, video: true),
-  );
-
-  final connection = await Sora.createConnection(
-    SoraConnectionConfig(
-      signalingUrls: const ['wss://sora.example.com/signaling'],
-      channelId: 'your-channel-id',
-      role: SoraRole.sendonly,
-    ),
-  );
-
-  await connection.connect(stream);
-}
-```
-
-### recvonly で接続する
-
-映像・音声を受信する例です。
-
-```dart
-import 'package:sora_sdk/sora_sdk.dart';
-
-Future<void> main() async {
-  final connection = await Sora.createConnection(
-    SoraConnectionConfig(
-      signalingUrls: const ['wss://sora.example.com/signaling'],
-      channelId: 'your-channel-id',
-      role: SoraRole.recvonly,
-    ),
-  );
-
-  connection.events.listen((event) {
-    if (event is SoraTrackEvent) {
-      print('track added: ${event.track.trackId} / ${event.track.connectionId}');
-    }
-  });
-
-  await connection.connect();
-}
-```
-
-### SoraConnectionConfig の設定
-
-`SoraConnectionConfig` では以下の設定が可能です。
-
-```dart
-final config = SoraConnectionConfig(
-  signalingUrls: const ['wss://sora.example.com/signaling'],
-  channelId: 'your-channel-id',
-  role: SoraRole.sendrecv,
-  // 基本オプション
-  audio: true,
-  video: true,
-  clientId: 'client-1',
-  bundleId: 'bundle-1',
-  metadata: <String, Object?>{'access_token': '...'},
-  signalingNotifyMetadata: <String, Object?>{},
-  // 音声ストリーミング (Sora は文字列をそのまま言語コードとして扱う)
-  audioStreamingLanguageCode: 'ja-JP',
-  // DataChannel シグナリング
-  dataChannelSignaling: true,
-  ignoreDisconnectWebSocket: true,
-  dataChannels: <Map<String, Object?>>[
-    {'label': '#my-channel', 'direction': 'sendrecv', 'compress': true},
-  ],
-  // サイマルキャスト
-  simulcast: true,
-  simulcastRequestRid: SimulcastRequestRid.r0,
-  // スポットライト
-  spotlight: true,
-  spotlightFocusRid: SpotlightRid.r1,
-  spotlightUnfocusRid: SpotlightRid.r0,
-  // コーデック / ビットレート (kbps)
-  audioCodecType: AudioCodecType.opus,
-  videoCodecType: VideoCodecType.vp9,
-  audioBitRate: 64, // 音声 (kbps)
-  videoBitRate: 2500, // 映像 (kbps)
-  videoVp9Params: <String, Object?>{},
-  videoH264Params: <String, Object?>{},
-  videoH265Params: <String, Object?>{},
-  videoAv1Params: <String, Object?>{},
-  // Opus 詳細パラメーター (Sora の実験的機能)
-  // Sora の対応状況を確認し、利用には事前にサポートへの連絡が必要
-  // role が sendrecv / sendonly の場合のみ有効
-  // usedtx を有効にすると録画がおかしくなる
-  audioOpusParamsChannels: 2,
-  audioOpusParamsMaxplaybackrate: 48000,
-  audioOpusParamsMinptime: 10,
-  audioOpusParamsPtime: 20,
-  audioOpusParamsStereo: true,
-  audioOpusParamsSpropStereo: false,
-  audioOpusParamsUseinbandfec: true,
-  audioOpusParamsUsedtx: false,
-  // 転送フィルター
-  forwardingFilters: <Map<String, Object?>>[],
-  // タイムアウト
-  timeoutOptions: const SoraTimeoutOptions(),
-);
-```
-
-カメラデバイス・解像度・フレームレートは `SoraConnectionConfig` ではなく、`MediaDevices.getUserMedia(GetUserMediaOptions(...))` で指定し、得られた `MediaStream` を `connection.connect(stream)` に渡してください。
-
-### 接続イベントの購読
-
-`connection.events` (`Stream<SoraConnectionEvent>`) で接続・シグナリング・DataChannel・リモートトラックを一元的に受け取れます。
-
-| イベント型 | 説明 |
-| --- | --- |
-| `SoraConnectionStateChangedEvent` | 接続状態変化 (connecting / connected / disconnected) |
-| `SoraConnectionErrorEvent` | 接続エラー (cameraOpenError 等) |
-| `SoraNotifyEvent` | notify メッセージ受信 |
-| `SoraPushEvent` | push メッセージ受信 |
-| `SoraSwitchedEvent` | switched メッセージ受信 (DataChannel シグナリング有効化) |
-| `SoraSignalingMessageEvent` | シグナリングメッセージ送受信 |
-| `SoraDataChannelOpenEvent` | DataChannel 利用可能 |
-| `SoraDataChannelMessageEvent` | DataChannel メッセージ受信 |
-| `SoraTrackEvent` | リモートトラック追加 |
-| `SoraRemoveTrackEvent` | リモートトラック削除 |
-| `SoraTimeoutEvent` | シグナリング接続タイムアウト |
-
-### 映像の表示
-
-リモート映像は `SoraRemoteVideoWidget`、ローカルプレビューは `SoraLocalVideoWidget` で表示します。どちらも内部で `Texture` の `key` を管理するため、利用者が `key` を直接扱う必要はありません。`SoraRemoteVideoWidget` は track を渡すだけで `textureId` を扱わずに済み、`SoraLocalVideoWidget` は下記のとおり `textureId` を渡します。
-
-```dart
-// リモート映像の表示
-connection.events.listen((event) {
-  if (event is SoraTrackEvent && event.track.kind == 'video') {
-    // event.track を SoraRemoteVideoWidget に渡す
-  }
-});
-
-// Widget ツリー内での使用例
-SoraRemoteVideoWidget(track: videoTrack)
-
-// ローカルプレビュー (mirror: true で鏡表示)
-SoraLocalVideoWidget(textureId: localTextureId, mirror: true)
-```
-
-`SoraConnection.localVideo` ストリームから `textureId` を取得し、`SoraLocalVideoWidget` に渡します。`textureId` は null 許容であり、テクスチャ準備完了前から Widget を構築できます。
-
-### 切断と統計情報の取得
-
-`connection.disconnect()` で切断、`connection.getStats()` で WebRTC 統計情報 (JSON 文字列) を取得できます。
-
-```dart
-// 切断
-await connection.disconnect();
-
-// 統計情報を取得する
-final stats = await connection.getStats();
-```
-
-`dispose` 後の API 呼び出し (`rpc` / `getStats` / `replaceVideoTrack` / `sendDataChannelMessage` / `setAudioEnabled` 等) は `StateError` で拒否されます。
-
-### メッセージ送受信
-
-`#` プレフィックス付きラベルのユーザー定義 DataChannel でバイナリメッセージを送受信できます。
-
-```dart
-// 送信
-connection.sendDataChannelMessage('#my-channel', Uint8List.fromList([0x01, 0x02]));
-
-// 受信
-connection.events.listen((event) {
-  if (event is SoraDataChannelMessageEvent) {
-    print('received on ${event.message.label}: ${event.message.data.length} bytes');
-  }
-});
-```
-
-### RPC
-
-`rpc` DataChannel を使って JSON-RPC 2.0 のリクエスト/レスポンスをやり取りできます。SDK が JSON-RPC メッセージの組み立てと id 採番を行います。
-
-```dart
-// リクエストを送信してレスポンスを待つ
-final result = await connection.rpc(
-  'method_name',
-  params: <String, Object?>{'key': 'value'},
-  options: const SoraRpcOptions(timeout: 5000),
-);
-
-// notification (レスポンスを待たない)
-await connection.rpc(
-  'method_name',
-  params: <String, Object?>{'key': 'value'},
-  options: const SoraRpcOptions(notification: true),
-);
-```
-
-エラー時は `SoraRpcError` が throw されます。`disconnect` 時には待機中の RPC リクエストが自動でキャンセルされます。
-
-### メッセージング専用接続
-
-音声・映像を伴わない DataChannel メッセージング専用接続は、設定の組み合わせで実現します。
-
-```dart
-final connection = await Sora.createConnection(
-  SoraConnectionConfig(
-    signalingUrls: const ['wss://sora.example.com/signaling'],
-    channelId: 'your-channel-id',
-    role: SoraRole.sendonly,
-    audio: false,
-    video: false,
-    dataChannelSignaling: true,
-    dataChannels: const [
-      {'label': '#messaging', 'direction': 'sendrecv', 'compress': true},
-    ],
-  ),
-);
-
-await connection.connect();
-connection.sendDataChannelMessage('#messaging', Uint8List.fromList([0x01, 0x02]));
-```
-
-## 構成
-
-```text
-sora-flutter-sdk/
-├── lib/                # sora_sdk パッケージ本体
-├── ios/                # iOS プラグイン (Swift)
-├── macos/              # macOS プラグイン (Swift)
-├── android/            # Android プラグイン (Kotlin)
-├── linux/              # Linux プラグイン (C++)
-├── windows/            # Windows プラグイン (C++)
-├── e2e_test_app/       # E2E テストアプリ（recvonly / sendonly / sendrecv / 2 クライアント疎通）
-├── devtools/           # 開発用サンプルアプリ
-└── scripts/            # ネイティブ依存取得スクリプト
-```
+使い方は [Sora Flutter SDK ドキュメント](https://sora-flutter-sdk.shiguredo.jp/) を参照してください。
 
 ## サンプル
 
-### e2e_test_app
+サンプルは [devtools](https://github.com/shiguredo/sora-flutter-sdk/tree/develop/devtools) を参照してください。
 
-`integration_test` で recvonly / sendonly / sendrecv 接続と、2 クライアント間の
-基本メディア疎通を検証する最小アプリです。2 クライアント E2E では sender / receiver が同じ
-`channelId` を共有し、`bundleId` は設定しません。macOS 専用の Video Codec E2E では、VP8 / VP9 /
-AV1 / H.264 / H.265 を指定した送受信を個別に検証します。詳細は [e2e_test_app/README.md](e2e_test_app/README.md) を参照してください。
+## インストール
 
 ```bash
-cd e2e_test_app
-flutter pub get
-flutter test integration_test/recvonly_e2e_test.dart -d macos
-flutter test integration_test/sendonly_dummy_video_e2e_test.dart -d macos
-flutter test integration_test/sendrecv_smoke_e2e_test.dart -d macos
-flutter test integration_test/sendrecv_bidirectional_e2e_test.dart -d macos
-flutter test integration_test/connection_lifecycle_e2e_test.dart -d macos
-flutter test integration_test/audio_media_e2e_test.dart -d macos
-flutter test integration_test/texture_rendering_e2e_test.dart -d macos
-flutter test integration_test/two_party_media_e2e_test.dart -d macos
-flutter test integration_test/video_codec_e2e_test.dart -d macos
+flutter pub add sora_sdk
 ```
 
-### devtools
+## E2E (End to End) テスト
 
-開発時の動作確認用 Flutter アプリです。
-
-## ビルド
-
-Flutter 3.44.0 以上、Dart SDK 3.10.0 以上が必要です。iOS は Xcode (iOS 16.0 以上)、macOS は Xcode (macOS 15.0 以上) が必要です。
-
-Android / Windows / Linux の動作環境とビルド手順は次のドキュメントを参照してください。
-
-- [Android](https://sora-flutter-sdk.shiguredo.jp/android.html)
-- [Windows](https://sora-flutter-sdk.shiguredo.jp/windows.html)
-- [Linux](https://sora-flutter-sdk.shiguredo.jp/linux.html)
-
-ネイティブ依存 (libwebrtc) は iOS / macOS では Swift Package Manager が、Android / Windows / Linux では各ビルド時に `scripts/fetch_native_deps.dart` が自動取得します。取得対象は [`scripts/native_deps.json`](scripts/native_deps.json) で管理しています。
-
-iOS / macOS 向けの `libwebrtc_c.xcframework.zip` の version は [`scripts/native_deps.json`](scripts/native_deps.json) の `libwebrtc_c.version`、URL / checksum は `libwebrtc_c.apple_xcframework` を正本として管理しています。
-
-手動更新手順:
-
-```bash
-# 1. scripts/native_deps.json を手動で更新する
-
-# 2. Package.swift へ反映する
-dart run scripts/update_apple_native_binary.dart
-```
-
-更新対象は通常、`libwebrtc_c.version` と `libwebrtc_c.apple_xcframework.checksum` です。配布ファイル名や配布元を変える場合のみ `artifact` / `base_url` も更新します。
-
-## 対応 WebRTC SFU Sora
-
-Sora 2025.1.0 以降に対応しています。
-
-### 検証状況
-
-Sora 2025.1.0 以降のシグナリング仕様を対象に、`e2e_test_app` の `integration_test` で
-検証しています。CI (`.github/workflows/e2e-test.yml`) は macOS / Windows / Ubuntu 24.04
-(x86_64) の 3 環境で、`TEST_SIGNALING_URLS` が指す検証用 Sora に接続して実行します。
-検証項目と実行条件は [e2e_test_app/README.md](e2e_test_app/README.md) を参照してください。
-
-### 対応範囲
-
-| 機能 | 状態 |
-| --- | --- |
-| シグナリング (WebSocket / DataChannel) | 対応 |
-| リアルタイムメッセージング / RPC | 対応 |
-| シグナリング通知 / リダイレクト / 複数シグナリング URL (フェイルオーバー) | 対応 |
-| メタデータ認証 / シグナリング通知メタデータ | 対応 |
-| マルチストリーム / サイマルキャスト / スポットライト | 対応 |
-| 転送フィルター | 対応 |
-| 接続・切断・シグナリングの各種タイムアウト | 対応 |
-| コーデック (VP8 / VP9 / AV1 / H.264 / H.265 / Opus) | 対応 (詳細は「対応コーデック」節を参照) |
-| Flutter Texture によるローカル / リモート映像レンダリング | 対応 |
-| Opus 詳細パラメーター (`audioOpusParams*`) | 実験的機能。Sora の対応状況を確認し、利用には事前にサポートへの連絡が必要 |
-
-### 未対応
-
-- Sora 2025.1.0 より前のバージョン
-- サイマルキャストマルチコーデック (Sora の実験的機能)
-
-## 対応プラットフォーム
-
-| プラットフォーム | 対応バージョン |
-| --- | --- |
-| iOS | 16.0 以上 |
-| macOS | 15 以上 |
-| Android | Android 10 (API 29) 以上 |
-| Windows | Windows 10 20H2 以上 (x86_64) |
-| Linux | Ubuntu 24.04 (x86_64) |
+`integration_test` を利用した E2E テストを実行できます。
+詳細は [e2e_test_app/README.md](https://github.com/shiguredo/sora-flutter-sdk/blob/develop/e2e_test_app/README.md) を参照してください。
 
 ## 優先実装
 
@@ -504,28 +85,12 @@ Sora 2025.1.0 以降のシグナリング仕様を対象に、`e2e_test_app` の
 
 **詳細は Discord やメールなどでお気軽にお問い合わせください**
 
-## サポートについて
-
-### Discord
-
-- **サポートしません**
-- アドバイスします
-- フィードバック歓迎します
-
-最新の状況などは Discord で共有しています。質問や相談も Discord でのみ受け付けています。
-
-<https://discord.gg/shiguredo>
-
-### バグ報告
-
-Discord へお願いします。
-
 ## ライセンス
 
 Apache License 2.0
 
 ```text
-Copyright 2026-2026, Shiguredo Inc.
+Copyright 2026 Shiguredo Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -539,3 +104,60 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ```
+
+## リンク
+
+### 商用製品
+
+- [WebRTC SFU Sora](https://sora.shiguredo.jp)
+  - [WebRTC SFU Sora ドキュメント](https://sora-doc.shiguredo.jp)
+- [Sora Cloud](https://sora-cloud.shiguredo.jp)
+  - [Sora Cloud ドキュメント](https://doc.sora-cloud.shiguredo.app)
+
+### 無料検証サービス
+
+- [Sora Labo](https://sora-labo.shiguredo.app)
+  - [Sora Labo ドキュメント](https://github.com/shiguredo/sora-labo-doc)
+
+### クライアント SDK
+
+- [Sora Flutter SDK](https://github.com/shiguredo/sora-flutter-sdk)
+  - [Sora Flutter SDK ドキュメント](https://sora-flutter-sdk.shiguredo.jp/)
+- [Sora JavaScript SDK](https://github.com/shiguredo/sora-js-sdk)
+  - [Sora JavaScript SDK ドキュメント](https://sora-js-sdk.shiguredo.jp/)
+- [Sora iOS SDK](https://github.com/shiguredo/sora-ios-sdk)
+  - [Sora iOS SDK ドキュメント](https://sora-ios-sdk.shiguredo.jp/)
+  - [Sora iOS SDK クイックスタート](https://github.com/shiguredo/sora-ios-sdk-quickstart)
+  - [Sora iOS SDK サンプル集](https://github.com/shiguredo/sora-ios-sdk-samples)
+- [Sora Android SDK](https://github.com/shiguredo/sora-android-sdk)
+  - [Sora Android SDK ドキュメント](https://sora-android-sdk.shiguredo.jp/)
+  - [Sora Android SDK クイックスタート](https://github.com/shiguredo/sora-android-sdk-quickstart)
+  - [Sora Android SDK サンプル集](https://github.com/shiguredo/sora-android-sdk-samples)
+- [Sora Unity SDK](https://github.com/shiguredo/sora-unity-sdk)
+  - [Sora Unity SDK ドキュメント](https://sora-unity-sdk.shiguredo.jp/)
+  - [Sora Unity SDK サンプル集](https://github.com/shiguredo/sora-unity-sdk-samples)
+- [Sora Python SDK](https://github.com/shiguredo/sora-python-sdk)
+  - [Sora Python SDK ドキュメント](https://sora-python-sdk.shiguredo.jp/)
+  - [Sora Python SDK サンプル集](https://github.com/shiguredo/sora-python-sdk-samples)
+- [Sora C++ SDK](https://github.com/shiguredo/sora-cpp-sdk)
+
+### クライアントツール
+
+- [Sora DevTools](https://github.com/shiguredo/sora-devtools)
+- [Media Processors](https://github.com/shiguredo/media-processors)
+- [WebRTC Native Client Momo](https://github.com/shiguredo/momo)
+
+### サーバーツール
+
+- [WebRTC Load Testing Tool Zakuro](https://github.com/shiguredo/zakuro)
+  - Sora 専用負荷試験ツール
+- [WebRTC Stats Analyzer Kohaku](https://github.com/shiguredo/kohaku)
+  - Sora 専用統計解析ツール
+- [Recording Composition Tool Hisui](https://github.com/shiguredo/hisui)
+  - Sora 専用録画ファイル合成ツール
+- [Audio Streaming Gateway Suzu](https://github.com/shiguredo/suzu)
+  - Sora 専用音声解析ゲートウェイ
+- [Sora Archive Uploader](https://github.com/shiguredo/sora-archive-uploader)
+  - Sora 専用録画ファイル S3 互換オブジェクトストレージアップロードツール
+- [Prometheus exporter for WebRTC SFU Sora metrics](https://github.com/shiguredo/sora_exporter)
+  - Sora 専用 OpenMetrics 形式エクスポーター

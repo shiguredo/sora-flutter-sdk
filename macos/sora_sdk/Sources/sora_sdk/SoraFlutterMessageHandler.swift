@@ -62,6 +62,12 @@ private class LocalVideoRenderer {
   func dispose() {
     cameraCapturer.stop()
   }
+
+  /// カメラキャプチャだけを停止する。
+  /// テクスチャは保持したままにし、破棄は `disposeLocalVideoTrackTexture` に任せる。
+  func stopCapture() {
+    cameraCapturer.stop()
+  }
 }
 
 /// クライアントラッパー (カメラ・レンダリングのみ管理)
@@ -271,6 +277,12 @@ class SoraFlutterMessageHandler {
     case "disposeLocalVideoTrackTexture":
       let videoSourcePtr = (args["videoSourcePtr"] as? NSNumber)?.int64Value ?? 0
       localVideoRenderers.removeValue(forKey: videoSourcePtr)?.dispose()
+      result(nil)
+
+    // 実行中のカメラキャプチャを停止する
+    case "stopCameraCapturer":
+      let videoSourcePtr = (args["videoSourcePtr"] as? NSNumber)?.int64Value ?? 0
+      localVideoRenderers[videoSourcePtr]?.stopCapture()
       result(nil)
 
     // リモートビデオレンダラーを作成する

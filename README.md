@@ -46,7 +46,6 @@ Please read <https://github.com/shiguredo/oss/blob/master/README.en.md> before u
 - カメラデバイスの選択、解像度・フレームレートの指定、カメラ切り替え (`replaceVideoTrack`) に対応
 - 音声入力デバイス / 音声出力デバイスの列挙に対応
 - カメラ以外の映像フレームを送信する外部映像入力に対応
-- iOS では ReplayKit を利用したアプリケーション内画面キャプチャに対応
 - 受信 PCM の取得と PCM の送信 (`PushAudio`) に対応
 
 ## 条件

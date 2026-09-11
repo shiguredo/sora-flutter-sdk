@@ -1,7 +1,7 @@
 # 公開 API メソッドの dartdoc に「throw する例外」と「事前条件」を追記する
 
 - Created: 2026-08-27
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-11
 - Branch: feature/doc-add-public-api-throws-dartdoc
 - Polished: 2026-09-07
 - Milestone: 2026.1.0
@@ -38,3 +38,9 @@
 - [ ] 対象 10 メソッドと `SoraConnectionConfig.toMap` の dartdoc に例外 / 事前条件が追記されている。
 - [ ] `SoraConnectionConfig.toMap()` の生成時検証 (`RangeError` + `ArgumentError`) が dartdoc に明記されている。
 - [ ] `flutter analyze` が成功する。ドキュメントのみの変更のため専用の関連テストはなし。
+
+## 解決方法
+
+- `lib/src/sora_connection.dart` の公開メソッド 10 件 (`connect` / `disconnect` / `replaceAudioTrack` / `replaceVideoTrack` / `removeAudioTrack` / `removeVideoTrack` / `setAudioEnabled` / `setVideoEnabled` / `getStats` / `rpc`) に、投げる例外と発火条件を条件ごとに追記した。
+- 例外型は `[StateError]` のような参照形式で示し、件数は断定しなかった。`disconnect()` が dispose 済みでも例外を投げないこと、`getStats()` が PeerConnection 未生成で上限未達の場合に `null` を返すこと、`rpc()` が `notification` 指定時に `null` を返すことも明記した。
+- `lib/src/sora_connection_config.dart` の `toMap()` に、検証が接続生成時に走ることと `ArgumentError` / `RangeError` の条件を明記し、クラスドキュメントから `toMap()` を参照するようにした。

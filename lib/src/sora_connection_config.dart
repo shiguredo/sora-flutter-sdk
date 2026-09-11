@@ -6,10 +6,11 @@ import 'sora_validator.dart';
 
 /// Sora 接続設定のデータクラス
 ///
-/// フィールドの検証は `toMap()` の実行時に行う。`const` コンストラクタを
-/// 維持するため、コンストラクタでは検証しない。`signalingUrls` /
-/// `channelId` の空検証と数値の範囲検証は `toMap()` で行い、各 URL 要素の
-/// 形式検証は接続開始時に行う。
+/// フィールドの検証は [SoraConnectionConfig.toMap] の実行時に行う。
+/// `const` コンストラクタを維持するため、コンストラクタでは検証しない。
+/// `signalingUrls` / `channelId` の空検証と数値の範囲検証は `toMap()` で行い、
+/// 各 URL 要素の形式検証は接続開始時に行う。`toMap()` が投げる例外は
+/// [SoraConnectionConfig.toMap] を参照すること。
 class SoraConnectionConfig {
   /// @nodoc
   const SoraConnectionConfig({
@@ -208,6 +209,20 @@ class SoraConnectionConfig {
   final SoraTimeoutOptions timeoutOptions;
 
   /// connect メッセージの payload へ変換する。
+  ///
+  /// `const` コンストラクタを維持するため、フィールドの検証は本メソッドの
+  /// 実行時、すなわち接続生成時に行う。
+  ///
+  /// 例外:
+  ///
+  /// - [signalingUrls] が空の場合は [ArgumentError]。
+  /// - [channelId] が空の場合は [ArgumentError]。
+  /// - [audioBitRate] が 6 〜 510 の範囲外の場合は [RangeError]。
+  /// - [videoBitRate] が 1 〜 50000 の範囲外の場合は [RangeError]。
+  /// - [audioOpusParamsChannels] が 1 〜 8 の範囲外の場合は [RangeError]。
+  /// - [audioOpusParamsMaxplaybackrate] が 8000 〜 48000 の範囲外の場合は
+  ///   [RangeError]。
+  /// - [audioOpusParamsMinptime] が 3 〜 120 の範囲外の場合は [RangeError]。
   Map<String, Object?> toMap() {
     // const コンストラクターを維持するため、接続設定の利用時に検証する。
     validateSignalingUrls(signalingUrls);

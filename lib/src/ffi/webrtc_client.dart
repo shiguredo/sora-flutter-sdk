@@ -174,6 +174,11 @@ class WebrtcClient {
   // Dart 側で SetRecordingDevice を呼ぶために PCF に渡した後も release せず持ち続ける。
   static Pointer<WebrtcAudioDeviceModuleRefcounted>? _sharedAdmRef;
   static SimulcastVideoEncoderFactory? _sharedSimulcastVideoEncoderFactory;
+  // 共有 factory の MediaEngine を Terminate させないための keep-alive
+  // PeerConnection を保持するクライアント。
+  //
+  // 詳細は `_createSharedKeepAlivePeerConnection()` を参照する。
+  static WebrtcClient? _sharedKeepAliveClient;
   // 音声デバイスを利用するかどうか。共有 factory の生成前に設定する。
   // false の場合は push audio device が選択される。
   static bool _useAudioDevice = true;
@@ -217,6 +222,12 @@ class WebrtcClient {
       _sharedSignalingThread != null ||
       _sharedAdmRef != null ||
       _sharedSimulcastVideoEncoderFactory != null;
+
+  // テスト専用フック。共有 factory の MediaEngine を Terminate させない
+  // keep-alive PeerConnection が生成済みかを返す。
+  @visibleForTesting
+  static bool get hasSharedKeepAlivePeerConnectionForTest =>
+      _sharedKeepAliveClient != null;
 
   // `LibWebrtcC` の共有インスタンスを返す。
   //
@@ -565,6 +576,10 @@ class WebrtcClient {
         options,
       );
       sharedLib.pcFactoryOptionsDelete(options);
+
+      // 共有 factory の MediaEngine をプロセス生存期間中 Terminate させない。
+      // 生成の要否は `_createSharedKeepAlivePeerConnection()` 内で判定する。
+      _createSharedKeepAlivePeerConnection();
     } catch (_) {
       // factory 生成 (成功) 後の例外では factory とその資源 (スレッド /
       // ADM) が生きているため破棄しない。生成前の失敗 (ADM init 失敗等)
@@ -574,6 +589,54 @@ class WebrtcClient {
         _releaseSharedFactoryResources(depsToRelease);
       }
       rethrow;
+    }
+  }
+
+  // 共有 factory の MediaEngine が Terminate されるのを防ぐ keep-alive
+  // PeerConnection を 1 つだけ生成して保持する。
+  //
+  // libwebrtc は最後の PeerConnection が破棄されると
+  // `ConnectionContext::ReleaseMediaEngine()` から
+  // `WebRtcVoiceEngine::Terminate()` を呼び、共有 ADM の `Terminate()` まで
+  // 実行する。Linux の PulseAudio ADM は `Terminate()` で `quit_` を立てるが
+  // `Init()` で false に戻さないため、次の PeerConnection 作成時に再生成される
+  // 録音・再生スレッドが即終了し、2 回目以降の接続で音声が送信されなくなる。
+  // 実際には接続しない PeerConnection を 1 つプロセス生存期間中保持して
+  // MediaEngine の参照カウントを 0 にしないことで、Sora C++ SDK が
+  // `ConnectionContext::MediaEngineReference` を保持するのと同じ効果を得る。
+  //
+  // この処理は libwebrtc の MediaEngine 初期化タイミングを最初の
+  // PeerConnection 作成から共有 factory 生成直後へ前倒しする効果もある。
+  // これにより `adm_helpers::Init()` による録音デバイスのデフォルト復帰が
+  // `MediaDevices.createAudioTrack()` のデバイス選択より先に完了する。
+  //
+  // keep-alive は接続処理を阻害しないことを優先し、生成に失敗した場合は
+  // 何もせず既存の接続経路へフォールバックする。
+  static void _createSharedKeepAlivePeerConnection() {
+    // 同じ問題が確認されている Linux のみで生成する。macOS の ADM は
+    // `Init()` で `_isShutDown` を false に戻すため Terminate / Init を
+    // 跨いでも録音スレッドは正常に再開する。
+    if (!Platform.isLinux) {
+      return;
+    }
+    if (_sharedKeepAliveClient != null) {
+      return;
+    }
+    try {
+      final client = WebrtcClient._(
+        lib: sharedLib,
+        consts: sharedConsts,
+        config: const <String, Object?>{'role': 'recvonly'},
+        onEvent: (String type, Map<String, Object?> data) {},
+      );
+      if (!client._ensurePeerConnection(null)) {
+        // 失敗時は `_ensurePeerConnection` 内で observer bridge と
+        // NativeCallable が解放される。client 自体を破棄して終了する。
+        return;
+      }
+      _sharedKeepAliveClient = client;
+    } catch (_) {
+      // keep-alive の生成失敗は接続処理へ影響させない。
     }
   }
 

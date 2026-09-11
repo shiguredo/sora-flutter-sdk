@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ffi';
+import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -219,6 +220,17 @@ void main() {
         WebrtcClient.forceCreateModularPeerConnectionFactoryFailureForTest =
             false;
       }
+    });
+  }, skip: ffiTestEnvironment.skipReason);
+
+  group('shared factory の MediaEngine keep-alive', () {
+    // 共有 factory は直前の group で恒久生成済みであることを前提にする。
+    test('Linux では MediaEngine を維持する keep-alive PeerConnection が生成される', () {
+      expect(WebrtcClient.hasSharedFactoryForTest, isTrue);
+      expect(
+        WebrtcClient.hasSharedKeepAlivePeerConnectionForTest,
+        Platform.isLinux,
+      );
     });
   }, skip: ffiTestEnvironment.skipReason);
 

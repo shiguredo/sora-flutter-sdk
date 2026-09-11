@@ -26,6 +26,12 @@
 // GObject 型: SoraLocalPreviewTexture (FlPixelBufferTexture のサブクラス)
 // ============================================================================
 
+// Flutter Linux エンジンは copy_pixels が FALSE を返すと、GError が
+// 未設定のまま error->message を参照してクラッシュする。
+// そのため、カメラの初回フレーム到着前でも常に有効なバッファを返す。
+// この配列は 2x2 の黒画像 (RGBA) を表す。
+static const uint8_t kLocalPreviewFallbackPixels[16] = {0};
+
 static gboolean sora_local_preview_texture_copy_pixels(
     FlPixelBufferTexture* texture,
     const uint8_t** out_buffer,
@@ -36,15 +42,19 @@ static gboolean sora_local_preview_texture_copy_pixels(
   auto* self = SORA_LOCAL_PREVIEW_TEXTURE(texture);
   // capturer は Stop() で明示的に nullptr に設定される前に
   // copy_pixels が呼ばれる可能性があるため、必ずチェックする
-  if (!self->capturer) {
-    return FALSE;
+  if (self->capturer) {
+    const uint8_t* pixels =
+        self->capturer->CopyPreviewPixelBuffer(width, height);
+    if (pixels && *width > 0 && *height > 0) {
+      *out_buffer = pixels;
+      return TRUE;
+    }
   }
-  const uint8_t* pixels = self->capturer->CopyPreviewPixelBuffer(width, height);
-  // カメラがまだ 1 フレームもキャプチャしていない場合は失敗として扱う
-  if (!pixels || *width == 0 || *height == 0) {
-    return FALSE;
-  }
-  *out_buffer = pixels;
+  // カメラがまだ 1 フレームもキャプチャしていない場合でも
+  // クラッシュさせないために 2x2 の黒画像を返す
+  *out_buffer = kLocalPreviewFallbackPixels;
+  *width = 2;
+  *height = 2;
   return TRUE;
 }
 

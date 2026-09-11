@@ -48,6 +48,12 @@ G_DECLARE_FINAL_TYPE(SoraRemoteVideoTexture,
                      REMOTE_VIDEO_TEXTURE,
                      FlPixelBufferTexture)
 
+// Flutter Linux エンジンは copy_pixels が FALSE を返すと、GError が
+// 未設定のまま error->message を参照してクラッシュする。
+// そのため、フレーム未受信時や sink 破棄中でも常に有効なバッファを返す。
+// この配列は 2x2 の黒画像 (RGBA) を表す。
+static const uint8_t kRemoteVideoFallbackPixels[16] = {0};
+
 static gboolean sora_remote_video_texture_copy_pixels(
     FlPixelBufferTexture* texture,
     const uint8_t** out_buffer,
@@ -56,15 +62,19 @@ static gboolean sora_remote_video_texture_copy_pixels(
     GError** error) {
   (void)error;
   auto* self = SORA_REMOTE_VIDEO_TEXTURE(texture);
-  if (!self->sink) {
-    return FALSE;
+  if (self->sink) {
+    const uint8_t* pixels =
+        linux_rendering_sink_copy_pixels(self->sink, width, height);
+    if (pixels) {
+      *out_buffer = pixels;
+      return TRUE;
+    }
   }
-  const uint8_t* pixels =
-      linux_rendering_sink_copy_pixels(self->sink, width, height);
-  if (!pixels) {
-    return FALSE;
-  }
-  *out_buffer = pixels;
+  // リモートフレーム未受信時や sink 破棄中でも
+  // クラッシュさせないために 2x2 の黒画像を返す
+  *out_buffer = kRemoteVideoFallbackPixels;
+  *width = 2;
+  *height = 2;
   return TRUE;
 }
 

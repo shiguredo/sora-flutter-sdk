@@ -1,5 +1,7 @@
 # バージョンタグの push で pub.dev に公開する。
 # canary 版のみ CHANGELOG 未記載の警告を無視する。安定版では警告をエラー扱いにする。
+# pub.dev の package metadata 障害 (dart-lang/pub-dev#9576) の回避策を含む。
+# 障害が復旧したらトークン削除と --skip-validation の回避策を外す。
 name: pub.dev に公開
 
 on:
@@ -41,6 +43,13 @@ jobs:
             echo "ignore_warnings=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: OIDC トークンを削除する
+        # pub.dev の package metadata エンドポイントが Authorization ヘッダ付きで
+        # 403 を返す障害 (dart-lang/pub-dev#9576) を回避するため、依存解決と
+        # dry-run の間はトークン登録を外す。PUB_TOKEN 環境変数は setup-dart が
+        # 設定済みなので、公開直前に再登録する。
+        run: dart pub token remove https://pub.dev
+
       - name: Install dependencies
         run: dart pub get
 
@@ -54,8 +63,9 @@ jobs:
 
       - name: Publish to pub.dev
         run: |
-          args=(pub publish --force)
-          if [[ "${{ steps.release.outputs.ignore_warnings }}" == "true" ]]; then
-            args+=(--ignore-warnings)
-          fi
-          dart "${args[@]}"
+          # 公開直前に OIDC トークンを再登録する。--ignore-warnings は dry-run
+          # 専用のため本番では指定しない。
+          dart pub token add https://pub.dev --env-var PUB_TOKEN
+          # トークン付きの依存解決を避けるため --skip-validation を使う。
+          # 検証は直前の dry-run で済ませている。
+          dart pub publish --force --skip-validation

@@ -296,7 +296,7 @@ final config = SoraConnectionConfig(
 
 ### 映像の表示
 
-リモート映像は `SoraRemoteVideoWidget`、ローカルプレビューは `SoraLocalVideoWidget` で表示します。これらの Widget は内部で `Texture` の `key` を管理するため、利用者が `key` や `textureId` を直接扱う必要はありません。
+リモート映像は `SoraRemoteVideoWidget`、ローカルプレビューは `SoraLocalVideoWidget` で表示します。どちらも内部で `Texture` の `key` を管理するため、利用者が `key` を直接扱う必要はありません。`SoraRemoteVideoWidget` は track を渡すだけで `textureId` を扱わずに済み、`SoraLocalVideoWidget` は下記のとおり `textureId` を渡します。
 
 ```dart
 // リモート映像の表示

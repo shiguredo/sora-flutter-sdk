@@ -299,7 +299,13 @@ class SoraConnection {
   /// セッション ID
   String? get sessionId => _signalingState.sessionId;
 
-  /// 音声トラックの有効/無効を切り替える
+  /// 音声トラックの有効 / 無効を切り替える
+  ///
+  /// 対象の音声トラックが未取得の場合は何もしない。
+  ///
+  /// 例外:
+  ///
+  /// - dispose 済みの場合は [StateError]。
   void setAudioEnabled(bool enabled) {
     _ensureNotDisposed();
     _currentAudioTrack?.enabled = enabled;
@@ -308,7 +314,13 @@ class SoraConnection {
   /// 音声トラックが有効かどうかを返す
   bool get isAudioEnabled => _currentAudioTrack?.enabled ?? false;
 
-  /// 映像トラックの有効/無効を切り替える
+  /// 映像トラックの有効 / 無効を切り替える
+  ///
+  /// 対象の映像トラックが未取得の場合は何もしない。
+  ///
+  /// 例外:
+  ///
+  /// - dispose 済みの場合は [StateError]。
   void setVideoEnabled(bool enabled) {
     _ensureNotDisposed();
     _currentVideoTrack?.enabled = enabled;
@@ -556,6 +568,28 @@ class SoraConnection {
   /// recvonly、または audio / video がともに `false` の場合は stream を渡せない。
   /// sendonly / sendrecv で audio と video がともに未指定の場合は Sora のデフォルトが適用されるため、
   /// stream を省略することも、config に応じた track を含む stream を渡すこともできる。
+  ///
+  /// 例外:
+  ///
+  /// - dispose 済みの場合は [StateError]。
+  /// - recvonly で [stream] が null でない場合は [StateError]。
+  /// - sendonly / sendrecv で [stream] が null かつ audio / video の少なくとも
+  ///   一方が `true` の場合は [StateError]。
+  /// - audio / video がともに `false` で [stream] が null でない場合は
+  ///   [StateError]。
+  /// - audio が `true` で [stream] の audio track が 1 つでない場合は
+  ///   [StateError]。
+  /// - audio が `false` で [stream] に audio track がある場合は [StateError]。
+  /// - audio が未指定で [stream] に audio track が 2 つ以上ある場合は
+  ///   [StateError]。
+  /// - video が `true` で [stream] の video track が 1 つでない場合は
+  ///   [StateError]。
+  /// - video が `false` で [stream] に video track がある場合は [StateError]。
+  /// - video が未指定で [stream] に video track が 2 つ以上ある場合は
+  ///   [StateError]。
+  /// - 接続が `timeoutOptions.connectionTimeout` を超えた場合は
+  ///   [TimeoutException]。
+  /// - screen capture の開始中に接続が無効化された場合は [StateError]。
   Future<void> connect([LocalMediaStream? stream]) async {
     _ensureNotDisposed();
     // disconnect() は WebSocket の close 待ちと ReplayKit の停止を含む。
@@ -816,6 +850,13 @@ class SoraConnection {
   ///
   /// graceful disconnect message の送信、transport close、native teardown、
   /// セッション state reset はこの経路でまとめて扱う。
+  ///
+  /// dispose 済みでも例外は投げない。
+  ///
+  /// 例外:
+  ///
+  /// - 切断処理が `timeoutOptions.disconnectWaitTimeout` を超えた場合は
+  ///   [TimeoutException]。
   Future<void> disconnect() async {
     final existing = _ongoingDisconnect;
     if (existing != null) {
@@ -1189,16 +1230,33 @@ class SoraConnection {
   /// W3C WebRTC の `RTCPeerConnection.getStats()` と
   /// 名前をそろえるため、`get` をあえて残している。
   ///
-  /// 孤立 request が上限に達している場合は `StateError` で失敗する。
-  /// 上限到達後はコールバック到着による自然減まで失敗が続く。
-  /// 自然減が起きない場合は接続の再生成が必要になる。
-  /// PC 未生成で上限未達の場合は null を返す。
+  /// 孤立 request が上限に達した場合は、コールバック到着による自然減まで
+  /// 失敗が続く。自然減が起きない場合は接続の再生成が必要になる。
+  ///
+  /// 例外:
+  ///
+  /// - dispose 済みの場合は [StateError]。
+  /// - 孤立 request が上限に達している場合は [StateError]。
+  /// - 応答が 5 秒以内に返らない場合は [TimeoutException]。
+  ///
+  /// PeerConnection 未生成で上限未達の場合は例外ではなく `null` を返す。
   Future<String?> getStats() async {
     _ensureNotDisposed();
     return _webrtcClient.getStats();
   }
 
   /// 接続中の audio sender に新しい track を設定する。
+  ///
+  /// 例外:
+  ///
+  /// - dispose 済みの場合は [StateError]。
+  /// - PeerConnection が connected でない場合は [StateError]。
+  /// - シグナリングの接続が確立していない場合は [StateError]。
+  /// - [stream] がこの接続にアタッチされていない場合は [StateError]。
+  /// - [stream] が dispose 済みの場合は [StateError]。
+  /// - [track] が [LocalAudioTrack] でない場合は [StateError]。
+  /// - [track] が dispose 済みの場合は [StateError]。
+  /// - role が recvonly、または audio が `false` の場合は [StateError]。
   Future<void> replaceAudioTrack(
     LocalMediaStream stream,
     LocalMediaStreamTrack track,
@@ -1242,6 +1300,17 @@ class SoraConnection {
   /// external video track を渡した場合、[localVideo] Stream には何も
   /// emit されない。camera からの切り替えで消費者が古い `textureId` を
   /// 保持し続けないよう、切り替え側で明示的に破棄すること。
+  ///
+  /// 例外:
+  ///
+  /// - dispose 済みの場合は [StateError]。
+  /// - PeerConnection が connected でない場合は [StateError]。
+  /// - シグナリングの接続が確立していない場合は [StateError]。
+  /// - [stream] がこの接続にアタッチされていない場合は [StateError]。
+  /// - [stream] が dispose 済みの場合は [StateError]。
+  /// - [track] が [LocalVideoTrack] でない場合は [StateError]。
+  /// - [track] が dispose 済みの場合は [StateError]。
+  /// - role が recvonly、または video が `false` の場合は [StateError]。
   Future<void> replaceVideoTrack(
     LocalMediaStream stream,
     LocalMediaStreamTrack track,
@@ -1476,6 +1545,15 @@ class SoraConnection {
   }
 
   /// 接続中の audio sender から track を外す。
+  ///
+  /// 例外:
+  ///
+  /// - dispose 済みの場合は [StateError]。
+  /// - PeerConnection が connected でない場合は [StateError]。
+  /// - シグナリングの接続が確立していない場合は [StateError]。
+  /// - [stream] がこの接続にアタッチされていない場合は [StateError]。
+  /// - [stream] が dispose 済みの場合は [StateError]。
+  /// - role が recvonly、または audio が `false` の場合は [StateError]。
   Future<void> removeAudioTrack(LocalMediaStream stream) async {
     _ensureNotDisposed();
     _validateRemoveAudioTrack(stream);
@@ -1495,6 +1573,15 @@ class SoraConnection {
   }
 
   /// 接続中の video sender から track を外す。
+  ///
+  /// 例外:
+  ///
+  /// - dispose 済みの場合は [StateError]。
+  /// - PeerConnection が connected でない場合は [StateError]。
+  /// - シグナリングの接続が確立していない場合は [StateError]。
+  /// - [stream] がこの接続にアタッチされていない場合は [StateError]。
+  /// - [stream] が dispose 済みの場合は [StateError]。
+  /// - role が recvonly、または video が `false` の場合は [StateError]。
   Future<void> removeVideoTrack(LocalMediaStream stream) {
     _ensureNotDisposed();
     _validateRemoveVideoTrack(stream);
@@ -1570,6 +1657,16 @@ class SoraConnection {
   }
 
   /// JSON-RPC リクエストを rpc DataChannel 経由で送信する
+  ///
+  /// [options] の `notification` が `true` の場合は応答を待たずに `null` を
+  /// 返す。
+  ///
+  /// 例外:
+  ///
+  /// - dispose 済みの場合は [StateError]。
+  /// - Sora が JSON-RPC の error を返した場合は [SoraRpcError]。
+  /// - [options] の `timeout` を指定していて、その時間内に応答が返らない
+  ///   場合は [TimeoutException]。
   Future<Object?> rpc(
     String method, {
     Object? params,

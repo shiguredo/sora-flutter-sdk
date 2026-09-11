@@ -1,7 +1,7 @@
 # `LICENSE` に Copyright 行 / APPENDIX を追加する
 
 - Created: 2026-08-27
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-11
 - Branch: feature/add-license-copyright
 - Polished: 2026-09-07
 - Milestone: 2026.1.0
@@ -41,3 +41,9 @@
 
 - [ ] `LICENSE` 末尾に上記 boilerplate が追記されている。
 - [ ] 追記文面が `README.md` 518-530 行目と同一である。
+
+## 解決方法
+
+対応不要として closed にする。
+
+著作権者表記 (`Copyright 2026-2026, Shiguredo Inc.`) は `README.md` のライセンス節に既に記載されている。`LICENSE` は Apache License 2.0 の本文のみを置く方針とし、APPENDIX boilerplate の追記は行わない。

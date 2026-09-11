@@ -121,8 +121,6 @@ limitations under the License.
 
 ### クライアント SDK
 
-- [Sora Flutter SDK](https://github.com/shiguredo/sora-flutter-sdk)
-  - [Sora Flutter SDK ドキュメント](https://sora-flutter-sdk.shiguredo.jp/)
 - [Sora JavaScript SDK](https://github.com/shiguredo/sora-js-sdk)
   - [Sora JavaScript SDK ドキュメント](https://sora-js-sdk.shiguredo.jp/)
 - [Sora iOS SDK](https://github.com/shiguredo/sora-ios-sdk)
@@ -140,6 +138,8 @@ limitations under the License.
   - [Sora Python SDK ドキュメント](https://sora-python-sdk.shiguredo.jp/)
   - [Sora Python SDK サンプル集](https://github.com/shiguredo/sora-python-sdk-samples)
 - [Sora C++ SDK](https://github.com/shiguredo/sora-cpp-sdk)
+- [Sora Rust SDK](https://github.com/shiguredo/sora-rust-sdk)
+- [Sora Flutter SDK](https://github.com/shiguredo/sora-flutter-sdk)
 
 ### クライアントツール
 

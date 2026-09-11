@@ -1,7 +1,7 @@
 # `SoraErrorCode` に SDP / トラック追加系のエラーコードを追加する
 
 - Created: 2026-08-27
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-11
 - Branch: feature/add-sora-error-code-sdp-track
 - Polished: 2026-08-27
 - Milestone: 2026.1.0
@@ -41,3 +41,9 @@ emit 箇所は `lib/src/ffi/webrtc_client.dart` の SDP / PC 生成 / トラッ�
 - [ ] 上記 8 種類のリテラル文字列での emit が `SoraErrorCode` 経由に置き換わっている。
 - [ ] 追加した定数の dartdoc が書かれている。
 - [ ] `flutter analyze` と関連テストが成功する。
+
+## 解決方法
+
+- `lib/src/sora_error_code.dart` の `SoraErrorCode` に 8 種類の定数 (`offerInvalid` / `reofferInvalid` / `setRemoteDescriptionFailed` / `createAnswerFailed` / `setLocalDescriptionFailed` / `createPeerConnectionFailed` / `addAudioTrackFailed` / `addVideoTrackFailed`) を emit 条件の dartdoc 付きで追加した。
+- `lib/src/ffi/webrtc_client.dart` の 10 箇所、`lib/src/ffi/callback_handlers.dart` の 3 箇所のリテラル emit を定数参照に置き換えた。`callback_handlers.dart` には `sora_error_code.dart` の import を追加した。
+- `candidate_parse_failed` は issue のスコープ外のためリテラルのまま残した。

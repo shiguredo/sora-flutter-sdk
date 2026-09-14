@@ -515,9 +515,12 @@ class _DevToolsPageState extends State<DevToolsPage>
     // 握り潰すため、再接続時に選択が反映されない原因を切り分けるために使う。
     MediaDevices.setRecordingDeviceDebugSink(_appendLog);
     // 診断ログの出力先が有効かどうかを起動時に 1 行だけ残す。
-    // この行が出ない場合、SDK 側の変更を含まないビルドが動いている。
+    // SDK 側の診断ログ実装の版を判別できるよう、出力先の同一性も記録する。
+    // この行が出ない、または sink が unset の場合は SDK 側の変更を含まない
+    // ビルドが動いている。
     MediaDevices.recordingDeviceDebugSink?.call(
-      'audio_input_reconnect: diagnostic_sink=attached',
+      'audio_input_reconnect: diagnostic_sink=attached'
+      ' sink=${MediaDevices.recordingDeviceDebugSink != null ? 'set' : 'unset'}',
     );
     // プラットフォームがサポートする Video Codec 一覧を動的に取得する。
     try {

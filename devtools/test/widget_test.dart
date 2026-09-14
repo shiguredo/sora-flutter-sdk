@@ -527,7 +527,9 @@ void main() {
     // 起動時に録音デバイス切り替えの診断ログ出力先が有効かどうかを 1 行だけ残す。
     // ログ本文は複数行を 1 つの Text にまとめて表示するため部分一致で確認する。
     expect(
-      find.textContaining('audio_input_reconnect: diagnostic_sink=attached'),
+      find.textContaining(
+        'audio_input_reconnect: diagnostic_sink=attached sink=set',
+      ),
       findsOneWidget,
     );
     expect(find.text('Follow latest'), findsOneWidget);

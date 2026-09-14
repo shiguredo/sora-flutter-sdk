@@ -3,7 +3,7 @@
 - Created: 2026-09-14
 - Completed: {YYYY-MM-DD}
 - Branch: feature/fix-rejected-remote-video-track-removal
-- Polished: {YYYY-MM-DD}
+- Polished: 2026-09-14
 
 ## 目的
 
@@ -11,7 +11,7 @@
 
 ## 現状
 
-再現環境は Linux の devtools（recvonly、多人数チャネル接続）と、H.264 を送信する sendrecv クライアントの組み合わせ。`skills/sora-flutter-sdk/SKILL.md` の対応コーデック表のとおり、Linux はソフトウェアコーデック（VP8 / VP9 / AV1）のみで H.264 はデコードできない。実ログでの流れは次のとおり。
+再現環境は Linux の devtools（recvonly、多人数チャネル接続）と、H.264 を送信する sendrecv クライアントの組み合わせ。`README.md` の対応コーデック表のとおり、ソフトウェアバックエンドは全プラットフォームで VP8 / VP9 / AV1 のみであり、ハードウェアアクセラレータに該当しない Linux は H.264 をデコードできない。実ログでの流れは次のとおり。
 
 1. Sora から re-offer が届き、相手の video m-line に H.264 のみが含まれる（`a=rtpmap:35 H264/90000`、sendonly）。
 2. `native: ontrack kind=video` が発火し、Dart 側が `RemoteTrackManager.attachRemoteVideoTrack` で renderer / texture を生成し `remote_track_attached` を emit する。これが黒画面の実体（フレームは届かないため黒表示になる）。
@@ -57,7 +57,7 @@ SDK 側の要因は、リモートトラック削除イベントが「リモー�
 - `lib/src/ffi/webrtc_client.dart`: `SdpNegotiationCallbacks` からの拒否通知を `_onEvent` 経由で `SoraConnection` へ流す wiring。
 - `lib/src/sora_connection.dart`: `_handleWebrtcEvent` での拒否イベント処理（`_emitRemoveTrackEvent` 経由のイベント発火を含む）。
 - `lib/src/sora_remote_track_manager.dart`: 拒否済み trackId 集合の保持、`attachRemoteVideoTrack` の打ち消し、trackId 指定の detach と `_disposeRetryEntries` の連携。
-- ユニットテストの追加と、`CHANGES.md` への Fix 追記（`shiguredo-changelog` スキルの規約に従う）。
+- ユニットテストの追加。`CHANGELOG.md` への記載は正式リリース前のため行わない（`CODEBASE.md` の「正式リリース前」節に従う）。
 
 ## 関連
 

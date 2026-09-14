@@ -343,6 +343,13 @@ class WebrtcClient {
     bool preferDefaultDevice = false,
     void Function(String message)? emitDebug,
   }) {
+    // 切り替えが無言で失敗する経路を切り分けるため、公開入口でも記録する。
+    // この行が出ない場合は、この関数に到達していないことになる。
+    _emitRecordingDeviceDebug(
+      emitDebug,
+      'native: recording_device_apply deviceId=$deviceId'
+      ' preferDefaultDevice=$preferDefaultDevice',
+    );
     final error = _trySetRecordingDeviceByGuid(
       deviceId,
       labelHint: labelHint,

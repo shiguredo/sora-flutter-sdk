@@ -110,14 +110,22 @@ Future<void> setAudioInputDevice(String? deviceId) async {
       ' enumerated=${devices.length}'
       ' matched=${selectedDevice != null}',
     );
-    WebrtcClient.setRecordingDeviceByGuid(
-      effectiveDeviceId,
-      labelHint: selectedDevice?.label,
-      preferDefaultDevice: deviceId == null,
-      // 切り替え失敗の内容を利用側のログへ届ける。
-      // 未設定の間は SDK 側で何も出力しない。
-      emitDebug: sink,
-    );
+    try {
+      WebrtcClient.setRecordingDeviceByGuid(
+        effectiveDeviceId,
+        labelHint: selectedDevice?.label,
+        preferDefaultDevice: deviceId == null,
+        // 切り替え失敗の内容を利用側のログへ届ける。
+        // 未設定の間は SDK 側で何も出力しない。
+        emitDebug: sink,
+      );
+    } catch (error) {
+      // 失敗の内容を利用側のログへ届けてから再送出する。呼び出し元の
+      // `createAudioTrack` がデバイス不存在として握り潰す経路でも、
+      // 何が起きたかをログから確認できるようにする。
+      sink?.call('native: set_audio_input_device failed error=$error');
+      rethrow;
+    }
     return;
   }
   await soraMethodChannel

@@ -16,7 +16,7 @@ Windows の実 ADM (`webrtc::AudioDeviceWindowsCore`) は MTA を要求するた
 
 - `WebrtcClient._ensureSharedFactory` は Windows で `LibWebrtcC.soraCreateAudioDeviceModule` を呼ぶ。`windows_bridge.c` の setjmp ラッパーは abort を捕捉して NULL を返す
 - ADM が NULL の場合、`WebrtcClient.sharedAudioDeviceModule` も null になり、`WebrtcClient.setRecordingDeviceByGuid` が `StateError('AudioDeviceModule is not initialized.')` を投げる
-- devtools は `devtools/windows/runner/main.cpp` で MTA 初期化済み。e2e_test_app も実音声デバイスのテストのために MTA 化した
+- devtools は `devtools/windows/runner/main.cpp` で MTA 初期化済み。e2e_test_app も ADM を使う `windows_audio_device_test.dart` のために MTA 化した
 - 実アプリ向けの要件や回避策は README / ドキュメントに記載されていない
 - `useAudioDevice` の既定値は true のため、既定設定のまま接続するアプリがこの問題に当たる
 

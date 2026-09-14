@@ -136,17 +136,18 @@ libwebrtc の `AudioDeviceWindowsCore::RecordingDevices()` は `_RefreshDeviceLi
 ## テスト戦略
 
 - 保留の可否判定は純粋関数 `shouldDeferRecordingDeviceApply` に切り出し、`test/webrtc_client_recording_device_test.dart` で単体テストする。列挙失敗 (`-1`) は保留、デバイス無し (`0`) と列挙成功 (`1` 以上) は保留しないことを固定する
-- `setRecordingDeviceByGuid` の FFI 呼び出し部分と `_restoreSelectedRecordingDevice` はネイティブライブラリと Windows 実機が必要なため自動テストしない。実機の `native: windows_audio_restore device=... ok` で確認する
+- `setRecordingDeviceByGuid` の FFI 呼び出し部分と `_restoreSelectedRecordingDevice` は Windows の CoreAudio ADM とネイティブライブラリが必要なため、現在の CI では到達しない。Linux の FFI ジョブは push audio device を使うため CoreAudio 経路の代替にならず、`.github/workflows/ci.yml` の Windows ジョブはビルドのみである。自動テストで覆うには Windows ジョブへのネイティブライブラリ導入が必要で、本 issue の範囲を超えるため実機確認で担保する
 - `resolveRecordingDeviceIndex` の単体テスト (`test/webrtc_client_recording_device_test.dart`) は既存のものを維持する
 - `_prepareLocalStream` の実処理 (removeTrack / dispose / createAudioTrack / addTrack) はネイティブライブラリと実デバイスが必要なため自動テストしない。モックやスタブは追加しない
 - `e2e_test_app/integration_test/windows_audio_device_test.dart` は本 issue の検証手段に使わない。理由は次節に記す
-- 実マイクが 2 本以上ある Windows 実機での手動確認を `## 手動確認手順 (Windows 実機)` に従って行う。これが本 issue の唯一の検証手段である
+- 実マイクが 2 本以上ある Windows 実機での手動確認を `## 手動確認手順 (Windows 実機)` に従って行う
 
 ### Windows E2E テストを検証手段に使わない理由
 
 - `e2e_test_app/integration_test/windows_audio_device_test.dart` は Sora 接続を作らないため PeerConnection が生成されず、`native: windows_audio_restore` が出力されない。再適用は `_configureWindowsAudioDeviceAfterPeerConnection` (PeerConnection 作成直後) と `_addExistingLocalAudioTrack` (`pcAddTrack` 直前) の 2 箇所からのみ呼ばれるためである
 - 接続なしで `MediaDevices.createAudioTrack(audioDeviceId:)` を呼んだ場合に確認できるのは「例外が出ないこと」だけで、ADM にどのデバイスが入ったかも、録音開始時にそれが使われたかも観測できない。ADM の状態を読む公開 API は無く、`WebrtcClient` は `lib/sora_sdk.dart` で export していない
-- このテストは `.github/workflows/ci.yml` ではビルドのみ、`.github/workflows/e2e-test.yml` の Windows マトリクスにも含まれないため CI では実行されない。Windows 実機で手動実行したときに列挙と `createAudioTrack` が通ることを確認する煙テストとして扱う
+- さらに、同テストは列挙の先頭デバイスを選ぶため、既定デバイスが選ばれた場合と区別できない。0173 の症状が出ている状態でも成功し得る
+- このテストは `.github/workflows/e2e-test.yml` の Windows マトリクスに含まれておらず CI では実行されない。マトリクスへ追加した場合にランナー上で成立するか (音声入力デバイスが列挙できるか) は別 issue (0175) で確認する。観測 API の追加を含む検証内容の強化も 0175 で扱う
 
 ## 完了条件
 
@@ -183,7 +184,7 @@ libwebrtc の `AudioDeviceWindowsCore::RecordingDevices()` は `_RefreshDeviceLi
 4. デバイス B にのみ話しかけ、audio `outbound-rtp` の `audioLevel` または `totalAudioEnergy` が反応することを確認する
 5. 受信側で B のマイクの音声だけが届くことを確認する
 
-CI (GitHub Actions の Windows Hosted Runner) には音声入力デバイスが無いため、この手順は自動テストでは代替できない。`e2e_test_app/integration_test/windows_audio_device_test.dart` も Sora 接続を作らないため再適用を観測できず、代替にならない (`## テスト戦略` を参照)。したがって本手順が本 issue の唯一の検証手段である。
+この手順は音声入力デバイスを 2 つ以上持つ Windows 実機と、その場で特定のマイクに話しかける確認を前提とする。CI の Windows ランナーで音声入力デバイスが列挙できるかは未確認であり、実マイクへの入力と受信側での聞き分けは自動化できない。`e2e_test_app/integration_test/windows_audio_device_test.dart` も Sora 接続を作らないため再適用を観測できず、代替にならない (`## テスト戦略` を参照)。したがって本 issue では本手順を検証手段とする。同テストの強化は別 issue (0175) で扱う。
 
 ## 確認結果
 
@@ -199,7 +200,7 @@ CI (GitHub Actions の Windows Hosted Runner) には音声入力デバイスが�
 - 前回実デバイスで接続し、今回 beep 音声を有効にして再接続した場合に既存の音声トラックが残り beep トラックが追加されない既存挙動
 - 再適用の 2 箇所 (`_configureWindowsAudioDeviceAfterPeerConnection` と `_addExistingLocalAudioTrack`) の両方で列挙に失敗した場合の追加対策。実機では PeerConnection 作成直後までに ADM が復旧しており、復旧しなかった場合は `native: windows_audio_restore skipped: enumerate_failed count=...` が 2 回出て成功ログが出ないため Diagnostics タブの Logs から判別できる。上位へ通知する手段は `_emitState` の接続エラー経路しかなく、接続自体は成立している状態に対してエラーを出すのは過剰である。実機でこの状態が観測された場合に別 issue で扱う
 - `devtools/README.md` への制限事項の追記。ドキュメント整備は別 issue に切り出す
-- `e2e_test_app/integration_test/windows_audio_device_test.dart` の検証内容の強化。このテストは Sora 接続を作らないため再適用のログを観測できず、ADM に適用されたデバイスを読む公開 API も無いため、本 issue の症状を検出する形にできない。強化するには接続を伴う別のテストとして作る必要があり、手動確認手順で代替する
+- `e2e_test_app/integration_test/windows_audio_device_test.dart` の検証内容の強化。同テストは Sora 接続を作らないため再適用のログを観測できず、ADM に適用されたデバイスを読む公開 API も無い。観測 API の追加と `e2e-test.yml` の Windows マトリクスへの追加を含めて別 issue (0175) で扱う
 
 ## 関連 issue
 

@@ -14,6 +14,10 @@ Windows で `useAudioDevice: true` の実音声デバイス (Windows CoreAudio A
 
 - 0033: WebrtcClient に Windows の AudioDeviceModule 初期化パスを追加する
 - 0036: Windows 音声デバイス (WASAPI) の列挙と選択を実装する
+- 0171: Windows でエコーキャンセルを有効化する
+- 0172: Windows アプリの COM 初期化要件 (MTA) を扱う
+- 0173: devtools で再接続時に音声入力デバイスの選択が反映されない問題を修正する
+- 0174: Windows の DLL で補正 API のシンボル解決を検証する CI を追加する
 
 ## 再現手順
 
@@ -108,15 +112,18 @@ CI (GitHub Actions の Windows Hosted Runner) には音声入力デバイスが�
 - `test/webrtc_client_test.dart` に補正 API のシンボル解決と `kWindowsDefaultDevice` の値のテストを追加した
 - `e2e_test_app/windows/runner/main.cpp` の `wWinMain` を `COINIT_MULTITHREADED` に変更し、`e2e_test_app/windows/runner/CMakeLists.txt` に `/utf-8` を追加した
 - `CHANGELOG.md` への追記は正式リリース確定時に実施する。CODEBASE.md の「正式リリース前」節により、本ブランチでは追記しない。追記内容は `[FIX] Windows で実音声デバイス利用時に音声が送受信できない問題を修正する` とし、内蔵 AEC の無効化、再生デバイスと録音デバイスの補正、Windows 内蔵 AEC が利用可能な環境でエコーキャンセルが無効になる副作用を含める
+- CI では音声入力デバイスが使えないため、実音声デバイスの送受信テストは追加しない。回帰確認は Windows 実機で行う
+
+## 確認結果
+
 - Windows 実機で sendonly / sendrecv の音声送信と recvonly / sendrecv の音声再生が成立し、sender の `outbound-rtp` と receiver の `inbound-rtp` が増加することを手動確認した
 - 音声入力に既定以外のデバイスを選択した接続でも、選択したデバイスが維持されることを手動確認した
 - Windows 実機で `e2e_test_app/integration_test/windows_audio_device_test.dart` を実行し、2 件とも通過した
 - `e2e_test_app` の `flutter analyze --fatal-infos` を実行し、問題がないことを確認した (ルートと devtools は GitHub Actions の CI で通過)
-- CI では音声入力デバイスが使えないため、実音声デバイスの送受信テストは追加しない。回帰確認は Windows 実機で行う
 - GitHub Actions の E2E Test (macOS / Linux / Windows) が通過した。Windows の runner 変更を含む e2e_test_app で接続テストが通ることを確認した
 - GitHub Actions の CI (Build Linux) で FFI 依存テストと解析が通過した。補正 API のシンボル解決と `kWindowsDefaultDevice` の値のテストを含む
 
-## 補足 (実機 A/B 確認)
+### 録音デバイス再適用の A/B 確認
 
 既定以外のマイクを選択して sendonly 接続した際の debug ログ:
 

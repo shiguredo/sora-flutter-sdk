@@ -211,7 +211,6 @@ libwebrtc の `AudioDeviceWindowsCore::RecordingDevices()` は `_RefreshDeviceLi
 - [x] `cd devtools && flutter analyze --fatal-infos lib test` と `flutter test` が成功する
 - [x] `dart format --output=none --set-exit-if-changed lib test` が差分なし
 - [x] モックやスタブを使用していない
-- [ ] 音声をミュートにしてから入力デバイスを変更して再接続しても、ミュートが維持される
 - [ ] `CHANGELOG.md` へは追記しない (`CODEBASE.md` の「正式リリース前」節)。正式リリース確定時に `[FIX]` を追記する
 
 ## 手動確認手順 (Windows 実機)
@@ -232,11 +231,11 @@ CI (GitHub Actions の Windows Hosted Runner) には音声入力デバイスが�
 - `## 再現手順` に記載したとおり、改善前は再接続後も A が使われ、改善後は B が使われることを Windows 実機で確認した
 - 再接続時は `RecordingDevices()` が `-1` を返すため選択を保持し、PeerConnection 作成直後の再適用で `target_index` を解決して B を適用することをログで確認した
 - 受信側で B のマイクの音声が届くことを確認した
-- 残る確認は「音声をミュートにしてから入力デバイスを変更して再接続してもミュートが維持されること」である
 
 ## 対象外
 
 - 接続中の音声入力デバイス切り替え。ADM は録音初期化後に `SetRecordingDevice` を -1 で拒否し、UI 側も接続中は `Audio Input` を無効化している。SDK の `SoraConnection.replaceAudioTrack` は音声トラックを `rtpSenderSetTrack` で差し替えるだけで ADM の録音デバイスを切り替えないため、この用途には使えない
+- 接続中にミュートした状態を再接続後も維持する対応。実機確認で維持されないことを確認したが、原因は devtools の UI 状態管理にある。接続中のミュートは `_toggleAudioEnabled` がトラックの `enabled` のみを変更し、`DevToolsPageNotifier.applyToggleAudio` は接続中に `connectAudio` を更新しない (`devtools/lib/src/devtools_models.dart`)。再接続時は `_prepareLocalStream` が音声トラックを `enabled = true` の既定値で新規生成するため、デバイス変更の有無に関係なくミュートが解除される。本 issue の修正対象 (SDK の録音デバイス選択) とは原因も変更対象も別であるため、別 issue に切り出す
 - 前回実デバイスで接続し、今回 beep 音声を有効にして再接続した場合に既存の音声トラックが残り beep トラックが追加されない既存挙動
 - `devtools/README.md` への制限事項の追記。ドキュメント整備は別 issue に切り出す
 

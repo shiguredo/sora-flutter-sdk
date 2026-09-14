@@ -895,6 +895,21 @@ class LibWebrtcC {
         int Function(Pointer<WebrtcAudioDeviceModule>)
       >('webrtc_AudioDeviceModule_InitRecording');
 
+  // Windows の内蔵 AEC (CWMAudioAEC DMO) の有効 / 無効を切り替える。
+  late final audioDeviceModuleEnableBuiltInAEC = _lib
+      .lookupFunction<
+        Int32 Function(Pointer<WebrtcAudioDeviceModule>, Int32),
+        int Function(Pointer<WebrtcAudioDeviceModule>, int)
+      >('webrtc_AudioDeviceModule_EnableBuiltInAEC');
+
+  // Windows の既定デバイス種別 (既定デバイス / 既定通信デバイス) で
+  // 再生デバイスを切り替える。
+  late final audioDeviceModuleSetPlayoutDeviceWithWindowsDeviceType = _lib
+      .lookupFunction<
+        Int32 Function(Pointer<WebrtcAudioDeviceModule>, Int32),
+        int Function(Pointer<WebrtcAudioDeviceModule>, int)
+      >('webrtc_AudioDeviceModule_SetPlayoutDeviceWithWindowsDeviceType');
+
   // 録音が初期化済みかを返す
   late final audioDeviceModuleRecordingIsInitialized = _lib
       .lookupFunction<
@@ -3387,6 +3402,11 @@ class WebrtcConstants {
     'webrtc_AudioDeviceModule_kLinuxAlsaAudio',
   );
   late final int kDummyAudio = _lookup('webrtc_AudioDeviceModule_kDummyAudio');
+
+  // Windows の既定デバイス種別 (eConsole の既定デバイス)
+  late final int kWindowsDefaultDevice = _lookup(
+    'webrtc_AudioDeviceModule_kDefaultDevice',
+  );
 
   // SSL プロトコル
   late final int sslProtocolDtls12 = _lookup('webrtc_SSL_PROTOCOL_DTLS_12');

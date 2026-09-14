@@ -319,10 +319,6 @@ class DevToolsConnectionController {
   final Future<void> Function(LocalMediaStream stream) _disposeLocalStream;
   // beep 音声送信時に保持する BeepAudioTrack。
   DevToolsBeepAudioTrack? _beepAudioTrack;
-  // 直近の `_prepareLocalStream` で音声トラックの生成経路を記録済みかどうか。
-  // 音声トラックを生成しない経路でも最後に 1 行だけ結果を出すために使う。
-  // 再接続時に音声入力デバイスの選択が反映されない問題の原因調査用。
-  bool _loggedAudioTrackPreparation = false;
 
   // beep 音声トラックを取得する。
   // 接続中かつ beep 音声送信が有効な場合に non-null を返す。
@@ -718,60 +714,20 @@ class DevToolsConnectionController {
   }
 
   // connect 前に local media を必要に応じて生成 / 再利用する。
-  //
-  // 再接続時に音声入力デバイスの選択が反映されない問題の原因を切り分けるため、
-  // `audio_input_reconnect:` プレフィクスの診断ログを出力する。記録する内容は、
-  // `_prepareLocalStream` が新規生成と再利用のどちらの分岐を通ったか、音声トラックを
-  // 生成したかどうか、生成に渡した `audioDeviceId`、生成の成否である。
   Future<LocalMediaStream?> _prepareLocalStream({
     required DevToolsConnectRequest request,
     required void Function(int textureId) onLocalTextureReady,
   }) async {
-    // 判定時の状態を残す。利用可能な音声入力デバイス数は `AudioDeviceModule` の
-    // 列挙結果であり、デバイスが消えている場合の切り分けに使う。
-    var availableAudioInputDeviceCount = -1;
-    try {
-      availableAudioInputDeviceCount =
-          (await MediaDevices.enumerateAudioInputDevices()).length;
-    } catch (error) {
-      _appendLog(
-        'audio_input_reconnect: enumerate_audio_input_devices error=$error',
-      );
-    }
-    final existingAudioTrackCount =
-        request.existingLocalStream?.getAudioTracks().length ?? 0;
-    _appendLog(
-      'audio_input_reconnect: branch='
-      '${request.existingLocalStream == null ? 'create' : 'reuse'}'
-      ' existing=${request.existingLocalStream != null}'
-      ' audio_tracks=$existingAudioTrackCount'
-      ' configured_audio=${request.configuredAudio}'
-      ' configured_video=${request.configuredVideo}'
-      ' beep=${request.beepAudioEnabled}'
-      ' use_audio_device=${request.useAudioDevice}'
-      ' external_video=${request.useExternalVideoTrack}'
-      ' selected_audio_device=${request.selectedAudioInputDeviceId}'
-      ' available_audio_inputs=$availableAudioInputDeviceCount',
-    );
-
     if (request.role != SoraRole.sendonly &&
         request.role != SoraRole.sendrecv) {
       await disposeLocalStream(request.existingLocalStream);
-      _appendLog(
-        'audio_input_reconnect: attach=none reason=not_sending_role'
-        ' role=${request.role.value}',
-      );
       return null;
     }
     if (!request.configuredAudio && !request.configuredVideo) {
       await disposeLocalStream(request.existingLocalStream);
-      _appendLog(
-        'audio_input_reconnect: attach=none reason=no_media_configured',
-      );
       return null;
     }
 
-    _loggedAudioTrackPreparation = false;
     LocalMediaStream? localStream = request.existingLocalStream;
     try {
       // 再利用する stream に残った beep track は、先に stream から外して破棄する。
@@ -790,8 +746,8 @@ class DevToolsConnectionController {
               localStream.addTrack(audioTrack);
             } else {
               localStream.addTrack(
-                await _createAudioTrackWithDevice(
-                  deviceId: request.selectedAudioInputDeviceId,
+                await MediaDevices.createAudioTrack(
+                  audioDeviceId: request.selectedAudioInputDeviceId,
                 ),
               );
             }
@@ -810,13 +766,6 @@ class DevToolsConnectionController {
               videoFrameRate: request.selectedFrameRate,
             ),
           );
-          if (request.configuredAudio) {
-            _logAudioTrackPreparation(
-              generated: !request.beepAudioEnabled,
-              deviceId: request.selectedAudioInputDeviceId,
-              detail: 'getUserMedia',
-            );
-          }
           // beep 音声が有効な場合は getUserMedia の後で DevToolsBeepAudioTrack を追加する。
           if (request.configuredAudio && request.beepAudioEnabled) {
             final audioTrack = await MediaDevices.createAudioTrack();
@@ -843,8 +792,8 @@ class DevToolsConnectionController {
               localStream.addTrack(audioTrack);
             } else {
               localStream.addTrack(
-                await _createAudioTrackWithDevice(
-                  deviceId: request.selectedAudioInputDeviceId,
+                await MediaDevices.createAudioTrack(
+                  audioDeviceId: request.selectedAudioInputDeviceId,
                 ),
               );
             }
@@ -871,60 +820,11 @@ class DevToolsConnectionController {
         onLocalTextureReady(textureId);
         _appendEventLog('local_video_ready: textureId=$textureId');
       }
-      // 音声トラックを生成しない経路でも結果を 1 行だけ残す。
-      if (!_loggedAudioTrackPreparation) {
-        _appendLog(
-          'audio_input_reconnect: attach=unchanged reason=no_audio_track '
-          'audio_tracks=${localStream.getAudioTracks().length}',
-        );
-      }
       return localStream;
     } catch (_) {
       await disposeLocalStream(localStream);
       rethrow;
     }
-  }
-
-  // 選択中のデバイスを指定して音声トラックを生成し、診断ログを出力する。
-  //
-  // 再接続時に音声入力デバイスの選択が反映されない問題の原因調査用。
-  Future<LocalAudioTrack> _createAudioTrackWithDevice({
-    required String? deviceId,
-  }) async {
-    _appendLog('audio_input_reconnect: create_audio_track device=$deviceId');
-    try {
-      final track = await MediaDevices.createAudioTrack(
-        audioDeviceId: deviceId,
-      );
-      _logAudioTrackPreparation(
-        generated: true,
-        deviceId: deviceId,
-        detail: 'createAudioTrack',
-      );
-      return track;
-    } catch (error) {
-      _appendLog(
-        'audio_input_reconnect: create_audio_track_failed'
-        ' device=$deviceId error=$error',
-      );
-      rethrow;
-    }
-  }
-
-  // 音声トラックの生成結果を 1 回だけ診断ログへ出力する。
-  void _logAudioTrackPreparation({
-    required bool generated,
-    required String? deviceId,
-    required String detail,
-  }) {
-    if (_loggedAudioTrackPreparation) {
-      return;
-    }
-    _loggedAudioTrackPreparation = true;
-    _appendLog(
-      'audio_input_reconnect: attach=${generated ? 'generated' : 'reused'}'
-      ' detail=$detail device=$deviceId',
-    );
   }
 
   // external video track を生成する。

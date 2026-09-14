@@ -92,10 +92,6 @@ Future<void> setAudioInputDevice(String? deviceId) async {
   // 内部の getDefaultAudioInputDeviceId / enumerateAudioInputDevices も
   // 軽量な問い合わせであるため、タイムアウトは設定していない。
   if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
-    final sink = WebrtcClient.recordingDeviceDebugSink;
-    // 録音デバイスの切り替えが無言で失敗する経路を切り分けるため、
-    // 入口と列挙結果を記録する。出力先が未設定のときは何も出力しない。
-    sink?.call('native: set_audio_input_device requested=$deviceId');
     final effectiveDeviceId = deviceId ?? await getDefaultAudioInputDeviceId();
     final devices = await enumerateAudioInputDevices();
     AudioInputDevice? selectedDevice;
@@ -105,27 +101,11 @@ Future<void> setAudioInputDevice(String? deviceId) async {
         break;
       }
     }
-    sink?.call(
-      'native: set_audio_input_device effective=$effectiveDeviceId'
-      ' enumerated=${devices.length}'
-      ' matched=${selectedDevice != null}',
+    WebrtcClient.setRecordingDeviceByGuid(
+      effectiveDeviceId,
+      labelHint: selectedDevice?.label,
+      preferDefaultDevice: deviceId == null,
     );
-    try {
-      WebrtcClient.setRecordingDeviceByGuid(
-        effectiveDeviceId,
-        labelHint: selectedDevice?.label,
-        preferDefaultDevice: deviceId == null,
-        // 切り替え失敗の内容を利用側のログへ届ける。
-        // 未設定の間は SDK 側で何も出力しない。
-        emitDebug: sink,
-      );
-    } catch (error) {
-      // 失敗の内容を利用側のログへ届けてから再送出する。呼び出し元の
-      // `createAudioTrack` がデバイス不存在として握り潰す経路でも、
-      // 何が起きたかをログから確認できるようにする。
-      sink?.call('native: set_audio_input_device failed error=$error');
-      rethrow;
-    }
     return;
   }
   await soraMethodChannel

@@ -510,18 +510,6 @@ class _DevToolsPageState extends State<DevToolsPage>
       appendEventLog: _appendEventLog,
       disposeLocalStream: _disposeLocalStream,
     );
-    // 録音デバイス切り替えの診断ログを画面のログへ流す。
-    // `MediaDevices.createAudioTrack` は切り替え失敗をデバイス不存在として
-    // 握り潰すため、再接続時に選択が反映されない原因を切り分けるために使う。
-    MediaDevices.setRecordingDeviceDebugSink(_appendLog);
-    // 診断ログの出力先が有効かどうかを起動時に 1 行だけ残す。
-    // SDK 側の診断ログ実装の版を判別できるよう、出力先の同一性も記録する。
-    // この行が出ない、または sink が unset の場合は SDK 側の変更を含まない
-    // ビルドが動いている。
-    MediaDevices.recordingDeviceDebugSink?.call(
-      'audio_input_reconnect: diagnostic_sink=attached'
-      ' sink=${MediaDevices.recordingDeviceDebugSink != null ? 'set' : 'unset'}',
-    );
     // プラットフォームがサポートする Video Codec 一覧を動的に取得する。
     try {
       final codecTypes = Sora.supportedVideoCodecTypes;
@@ -601,8 +589,6 @@ class _DevToolsPageState extends State<DevToolsPage>
     _connection = null;
     final localStream = _localStream;
     _localStream = null;
-    // 画面のログ callback が破棄後に呼ばれないよう、SDK 側の出力先を先に外す。
-    MediaDevices.setRecordingDeviceDebugSink(null);
     // State.dispose は await できないため、購読を先に無効化してから cleanup を開始する。
     unawaited(_disposeAfterUnmount(connection, localStream));
     _signalingUrlController.dispose();

@@ -115,3 +115,15 @@ CI (GitHub Actions の Windows Hosted Runner) には音声入力デバイスが�
 - CI では音声入力デバイスが使えないため、実音声デバイスの送受信テストは追加しない。回帰確認は Windows 実機で行う
 - GitHub Actions の E2E Test (macOS / Linux / Windows) が通過した。Windows の runner 変更を含む e2e_test_app で接続テストが通ることを確認した
 - GitHub Actions の CI (Build Linux) で FFI 依存テストと解析が通過した。補正 API のシンボル解決と `kWindowsDefaultDevice` の値のテストを含む
+
+## 補足 (実機 A/B 確認)
+
+既定以外のマイクを選択して sendonly 接続した際の debug ログ:
+
+- `native: windows_audio_fix aec_rc=0 playout_rc=0`
+- `native: windows_audio_restore device={0.0.1.00000000}.{0c5b5ba3-2313-4746-b9cd-9bfe8c5713a1} ok` (PeerConnection 作成直後)
+- `native: windows_audio_restore device={0.0.1.00000000}.{0c5b5ba3-2313-4746-b9cd-9bfe8c5713a1} ok` (`pcAddTrack` 直前、約 8 ms 後)
+
+`pcAddTrack` 直前の再適用を削除して実機で確認したところ、ログは `native: windows_audio_restore ... ok` の 1 行だけになり、既定以外のデバイスが使われなくなった。PeerConnection 作成直後の再適用は rc=0 を返すが、これだけでは録音に選択が反映されない実機事象があるため、`pcAddTrack` 直前の再適用も残す。
+
+作成直後の設定が録音時に反映されない機序は未解明。libwebrtc m150 のソースには PeerConnection 作成後に録音デバイスを上書きする経路が見当たらないため、C ラッパーの呼び出しタイミングなど別の要因が疑われる。

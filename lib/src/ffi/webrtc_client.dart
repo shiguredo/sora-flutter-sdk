@@ -226,6 +226,8 @@ class WebrtcClient {
   static String? _selectedRecordingDeviceId;
   static String? _selectedRecordingDeviceLabelHint;
   static bool _selectedRecordingDevicePreferDefaultDevice = false;
+  // 直近の録音デバイス選択の結果。再適用の debug ログで原因を追うために保持する。
+  static String? _lastRecordingDeviceSelectionResult;
   // テスト専用フック。true の間は AudioDeviceModule の初期化を常に失敗させる。
   // ネイティブ環境 (音声デバイスの有無) に依存せずに共有 factory 生成の
   // 失敗経路を検証するために利用する。通常実行では常に false のまま。
@@ -341,6 +343,21 @@ class WebrtcClient {
   // 例外は投げない。PeerConnection 作成直後の再適用では、失敗しても接続
   // 処理を止めないためにこの経路を使う。
   static StateError? _trySetRecordingDeviceByGuid(
+    String deviceId, {
+    String? labelHint,
+    bool preferDefaultDevice = false,
+  }) {
+    final error = _trySetRecordingDeviceByGuidInternal(
+      deviceId,
+      labelHint: labelHint,
+      preferDefaultDevice: preferDefaultDevice,
+    );
+    // 失敗理由を debug ログで追えるように直近の結果を保持する。
+    _lastRecordingDeviceSelectionResult = error?.message ?? 'ok';
+    return error;
+  }
+
+  static StateError? _trySetRecordingDeviceByGuidInternal(
     String deviceId, {
     String? labelHint,
     bool preferDefaultDevice = false,
@@ -679,7 +696,9 @@ class WebrtcClient {
   //
   // 補正に失敗しても接続処理は継続する。push audio device など実 ADM を
   // 使わない場合や ADM 未生成の場合は何もしない。
-  static void _configureWindowsAudioDeviceAfterPeerConnection() {
+  static void _configureWindowsAudioDeviceAfterPeerConnection({
+    required void Function(String message) emitDebug,
+  }) {
     if (!Platform.isWindows || !_useAudioDevice) {
       return;
     }
@@ -692,18 +711,22 @@ class WebrtcClient {
 
     // 内蔵 AEC を無効化する。録音初期化済みなどで失敗しても、その場合は
     // 既に録音が開始されているか内蔵 AEC が使われていないため無視する。
-    sharedLib.audioDeviceModuleEnableBuiltInAEC(adm, 0);
+    final aecRc = sharedLib.audioDeviceModuleEnableBuiltInAEC(adm, 0);
 
     // 再生デバイスをメディア向け既定デバイスへ切り替える。既に再生が初期化
     // 済みなどで失敗しても、その場合は再生デバイスが確定済みのため無視する。
-    sharedLib.audioDeviceModuleSetPlayoutDeviceWithWindowsDeviceType(
-      adm,
-      sharedConsts.kWindowsDefaultDevice,
-    );
+    final playoutRc = sharedLib
+        .audioDeviceModuleSetPlayoutDeviceWithWindowsDeviceType(
+          adm,
+          sharedConsts.kWindowsDefaultDevice,
+        );
+
+    // 失敗時の切り分けができるよう、補正の結果を debug ログに残す。
+    emitDebug('native: windows_audio_fix aec_rc=$aecRc playout_rc=$playoutRc');
 
     // 録音デバイスを最後に選択されたデバイスへ戻す。デバイスが消えている
     // などで失敗しても、その場合は録音開始時に既定デバイスが使われる。
-    _restoreSelectedRecordingDevice();
+    _restoreSelectedRecordingDevice(emitDebug: emitDebug);
   }
 
   // 最後に成功した録音デバイス選択を ADM へ再適用する。
@@ -716,17 +739,31 @@ class WebrtcClient {
   //
   // 補正は接続処理を止めない。選択がない場合や再適用に失敗した場合は
   // 何もしない。
-  static void _restoreSelectedRecordingDevice() {
+  static void _restoreSelectedRecordingDevice({
+    required void Function(String message) emitDebug,
+  }) {
     final deviceId = _selectedRecordingDeviceId;
     if (deviceId == null) {
+      emitDebug(
+        'native: windows_audio_restore skipped: no selection '
+        'last=${_lastRecordingDeviceSelectionResult ?? '-'}',
+      );
       return;
     }
-    // 失敗しても接続処理は継続するため戻り値は使わない。
-    _trySetRecordingDeviceByGuid(
+    // 失敗しても接続処理は継続するため、戻り値はログにのみ使う。
+    final error = _trySetRecordingDeviceByGuid(
       deviceId,
       labelHint: _selectedRecordingDeviceLabelHint,
       preferDefaultDevice: _selectedRecordingDevicePreferDefaultDevice,
     );
+    if (error == null) {
+      emitDebug('native: windows_audio_restore device=$deviceId ok');
+    } else {
+      emitDebug(
+        'native: windows_audio_restore device=$deviceId '
+        'error=${error.message}',
+      );
+    }
   }
 
   // `_ensureSharedFactory` が途中で失敗した場合に、作成済みの thread / deps /
@@ -1850,7 +1887,7 @@ class WebrtcClient {
     // 音声デバイス設定を既定値へ書き換えるため、作成直後に補正する。
     // native リソースの解放後に呼び、補正が例外を投げても解放を妨げない。
     if (errMsg == null && _pcRef != null) {
-      _configureWindowsAudioDeviceAfterPeerConnection();
+      _configureWindowsAudioDeviceAfterPeerConnection(emitDebug: _emitDebug);
     }
 
     return errMsg == null && _pcRef != null;
@@ -1883,6 +1920,13 @@ class WebrtcClient {
     Pointer<WebrtcAudioTrackInterfaceRefcounted> audioTrackRef,
   ) {
     if (_pcRef == null) return;
+
+    // 録音開始 (pcAddTrack) の直前にも選択済み録音デバイスを再適用する。
+    // PeerConnection 作成直後の補正で設定済みでも、この時点が録音初期化の
+    // 直前であることを保証できるため、Windows では再度適用する。
+    if (Platform.isWindows && _useAudioDevice) {
+      _restoreSelectedRecordingDevice(emitDebug: _emitDebug);
+    }
 
     final trackRef = _lib.audioTrackCastToMediaStreamTrack(audioTrackRef);
     final streamIds = _createStreamIdVector();

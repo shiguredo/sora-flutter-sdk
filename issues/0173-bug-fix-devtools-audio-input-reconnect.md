@@ -21,91 +21,93 @@ Windows 実機で音声入力デバイスを変更して再接続しても、選
 
 `native: windows_audio_restore` は 1 回の接続で PeerConnection 作成直後と `pcAddTrack` 直前の 2 回出力される (`lib/src/ffi/webrtc_client.dart` の `_configureWindowsAudioDeviceAfterPeerConnection` と `_addExistingLocalAudioTrack`)。上記は 1 行のみで初回接続か再接続かの区別が無い。原因の確定時は、接続のたびに `connect: start role=...` (`devtools/lib/main.dart` の `_connect`) と対にして初回と再接続のログを両方記録する。SDK の debug メッセージは Diagnostics タブの Logs (app ログ) に出力される。event log は接続開始時に clear されるため使わない。
 
-## 再現手順 (要再確定)
-
-観測時の操作列は確定できていない。`Disconnect` は `_disposeClient()` を通じて `_localStream` を破棄する (`devtools/lib/main.dart` の `_disconnect` と `_disposeClient`、`_clearLocalPreview`) ため、`Audio Input` を変更してから接続する操作では `existingLocalStream` が null になり、`## 原因` に挙げた再利用分岐へ到達しない。実際に症状が出た操作列を特定して本節を書き直すこと。
-
-切り分けとして、次の 4 経路を順に試し、経路ごとに `windows_audio_restore` のデバイス ID を記録する。
+## 再現手順
 
 1. Windows 実機で devtools を起動し、音声入力にデバイス A、音声出力に実デバイスを選択する
 2. Connect Audio を有効、Send Beep Audio を無効、role を sendonly にして接続し、`windows_audio_restore` が A になることを確認する
-3. Disconnect を押し、音声入力デバイスを B に変更して再接続する
-4. Sora サーバー側から接続を閉じさせ、Disconnect を押さずに再接続する
-5. 手順 4 と同じ切断のあと、音声入力デバイスを B に変更して再接続する
+3. `Disconnect` を押し、音声入力デバイスを B に変更する
+4. 再接続し、`windows_audio_restore` が B になることを確認する
 
-手順 4 と 5 の切断は、Sora サーバー側から接続を閉じさせ、devtools の `Disconnect` ボタンを押さずに `Connect` を押す。切断されたことは Diagnostics タブの state が `disconnected` に戻ることで確認する。
+### 改善前の実測 (Windows 実機)
 
-### 経路ごとの分岐到達の判定
+改善前の実測では、再接続時の `windows_audio_restore` は A のままだった。原因確定に使ったログの要点を次に示す。デバイス ID は実値からプレースホルダへ置き換えている。
 
-原因の判断には、`_prepareLocalStream` がどちらの分岐を通ったかの記録を必ず対にする。追加する `audio_input_reconnect:` ログ (後述) で判定する。
+```
+audio_input_reconnect: branch=create existing=false audio_tracks=0 ... selected_audio_device=B ... available_audio_inputs=3
+native: set_audio_input_device requested=B
+native: set_audio_input_device effective=B enumerated=3 matched=true
+native: recording_device_apply deviceId=B preferDefaultDevice=false
+native: recording_device_set deviceId=B
+native: recording_device_set failed deviceId=B reason=no_devices count=-1
+native: set_audio_input_device failed error=Bad state: No audio input devices available.
+audio_input_reconnect: attach=generated detail=getUserMedia device=B
+native: windows_audio_fix aec_rc=0 playout_rc=0
+native: recording_device_set deviceId=A
+native: recording_device_resolve deviceId=A ... adm_devices=3 ... target_index=0
+native: windows_audio_restore device=A ok
+```
 
-| 経路 | 期待する分岐 |
-| --- | --- |
-| 3. Disconnect 後に B へ変更して再接続 | 新規生成 (`branch=create`)。再利用分岐には到達しない |
-| 4. サーバー切断後に B へ変更せず再接続 | 再利用 (`branch=reuse`) |
-| 5. サーバー切断後に B へ変更して再接続 | 再利用 (`branch=reuse`) |
+初回接続では同じ箇所が `count=3` を返し `target_index=0` で成功していた。経路別の分岐到達は次のとおりである。
 
-経路 4 と 5 で `branch=reuse` にならない場合は、`existingLocalStream` に音声トラックが残っていないことを意味する。その場合は再利用分岐を原因から棄却し、`## 原因` の候補 2 以降の切り分けへ進む。
+| 経路 | 切断操作 | デバイス変更 | `_prepareLocalStream` の分岐 | `windows_audio_restore` |
+| --- | --- | --- | --- | --- |
+| 初回接続 | なし | なし (A) | `branch=create` | A (期待どおり) |
+| 経路 3 | `Disconnect` ボタン | A から B | `branch=create` | A (B にならない) |
+| 経路 4 | Sora サーバー起因 | なし (A) | `branch=reuse` (`attach=unchanged audio_tracks=1`) | A (期待どおり) |
+| 経路 5 | Sora サーバー起因 | A から B | `branch=create` | A (B にならない) |
 
 ## 原因
 
-`native: windows_audio_restore` は `WebrtcClient._selectedRecordingDevice` を再適用する。この値は `WebrtcClient.setRecordingDeviceByGuid` が成功したときだけ更新される (`lib/src/ffi/webrtc_client.dart` の `_trySetRecordingDeviceByGuid`)。したがってログが前回のデバイスのままであることは、再接続時に `setRecordingDeviceByGuid(B)` が成功していないことを示す。
+再接続時、`MediaDevices.createAudioTrack(audioDeviceId: B)` が呼ぶ `AudioDeviceModule` は録音デバイス数を `-1` として返す。`WebrtcClient.setRecordingDeviceByGuid` はこの状態を `StateError('No audio input devices available.')` とし、`MediaDevices.createAudioTrack` がそれをデバイス不存在として握り潰すため、切り替えは行われず、`WebrtcClient._selectedRecordingDevice` は前回のデバイス A のまま残る。その後 `windows_audio_restore` が A を再適用するため、選択した B は使われない。
 
-現時点で確定していない原因候補を次に示す。実装前に切り分けて 1 つに絞ること。
+libwebrtc の `AudioDeviceWindowsCore::RecordingDevices()` は `_RefreshDeviceList(eCapture)` が失敗すると `-1` を返す。切断時に `Terminate()` が capture collection を解放し、次の PeerConnection 作成まで復旧しないため、トラック生成の時点では列挙できない。
 
-1. デバイスが見つからないため設定が握り潰されている。`_trySetRecordingDeviceByGuid` は一致するデバイスが無いと `StateError('Audio input device not found: $deviceId')` を返し (`lib/src/ffi/webrtc_client.dart`)、`MediaDevices.createAudioTrack` はこの `StateError` をデバイス不存在として握り潰して続行する (`lib/src/sora_media_devices.dart` の `createAudioTrack`、`lib/src/media/sora_media_device_platform.dart` の `isAudioInputDeviceNotFoundError`)。この場合 `_selectedRecordingDevice` は更新されず、ADM には前回のデバイスが残ったまま `windows_audio_restore` が前回のデバイスを再適用する。観測した症状と最も整合する
-2. 音声トラックが再利用されている。`_prepareLocalStream` の再利用分岐は、既存 stream に音声トラックがあると `createAudioTrack` を呼ばない (`devtools/lib/src/devtools_connection_controller.dart` の `_prepareLocalStream`)。この分岐は映像トラックを `useExternalVideoTrack` のときに作り直すが、音声トラックには同じ作り直しが無い。`## 再現手順 (要再確定)` のとおりこの分岐に到達していたかは未確定である
-3. `SetRecordingDevice` が rc != 0 で失敗している。この場合 `_trySetRecordingDeviceByGuid` が `StateError('SetRecordingDevice failed: ... rc=...')` を返し、`isAudioInputDeviceNotFoundError` の対象外のため `createAudioTrack` が rethrow する (`lib/src/sora_media_devices.dart`)。`_prepareLocalStream` の catch が stream を破棄して rethrow するため接続自体が失敗し、`windows_audio_restore` は出力されない。観測したログが出ていることと矛盾するため、候補としては低い
-4. 選択中のデバイス ID が `null` になっている。`setAudioInputDevice(null)` は既定入力デバイスへ戻す (`lib/src/media/sora_media_device_platform.dart`)
+`-1` は 130 ms 後の `windows_audio_fix` / `windows_audio_restore` では `3` に戻っている。つまりデバイスは存在しており、列挙できない時間帯に切り替えようとしていたことが原因である。
 
-`setRecordingDeviceByGuid(B)` が成功を返しても録音に反映されない事象は、0170 の確認でも「作成直後の設定が録音時に反映されない機序は未解明」として残っている (`issues/closed/0170-bug-fix-windows-audio-send-receive.md` の確認結果)。原因がこの事象であれば、devtools 側だけでは解決しない。
+### 棄却した候補
 
-### 追加する debug ログ
-
-原因を確定するため、devtools 側に次のログを実装してから実機で再現する。プレフィクスは `audio_input_reconnect:` に統一し、英語で出力する。
-
-- `audio_input_reconnect: branch=reuse existing=true|false audio_tracks=<n>`
-- `audio_input_reconnect: branch=create existing=false device=<id|null>`
-- `audio_input_reconnect: recreate from=<id|null> to=<id|null> muted=<true|false>`
-- `audio_input_reconnect: skip reason=<beep|push_audio|same_device|not_configured>`
-- `MediaDevices.createAudioTrack` の呼び出し前後で、渡した `audioDeviceId` の実値と例外の有無。例外が出た場合はその型とメッセージ
-
-`MediaDevices.createAudioTrack` はデバイス不存在の例外だけを握り潰す (`lib/src/sora_media_devices.dart` の `createAudioTrack`)。したがって `audio_input_reconnect: create device=<id>` の直後に例外ログが無いのに `native: windows_audio_restore` が前回のデバイスのままなら、候補 1 (デバイス不存在による握り潰し) が確定する。例外ログが出ている場合は候補 3、`create` が記録されない場合は候補 2 と切り分けられる。
-
-SDK 側 (`lib/src/media/sora_media_device_platform.dart` の `setAudioInputDevice`) は `WebrtcClient` のインスタンスを持たないトップレベル関数で debug ログの出力経路が無く、ログ追加には SDK の構造変更が要る。まず上記の devtools 側ログだけで切り分け、不足する場合に限り SDK 側の出力手段を検討する。
-
-`WebrtcClient._selectedRecordingDevice` は private で公開 API が無いため、devtools からは `native: windows_audio_restore` のログと `createAudioTrack` の成否ログを突き合わせて判断する。
-
-原因が確定したら本節を確定事項で置き換える。原因が SDK 本体 (`lib/`) の変更を要する場合は、`## 設計方針` と `## 完了条件` を更新したうえで、SDK 側の変更を本 issue に含めるか別 issue に分離するかを決める。
+- ADM のデバイス一覧と選択中の `deviceId` の表記不一致: `adm_guids` に選択中の B がそのまま含まれ、初回と復旧後は `target_index` が解決するため否定された
+- `SetRecordingDevice` の `rc != 0` による失敗: rc に到達する前に列挙で失敗しており、`reason=no_devices` であるため否定された
+- 選択中のデバイス ID が `null`: 実測で `selected_audio_device=B` が記録されているため否定された
+- 音声トラックの再利用: 経路 3 と 5 は `branch=create` のため否定された
+- `setRecordingDeviceByGuid` が成功を返すのに録音に反映されない事象: 選択が保持されていないため `windows_audio_restore` が A を再適用しており、0170 の未解明事象とは別である
 
 ## 現状
 
-- `_prepareLocalStream` の再利用分岐は、`localStream.getAudioTracks().isEmpty` が真のときだけ `createAudioTrack(audioDeviceId: selectedAudioInputDeviceId)` を呼ぶ。beep 音声が有効なときは `audioDeviceId` 無しの `createAudioTrack()` を呼ぶ (`devtools/lib/src/devtools_connection_controller.dart` の `_prepareLocalStream`)。この分岐は映像トラックを `useExternalVideoTrack` のときに作り直すが、音声トラックには同じ作り直しが無い。音声トラックが残っていれば選択中のデバイスは使われない
-- devtools は「前回の音声トラック作成時に使ったデバイス ID」を保持していないため、再利用分岐でデバイスの差分を検出できない
-- `onAudioInputChanged` は `_clearLocalPreview()` を呼び、`_clearLocalPreview()` は `_localStream` を null にして stream と track を破棄する (`devtools/lib/main.dart`)。`Disconnect` も同じく `_localStream` を破棄する (`devtools/lib/main.dart` の `_disconnect` と `_disposeClient`)
-- したがって、再利用分岐が問題になり得るのは `existingLocalStream` に音声トラックが残っている場合だけである。観測時の操作列がこの条件を満たしていたかは未確定であり、`## 原因` で確定する
-- 予期しない切断では devtools は `_localStream` を破棄しない (`devtools/lib/src/devtools_event_handler.dart`)。接続を保持したまま再接続した場合に `_localStream` が再利用分岐へ渡る
-- SDK 側の制約として、ADM は録音初期化後に `SetRecordingDevice` を -1 で拒否するため、音声トラックを作り直す場合も録音初期化前にデバイスを設定する必要がある (`lib/src/ffi/webrtc_client.dart` の `_configureWindowsAudioDeviceAfterPeerConnection` と `_restoreSelectedRecordingDevice`)
-- 接続中は `canChangeAudioInput` が偽になり `Audio Input` のドロップダウンが無効化される (`devtools/lib/main.dart`, `devtools/lib/src/devtools_settings_sections.dart`)。接続中の切り替えは UI からも実行できない
+- `MediaDevices.createAudioTrack` は `setAudioInputDevice` の例外をデバイス不存在として握り潰す (`lib/src/sora_media_devices.dart` の `createAudioTrack`、`lib/src/media/sora_media_device_platform.dart` の `isAudioInputDeviceNotFoundError`)。この分類では「デバイスが本当に無い」と「ADM が一時的に列挙できない」を区別できない
+- 切断後の ADM は `RecordingDevices()` が `-1` を返す時間帯があり、その間に `SetRecordingDevice` を呼んでも切り替わらない
+- `_prepareLocalStream` の再利用分岐は、既存 stream に音声トラックがあると `createAudioTrack` を呼ばない。到達するのは Sora サーバー起因の切断でデバイスを変更しない場合だけであり、選択と既存トラックのデバイスが一致するため症状には関与しない
+- 接続中は `canChangeAudioInput` が偽になり `Audio Input` のドロップダウンが無効化される (`devtools/lib/main.dart`, `devtools/lib/src/devtools_settings_sections.dart`)
 
 ## 設計方針
 
-原因が「音声トラックの再利用」または「デバイス不存在による握り潰し」だった場合の方針を次に示す。原因が別だった場合は `## 原因` の結果に合わせて本節以降を書き換えてから実装する。
+修正は SDK 側 (`lib/`) で行い、`## 原因` のとおり「ADM が録音デバイスを列挙できない時間帯に切り替えようとしていた」ことを解消する。
 
-### 前回デバイス ID の保持
+- `setRecordingDeviceByGuid` は、ADM が録音デバイスを列挙できない場合 (`adm_unavailable` / `no_devices`) を例外にせず、選択を `_selectedRecordingDevice` に保持して戻る。ADM が復旧した時点の再適用で切り替える
+  - 復旧を待つ既存の再適用は `_configureWindowsAudioDeviceAfterPeerConnection` (PeerConnection 作成直後) と `_addExistingLocalAudioTrack` (`pcAddTrack` 直前) の 2 箇所である
+  - `_restoreSelectedRecordingDevice` も列挙結果を確認し、`adm_unavailable` / `no_devices` のときは `windows_audio_restore skipped: ...` を記録して次の再適用へ委ねる
+  - デバイスが一覧に無い場合と `SetRecordingDevice` が rc != 0 の場合は従来どおり `StateError` を返し、`native: recording_device_resolve ... target_index=none` と `reason=set_failed rc=...` を記録する
+- `MediaDevices.createAudioTrack` の握り潰しは残す。切り替えが後続の再適用で完了するため、トラック生成を失敗させる必要がない
+- 選択を保持したまま再接続すると、一覧に無いデバイスを指定した場合でも再適用が `target_index=none` で失敗し、ADM には既定デバイスが残る。この状態は `native: windows_audio_restore ... error=...` で観測できる
+
+### devtools 側の併せて直す点
+
+`_prepareLocalStream` の再利用分岐に音声トラックのデバイス差分検出が無い非対称は残っている。到達するのは Sora サーバー起因の切断でデバイスを変更しない場合だけであり、その場合は選択と既存トラックのデバイスが一致するため実害はない。将来 `_clearLocalPreview()` の条件を見直して `_localStream` を保持する経路を増やす場合に備え、次の方針で併せて直す。
+
+#### 前回デバイス ID の保持
 
 - 保持先は `DevToolsConnectionController` の private field とする。`DevToolsConnectRequest` には追加しない (`devtools/test/devtools_connection_controller_test.dart` の `_createConnectRequest` を変更せずに済み、保持値の寿命も controller と一致する)
 - `String?` 1 つでは「未設定」と「既定入力を使った」を区別できないため、次の 2 つで表す
 
   ```dart
-  // 前回の音声トラック生成に使ったデバイス ID。null は既定入力を表す。
-  String? _lastAudioTrackDeviceId;
-  // _lastAudioTrackDeviceId が有効かどうか。false は未設定を表す。
-  bool _hasLastAudioTrackDeviceId = false;
+  // 接続中の音声トラック生成に使ったデバイス ID。null は既定入力を表す。
+  String? _attachedAudioDeviceId;
+  // _attachedAudioDeviceId が有効かどうか。false は未設定を表す。
+  bool _hasAttachedAudioDeviceId = false;
   ```
 
 - 更新は、新規生成分岐と作り直し分岐で音声トラックを `addTrack` した直後に限る
-- 破棄は次で `_hasLastAudioTrackDeviceId = false` にする。`configuredAudio` が偽で音声トラックを破棄する分岐、role が sendonly / sendrecv 以外または `configuredAudio` と `configuredVideo` が両方偽の早期 return、`_prepareLocalStream` の catch で stream 全体を破棄して rethrow する直前、beep トラックへ切り替えて実音声トラックを破棄する分岐
+- 破棄は次で `_hasAttachedAudioDeviceId = false` にする。`configuredAudio` が偽で音声トラックを破棄する分岐、role が sendonly / sendrecv 以外または `configuredAudio` と `configuredVideo` が両方偽の早期 return、`_prepareLocalStream` の catch で stream 全体を破棄して rethrow する直前、beep トラックへ切り替えて実音声トラックを破棄する分岐
 - `DevToolsConnectionController` には dispose が無いため、controller の破棄に伴う後始末は不要とする
 
 ### 作り直しの判定
@@ -132,10 +134,14 @@ SDK 側 (`lib/src/media/sora_media_device_platform.dart` の `setAudioInputDevic
 
 - `createAudioTrack` はデバイス不存在の例外だけを握り潰すため、デバイス設定が適用されないままトラック生成が続行する。ADM には前回適用されたデバイスが残る
 - 保持しているデバイスが一覧から消えている場合は、フォールバック後の選択デバイスを正として差分を判定し、作り直す
-- 候補 1 が原因だった場合は、選択が反映されないまま接続が成立することを防ぐ。devtools 側で `createAudioTrack` の例外を記録したうえで、再接続を失敗させるか `audio_input_reconnect: skip reason=device_not_found` を記録して既定入力で続行するかを、原因の確定後に決める
+- 選択を保持したまま接続し、復旧後の再適用でも一覧に無い場合は `target_index=none` となり、ADM には既定デバイスが残る。`native: windows_audio_restore ... error=Audio input device not found: ...` で観測できる
 
 ## エッジケースと期待動作
 
+- ADM が録音デバイスを列挙できない (`adm_unavailable` / `no_devices`): 例外にせず選択を保持し、復旧後の再適用で切り替える
+- 選択したデバイスが一覧に無い: 再適用で `target_index=none` となり、既定デバイスで接続を継続する
+- `SetRecordingDevice` が rc != 0: 再適用でも失敗し、既定デバイスで接続を継続する
+- 再接続を繰り返す: 再適用のたびに保持している選択を適用する
 - 保持値が未設定かつ音声トラックが存在する: 作り直す
 - 保持値と選択中のデバイス ID が同じ: 作り直さない
 - 保持値と選択中のデバイス ID が両方 null (既定入力): 作り直さない
@@ -147,58 +153,72 @@ SDK 側 (`lib/src/media/sora_media_device_platform.dart` の `setAudioInputDevic
 
 ## 変更対象ファイル
 
-- `devtools/lib/src/devtools_connection_controller.dart` (`_prepareLocalStream`、保持 field、`audio_input_reconnect:` ログ)
-- `devtools/lib/src/devtools_audio_input_reconnect_policy.dart` (新規、作り直し可否を判定する純粋関数)
+- `lib/src/ffi/webrtc_client.dart` (`setRecordingDeviceByGuid`、`_trySetRecordingDeviceByGuid`、`_restoreSelectedRecordingDevice`、診断ログ)
+- `lib/src/media/sora_media_device_platform.dart` (`setAudioInputDevice` の診断ログ)
+- `lib/src/sora_media_devices.dart` (`MediaDevices.setRecordingDeviceDebugSink` / `recordingDeviceDebugSink`)
+- `test/webrtc_client_recording_device_debug_sink_test.dart` (新規、出力先の設定と解除の単体テスト)
+- `devtools/lib/src/devtools_connection_controller.dart` (`_prepareLocalStream`、`audio_input_reconnect:` ログ)
+- `devtools/lib/main.dart` (診断ログの出力先の設定と解除)
+- `devtools/lib/src/devtools_audio_input_reconnect_policy.dart` (新規、再利用分岐の作り直し可否を判定する純粋関数)
 - `devtools/test/devtools_audio_input_reconnect_policy_test.dart` (新規、純粋関数の単体テスト)
-- `devtools/lib/main.dart` (`_clearLocalPreview()` の呼び出し条件を見直す場合のみ)
 - `devtools/lib/src/devtools_models.dart` と `devtools/lib/src/devtools_settings_sections.dart` は変更しない
-- `lib/` (SDK 本体) は変更しない。必要な API (`MediaDevices.createAudioTrack(audioDeviceId:)`) は既存を使う。`createAudioTrack` の挙動は変更せず、例外は devtools 側で記録する。原因切り分けの結果、SDK 側の修正が必要と判明した場合は、本 issue の設計方針と変更対象ファイルを更新して本 issue に含める。SDK 側だけを先行して修正する必要が生じた場合に限り、別 issue への分離を検討する
 
 ## テスト戦略
 
-- 作り直し可否の判定は上記の純粋関数に切り出し、`devtools/test/devtools_audio_input_reconnect_policy_test.dart` で表駆動の単体テストにする
-- 固定する組み合わせ: 保持値が未設定 / 同じ ID / 異なる ID / null と null / null と非 null / 非 null と null / 音声トラックなし / beep 有効 / `useAudioDevice` が偽 / `configuredAudio` が偽。「保持値が未設定」と「保持値が null」は別ケースとして固定する
+- ADM が録音デバイスを列挙できない場合に例外を投げず選択を保持することは、`setRecordingDeviceByGuid` が FFI を呼ぶため自動テストしない。実機の `native: recording_device_set deferred ... reason=no_devices` で確認する
+- 診断ログの出力先は `test/webrtc_client_recording_device_debug_sink_test.dart` で設定と解除を単体テストする
+- `resolveRecordingDeviceIndex` の単体テスト (`test/webrtc_client_recording_device_test.dart`) は既存のものを維持する
+- 再利用分岐の作り直し可否の判定は純粋関数に切り出し、`devtools/test/devtools_audio_input_reconnect_policy_test.dart` で表駆動の単体テストにする
+- 固定する組み合わせ: 保持値が未設定 / 同じ ID / 異なる ID / null と null / null と非 null / 非 null と null / 音声トラックなし / beep 有効 / `useAudioDevice` が偽 / `configuredAudio` が偽
 - `_prepareLocalStream` の実処理 (removeTrack / dispose / createAudioTrack / addTrack) はネイティブライブラリと実デバイスが必要なため自動テストしない。モックやスタブは追加しない
-- `DevToolsConnectRequest` にフィールドを追加しないため、`devtools/test/devtools_connection_controller_test.dart` は変更しない
 - 実マイクが 2 本以上ある Windows 実機での手動確認を `## 手動確認手順 (Windows 実機)` に従って行う
 
 ## 完了条件
 
-### フェーズ 1: 原因確定 (原因の如何にかかわらず必要)
+### フェーズ 1: 原因確定 (完了)
 
-- [ ] `## 原因` に書いた `audio_input_reconnect:` ログを devtools に実装し、Windows 実機で経路 3 / 4 / 5 の分岐到達と、`selectedAudioInputDeviceId` の実値、`createAudioTrack` の成否を記録する
-- [ ] 観測した症状を説明できる原因を候補 1 から 4 のうち 1 つに絞り、棄却した候補と棄却理由を確認結果として残す (該当が無い場合は新しい原因を `## 原因` に追記する)
-- [ ] 確定した原因に合わせて `## 再現手順` `## 原因` `## 設計方針` `## エッジケースと期待動作` `## テスト戦略` `## 完了条件` を更新する
-- [ ] `dart format --output=none --set-exit-if-changed devtools/lib devtools/test` が差分なし
-- [ ] `cd devtools && flutter analyze --fatal-infos lib test` が成功する
-- [ ] モックやスタブを使用していない
+- [x] `audio_input_reconnect:` `native: set_audio_input_device` `native: recording_device_*` の診断ログを実装し、Windows 実機で経路 3 / 4 / 5 の分岐到達を記録した
+- [x] 原因を確定した。再接続時の ADM が録音デバイス数 `-1` を返し、その `StateError` がデバイス不存在として握り潰されるため選択が保持されない
+- [x] 再利用分岐の到達条件を確定した (Sora サーバー起因の切断でデバイスを変更しない場合のみ到達し、症状の原因ではない)
+- [x] 候補 (一覧の表記不一致 / rc != 0 / デバイス ID が null / 音声トラックの再利用 / 0170 の未解明事象) を棄却した
+- [x] `## 原因` `## 設計方針` `## エッジケースと期待動作` `## テスト戦略` `## 完了条件` を確定内容に更新した
 
-### フェーズ 2: 修正 (原因が候補 1 または 2 と確定した場合)
+### フェーズ 2: 修正
 
-- [ ] 再接続後に `audio_input_reconnect: branch=reuse` または `branch=create` と、作り直しの有無が意図どおり記録される (Windows 実機で手動確認)
-- [ ] 音声入力デバイスを A から B に変更して再接続すると、`audio_input_reconnect: recreate from=<A の ID> to=<B の ID>` が 1 回だけ出力される (Windows 実機で手動確認)
-- [ ] あわせて `native: windows_audio_restore device=<デバイス B の ID> ok` が PeerConnection 作成直後と `pcAddTrack` 直前に出力される (Windows 実機で手動確認)
+- [x] `setRecordingDeviceByGuid` が ADM の列挙不能を例外にせず選択を保持し、復旧後の再適用で切り替えるよう修正した
+- [x] `_restoreSelectedRecordingDevice` が列挙不能時に `windows_audio_restore skipped: ...` を記録し、次の再適用へ委ねるよう修正した
+- [x] 診断ログの出力先の単体テストを追加した
+- [ ] 音声入力デバイスを A から B に変更して再接続すると `native: windows_audio_restore device=<デバイス B の ID> ok` が PeerConnection 作成直後と `pcAddTrack` 直前に出力される (Windows 実機で手動確認)
+- [ ] `native: recording_device_set deferred ... reason=no_devices` のあとに `native: windows_audio_restore device=<デバイス B の ID> ok` が出る (Windows 実機で手動確認)
 - [ ] 上記の接続で sender の audio `outbound-rtp` の `bytesSent` / `packetsSent` が増加する (Windows 実機で手動確認)
-- [ ] デバイスを変更せずに再接続した場合は `audio_input_reconnect: recreate` が出力されない
+- [ ] デバイス B にのみ話しかけ、audio `outbound-rtp` の `audioLevel` または `totalAudioEnergy` が反応する (Windows 実機で手動確認)
 - [ ] 音声をミュートにしてから入力デバイスを変更して再接続しても、ミュートが維持される
-- [ ] 追加した純粋関数の単体テストが成功する
-- [ ] `cd devtools && flutter test` が成功する。devtools のテストは `.github/workflows/ci.yml` では実行されないため、ローカルで実行し結果を確認結果として残す
-- [ ] `flutter analyze --fatal-infos lib test` (リポジトリルート) が成功する
+- [ ] `flutter analyze --fatal-infos lib test` (リポジトリルート) と `flutter test` (リポジトリルート) が成功する
+- [ ] `cd devtools && flutter analyze --fatal-infos lib test` と `flutter test` が成功する。devtools のテストは `.github/workflows/ci.yml` では実行されないため、ローカルで実行し結果を確認結果として残す
+- [ ] `dart format --output=none --set-exit-if-changed devtools/lib devtools/test` と `lib test` が差分なし
+- [ ] モックやスタブを使用していない
 - [ ] `CHANGELOG.md` へは追記しない (`CODEBASE.md` の「正式リリース前」節)。正式リリース確定時に `[FIX]` を追記する
 
 ## 手動確認手順 (Windows 実機)
 
 前提: 音声入力デバイスを A と B の 2 つ以上認識する Windows 実機を使う。入力デバイスが 1 つの環境では A / B の差分を確認できない。
 
-1. `## 再現手順 (要再確定)` の経路 3 / 4 / 5 を実施し、症状が再現する操作列を確定する
-2. Diagnostics タブの Logs で、再接続後に `audio_input_reconnect: branch=...` の分岐と `audio_input_reconnect: recreate from=... to=...` の有無を確認する
+1. `## 再現手順` の手順 1 から 4 を実施する
+2. Diagnostics タブの Logs で、再接続時に `native: recording_device_set deferred ... reason=no_devices` が出ることを確認する (ADM がまだ復旧していないことの記録)
 3. 同じく Logs で、`native: windows_audio_restore device=<デバイス B の ID> ok` が PeerConnection 作成直後と `pcAddTrack` 直前の 2 回出力されることを確認する
 4. Diagnostics タブの Stats で sender の audio `outbound-rtp` の `bytesSent` / `packetsSent` が増加することを確認する
 5. デバイス B にのみ話しかけ、audio `outbound-rtp` の `audioLevel` または `totalAudioEnergy` が反応することを確認する
-6. デバイスを変更せずに再接続し、`audio_input_reconnect: recreate` が出力されないことを確認する
-7. Audio Track を無効にしてから入力デバイスを変更して再接続し、Audio Track が無効のままであることを確認する
+6. Audio Track を無効にしてから入力デバイスを変更して再接続し、Audio Track が無効のままであることを確認する
 
 CI (GitHub Actions の Windows Hosted Runner) には音声入力デバイスが無いため、この手順は自動テストでは代替できない。
+
+## 確認結果
+
+`## 再現手順` に記載した改善前の実測に加え、改善後の実測をここへ追記する。次を記録すること。
+
+- 再接続時の `native: recording_device_set deferred ... reason=no_devices count=...`
+- 復旧後の `native: windows_audio_restore device=<デバイス B の ID> ok`
+- sender の audio `outbound-rtp` の増加
 
 ## 対象外
 

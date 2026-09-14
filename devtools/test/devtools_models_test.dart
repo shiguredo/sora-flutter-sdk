@@ -69,4 +69,65 @@ void main() {
     expect(notifier.iceStateLabel, 'unknown');
     expect(notifier.dtlsStateLabel, 'unknown');
   });
+
+  test('connection.destroyed 相当の接続単位削除で該当トラックだけが消える', () {
+    final notifier = DevToolsPageNotifier()
+      ..upsertRemoteTrack(
+        const RemoteMediaStreamTrack(
+          trackId: 'conn-a-video',
+          kind: 'video',
+          connectionId: 'conn-a',
+          textureId: 1,
+        ),
+      )
+      ..upsertRemoteTrack(
+        const RemoteMediaStreamTrack(
+          trackId: 'conn-b-video',
+          kind: 'video',
+          connectionId: 'conn-b',
+          textureId: 2,
+        ),
+      )
+      ..upsertRemoteTrack(
+        const RemoteMediaStreamTrack(
+          trackId: 'conn-a-audio',
+          kind: 'audio',
+          connectionId: 'conn-a',
+        ),
+      );
+
+    notifier.removeRemoteTracksByConnectionIds(const <String>{'conn-a'});
+
+    expect(
+      notifier.remoteVideos.map((track) => track.trackId),
+      <String>['conn-b-video'],
+    );
+    expect(notifier.remoteAudios, isEmpty);
+  });
+
+  test('接続単位の削除は track 単位の削除と競合しても冪等に終わる', () {
+    final notifier = DevToolsPageNotifier()
+      ..upsertRemoteTrack(
+        const RemoteMediaStreamTrack(
+          trackId: 'conn-a-video',
+          kind: 'video',
+          connectionId: 'conn-a',
+          textureId: 1,
+        ),
+      );
+
+    // `SoraRemoveTrackEvent` が先に届いた正常系の track 単位削除
+    notifier.removeRemoteTrack(
+      const RemoteMediaStreamTrack(
+        trackId: 'conn-a-video',
+        kind: 'video',
+        connectionId: 'conn-a',
+        textureId: 1,
+      ),
+    );
+    // 消えた後で接続単位の削除が届いても no-op のまま (二重削除エラーなし)
+    notifier.removeRemoteTracksByConnectionIds(const <String>{'conn-a'});
+
+    expect(notifier.remoteVideos, isEmpty);
+  });
 }

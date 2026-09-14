@@ -1,7 +1,7 @@
 # devtools で再接続時に音声入力デバイスの選択が反映されない問題を修正する
 
 - Created: 2026-09-14
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-14
 - Branch: feature/fix-devtools-audio-input-reconnect
 - Polished: 2026-09-14
 
@@ -172,7 +172,7 @@ libwebrtc の `AudioDeviceWindowsCore::RecordingDevices()` は `_RefreshDeviceLi
 - [x] `cd devtools && flutter analyze --fatal-infos lib test` と `flutter test` が成功する
 - [x] `dart format --output=none --set-exit-if-changed lib test` が差分なし
 - [x] モックやスタブを使用していない
-- [ ] `CHANGELOG.md` に追記していないことを確認する (`CODEBASE.md` の「正式リリース前」節)。正式リリース確定時に `[FIX]` を追記する
+- [x] `CHANGELOG.md` に追記していないことを確認する (`CODEBASE.md` の「正式リリース前」節)。正式リリース確定時に `[FIX]` を追記する
 
 ## 手動確認手順 (Windows 実機)
 
@@ -188,9 +188,21 @@ libwebrtc の `AudioDeviceWindowsCore::RecordingDevices()` は `_RefreshDeviceLi
 
 ## 確認結果
 
+### 原因確定時 (診断ログあり)
+
 - `## 再現手順` に記載したとおり、改善前は再接続後も A が使われ、改善後は B が使われることを Windows 実機で確認した
 - 再接続時は `RecordingDevices()` が `-1` を返すため選択を保持し、PeerConnection 作成直後の再適用で `target_index` を解決して B を適用することをログで確認した
 - 受信側で B のマイクの音声が届くことを確認した
+
+### 診断ログ削除後 (最終実装)
+
+Windows 実機で A から B へ切り替えて再接続し、次を確認した。
+
+- 初回接続: `native: windows_audio_restore device=<デバイス A> ok` が PeerConnection 作成直後と `pcAddTrack` 直前の 2 回出力され、`local_audio_track_added` と接続確立まで進む
+- 再接続 (B へ変更): `native: windows_audio_restore device=<デバイス B> ok` が同じ 2 箇所で出力される
+- 受信側で B のマイクの音声が届く
+
+`adm == nullptr` を例外へ戻した変更後も、列挙不能時の保留と復旧後の再適用が意図どおり動作している。
 
 ## 対象外
 
@@ -207,3 +219,20 @@ libwebrtc の `AudioDeviceWindowsCore::RecordingDevices()` は `_RefreshDeviceLi
 - 0170: Windows で実音声デバイス利用時に音声が送受信できない問題を修正する (closed)。`setRecordingDeviceByGuid` の選択内容を保持し、PeerConnection 作成直後と `pcAddTrack` 直前に再適用する実装を追加した。解決方法と確認結果は `issues/closed/0170-bug-fix-windows-audio-send-receive.md` を参照
 - 0171: Windows でエコーキャンセルを有効化する (open)。本 issue で対象外とした「接続中の切り替え不可」は ADM の `SetRecordingDevice` の制約と関連する
 - 0172: Windows アプリの COM 初期化要件 (MTA) を扱う (open)。ADM を生成できない環境では `setRecordingDeviceByGuid` が `StateError('AudioDeviceModule is not initialized.')` を投げる (`lib/src/ffi/webrtc_client.dart` の `setRecordingDeviceByGuid`)。原因切り分けでこの状態と混同しないこと
+
+## 解決方法
+
+再接続時に ADM が録音デバイスを列挙できない時間帯に切り替えようとしていたことを解消した。
+
+- `lib/src/ffi/webrtc_client.dart` の `setRecordingDeviceByGuid` は、`AudioDeviceModule` の `RecordingDevices()` が負の値を返す場合は例外にせず、要求された選択を `_requestedRecordingDevice` に保持して復旧後の再適用へ委ねるようにした
+- ADM を生成できない場合 (`adm == nullptr`) は従来どおり `StateError('AudioDeviceModule is not initialized.')` を投げ、接続側が検知できるようにした。列挙不能と違って復旧しないため、保留にすると選択が無言で破棄される
+- 保留の可否判定を純粋関数 `shouldDeferRecordingDeviceApply` に切り出し、`setRecordingDeviceByGuid` と `_restoreSelectedRecordingDevice` の両方で同じ判定を使うようにした
+- `_restoreSelectedRecordingDevice` は列挙不能時に `native: windows_audio_restore skipped: enumerate_failed count=...`、録音デバイスが 1 つも無い場合に `skipped: no_devices count=0` を記録するようにした
+- 要求された選択は適用の成否にかかわらず保持し、`_releaseSharedFactoryResources` で共有 factory を破棄するときに選択も破棄するようにした
+- 録音デバイス数と ADM の取得を `_enumerateRecordingDevices` に、選択の型を `typedef RecordingDeviceSelection` に集約した
+- `test/webrtc_client_recording_device_test.dart` に `shouldDeferRecordingDeviceApply` の単体テストを追加した (列挙失敗は保留、デバイス無しと列挙成功は保留しない)
+- `lib/src/media/sora_media_device_platform.dart` の `isAudioInputDeviceNotFoundError` から、生成元が無くなった `'No audio input devices available.'` を削除し、doc コメントを実態に合わせた
+- 原因確定に使った診断ログ (`WebrtcClient.recordingDeviceDebugSink`、`MediaDevices.setRecordingDeviceDebugSink`、`audio_input_reconnect:` ログ、専用テスト) は原因確定後に削除した
+- `CHANGELOG.md` への `[FIX]` の追記は正式リリース確定時に実施する。`CODEBASE.md` の「正式リリース前」節により、本ブランチでは追記しない
+
+Windows 実機で、再接続時に `native: windows_audio_restore device=<デバイス B> ok` が PeerConnection 作成直後と `pcAddTrack` 直前の 2 回出力され、受信側に B のマイクの音声が届くことを確認した。詳細は `## 確認結果` を参照。

@@ -116,6 +116,35 @@ void main() {
       expect(index, 2);
     });
 
+    test('preferDefaultDevice で default (labelHint) のみ一致する場合も返す', () {
+      // plain な labelHint 一致が無く default (labelHint) だけがあるケース。
+      // 実運用では deviceId 未指定時にこの形になりうる。
+      const onlyDefault = <({int index, String guid, String name})>[
+        (index: 1, guid: '{d}', name: 'default (Speaker)'),
+      ];
+      final index = resolveRecordingDeviceIndex(
+        devices: onlyDefault,
+        deviceId: '{unknown}',
+        labelHint: 'Speaker',
+        preferDefaultDevice: true,
+      );
+      expect(index, 1);
+    });
+
+    test('非連続インデックスでも default (labelHint) の ADM インデックスを返す', () {
+      const compacted = <({int index, String guid, String name})>[
+        (index: 0, guid: '{a}', name: 'mic-a'),
+        (index: 5, guid: '{c}', name: 'default (mic-c)'),
+      ];
+      final index = resolveRecordingDeviceIndex(
+        devices: compacted,
+        deviceId: '{unknown}',
+        labelHint: 'mic-c',
+        preferDefaultDevice: true,
+      );
+      expect(index, 5);
+    });
+
     test('default (labelHint) は完全一致のみで部分一致しない', () {
       // labelHint が 'マイク' のとき 'default (マイク (USB))' は一致しない。
       final index = resolveRecordingDeviceIndex(

@@ -105,88 +105,39 @@ libwebrtc の `AudioDeviceWindowsCore::RecordingDevices()` は `_RefreshDeviceLi
 
 修正は SDK 側 (`lib/`) で行い、`## 原因` のとおり「ADM が録音デバイスを列挙できない時間帯に切り替えようとしていた」ことを解消する。
 
-- `setRecordingDeviceByGuid` は、ADM が録音デバイスを列挙できない場合 (`adm_unavailable` / `no_devices`) を例外にせず、選択を `_selectedRecordingDevice` に保持して戻る。ADM が復旧した時点の再適用で切り替える
+- 保留の対象は「ADM が録音デバイスを列挙できない (`RecordingDevices()` が負の値)」場合に限定する。このときは例外にせず、要求を保持して復旧後の再適用へ委ねる
   - 復旧を待つ既存の再適用は `_configureWindowsAudioDeviceAfterPeerConnection` (PeerConnection 作成直後) と `_addExistingLocalAudioTrack` (`pcAddTrack` 直前) の 2 箇所である
-  - `_restoreSelectedRecordingDevice` も列挙結果を確認し、`adm_unavailable` / `no_devices` のときは `windows_audio_restore skipped: ...` を記録して次の再適用へ委ねる
-  - デバイスが一覧に無い場合と `SetRecordingDevice` が rc != 0 の場合は従来どおり `StateError` を返し、`native: recording_device_resolve ... target_index=none` と `reason=set_failed rc=...` を記録する
+  - `_restoreSelectedRecordingDevice` も同じ判定を使い、列挙できないときは `windows_audio_restore skipped: enumerate_failed ...` を記録して次の再適用へ委ねる。録音デバイスが 1 つも無い場合は `skipped: no_devices count=0` を記録する
+- ADM を生成できない場合 (`adm == nullptr`) は従来どおり `StateError('AudioDeviceModule is not initialized.')` を投げる。列挙不能と違って復旧しないため、保留にすると選択が無言で破棄される。この例外はデバイス不存在の分類対象外なので、`createAudioTrack` が rethrow して接続側が検知する
+- 一覧にデバイスが無い場合と `SetRecordingDevice` が rc != 0 の場合は従来どおり `StateError` を返す
+- 要求された選択は適用の成否にかかわらず `_requestedRecordingDevice` に保持する。適用できなかった要求を前回の成功値へ戻すと、どのデバイスを使う要求だったかが失われ、再適用のログからも判別できなくなるため。`_releaseSharedFactoryResources` で共有 factory を破棄するときに選択も破棄する
+- 保留の可否判定は純粋関数 `shouldDeferRecordingDeviceApply` に切り出し、`setRecordingDeviceByGuid` と `_restoreSelectedRecordingDevice` の両方で同じ判定を使う。ネイティブライブラリ無しで単体テストする
 - `MediaDevices.createAudioTrack` の握り潰しは残す。切り替えが後続の再適用で完了するため、トラック生成を失敗させる必要がない
 - 選択を保持したまま再接続すると、一覧に無いデバイスを指定した場合でも再適用が `target_index=none` で失敗し、ADM には既定デバイスが残る。この状態は `native: windows_audio_restore ... error=...` で観測できる
 
-### devtools 側の併せて直す点
-
-`_prepareLocalStream` の再利用分岐に音声トラックのデバイス差分検出が無い非対称は残っている。到達するのは Sora サーバー起因の切断でデバイスを変更しない場合だけであり、その場合は選択と既存トラックのデバイスが一致するため実害はない。将来 `_clearLocalPreview()` の条件を見直して `_localStream` を保持する経路を増やす場合に備え、次の方針で併せて直す。
-
-#### 前回デバイス ID の保持
-
-- 保持先は `DevToolsConnectionController` の private field とする。`DevToolsConnectRequest` には追加しない (`devtools/test/devtools_connection_controller_test.dart` の `_createConnectRequest` を変更せずに済み、保持値の寿命も controller と一致する)
-- `String?` 1 つでは「未設定」と「既定入力を使った」を区別できないため、次の 2 つで表す
-
-  ```dart
-  // 接続中の音声トラック生成に使ったデバイス ID。null は既定入力を表す。
-  String? _attachedAudioDeviceId;
-  // _attachedAudioDeviceId が有効かどうか。false は未設定を表す。
-  bool _hasAttachedAudioDeviceId = false;
-  ```
-
-- 更新は、新規生成分岐と作り直し分岐で音声トラックを `addTrack` した直後に限る
-- 破棄は次で `_hasAttachedAudioDeviceId = false` にする。`configuredAudio` が偽で音声トラックを破棄する分岐、role が sendonly / sendrecv 以外または `configuredAudio` と `configuredVideo` が両方偽の早期 return、`_prepareLocalStream` の catch で stream 全体を破棄して rethrow する直前、beep トラックへ切り替えて実音声トラックを破棄する分岐
-- `DevToolsConnectionController` には dispose が無いため、controller の破棄に伴う後始末は不要とする
-
-### 作り直しの判定
-
-- 判定順序は「`disposeBeepAudioTrack(localStream: localStream)` → 破棄条件の判定 → 作り直し要否の判定 → 作り直しまたは新規生成」に固定する
-- beep の判定材料は `request.beepAudioEnabled` とする。`disposeBeepAudioTrack` が判定より前に beep トラックを stream から外すため、判定時点の `getAudioTracks()` に beep トラックは含まれない
-- 優先順位は「beep 有効 > `useAudioDevice` 偽 > デバイス差分」とする。beep 有効時と `useAudioDevice` 偽のときは、選択中のデバイスが変わっていても作り直さない
-- 作り直す条件は、`request.configuredAudio` が真、`request.beepAudioEnabled` が偽、`request.useAudioDevice` が真、音声トラックが存在する、かつ「保持値が未設定」または「保持値と選択中の `audioDeviceId` が異なる」のいずれかである
-- 判定は純粋関数として `devtools/lib/src/devtools_audio_input_reconnect_policy.dart` に切り出す。引数は `hasAttachedDeviceId` (`bool`)、`attachedDeviceId` (`String?`)、`selectedDeviceId` (`String?`)、`configuredAudio`、`beepAudioEnabled`、`useAudioDevice`、`hasAudioTrack` とする。`devtools_local_preview_policy.dart` と同じ配置方針にそろえる
-
-### 作り直しの手順
-
-1. 既存の音声トラックをすべて `removeTrack` する
-2. 各トラックを `dispose` する
-3. 作り直す前に既存音声トラックの `enabled` を読む。読み出しは既存の `currentTrackEnabled` (`devtools/lib/src/devtools_track_state.dart`) を使い、SDK の track API を直接読まない
-4. `MediaDevices.createAudioTrack(audioDeviceId: selectedAudioInputDeviceId)` を await する
-5. 新しいトラックへ手順 3 の `enabled` を設定する
-6. `addTrack` する
-7. 生成に使ったデバイス ID を保持する
-
-`LocalMediaStream.addTrack` は既に音声トラックがある状態で別の音声トラックを追加すると `StateError('Multiple audio tracks are not supported.')` を投げる (`lib/src/sora_media_stream.dart` の `addTrack`) ため、`removeTrack` と `dispose` を `addTrack` より前に行う。
-
-### デバイス不存在の扱い
-
-- `createAudioTrack` はデバイス不存在の例外だけを握り潰すため、デバイス設定が適用されないままトラック生成が続行する。ADM には前回適用されたデバイスが残る
-- 保持しているデバイスが一覧から消えている場合は、フォールバック後の選択デバイスを正として差分を判定し、作り直す
-- 選択を保持したまま接続し、復旧後の再適用でも一覧に無い場合は `target_index=none` となり、ADM には既定デバイスが残る。`native: windows_audio_restore ... error=Audio input device not found: ...` で観測できる
-
 ## エッジケースと期待動作
 
-- ADM が録音デバイスを列挙できない (`adm_unavailable` / `no_devices`): 例外にせず選択を保持し、復旧後の再適用で切り替える
-- 選択したデバイスが一覧に無い: 再適用で `target_index=none` となり、既定デバイスで接続を継続する
-- `SetRecordingDevice` が rc != 0: 再適用でも失敗し、既定デバイスで接続を継続する
-- 再接続を繰り返す: 再適用のたびに保持している選択を適用する
-- 保持値が未設定かつ音声トラックが存在する: 作り直す
-- 保持値と選択中のデバイス ID が同じ: 作り直さない
-- 保持値と選択中のデバイス ID が両方 null (既定入力): 作り直さない
-- 片方だけ null: 作り直す
-- beep 音声が有効: 作り直す。ただし作り直しの対象は `audioDeviceId` 無しの `createAudioTrack()` であり、選択デバイスは適用されない (既存挙動)
-- `useAudioDevice` が偽: 作り直さない
-- デバイスを変更せずに再接続する: 再利用分岐でも作り直さない
-- 作り直しの途中で例外が発生した場合: `_prepareLocalStream` の既存 catch が stream 全体を破棄して rethrow するため、個別の後始末は追加しない。保持値は破棄する
+- ADM が録音デバイスを列挙できない (`RecordingDevices()` が負の値): 例外にせず要求を保持し、復旧後の再適用で切り替える。再適用も列挙できない場合は `windows_audio_restore skipped: enumerate_failed count=...` を記録して次の再適用へ委ねる
+- 録音デバイスが 1 つも無い (列挙結果が 0): 復旧しないため保留しない。再適用は `skipped: no_devices count=0` を記録する
+- ADM を生成できない (`adm == nullptr`): 復旧しないため `StateError('AudioDeviceModule is not initialized.')` を投げ、接続側が検知する。要求は保持するため、同じプロセスで ADM が生成されれば再適用の対象になる
+- 選択したデバイスが一覧に無い: `_trySetRecordingDeviceByGuid` が `StateError('Audio input device not found: ...')` を返す。`MediaDevices.createAudioTrack` はこれをデバイス不存在として握り潰すためトラック生成は続行し、再適用は `windows_audio_restore ... error=...` を記録して既定デバイスで接続を継続する
+- `SetRecordingDevice` が rc != 0: `StateError('SetRecordingDevice failed: ...')` を返す。分類対象外のため `createAudioTrack` が rethrow し、接続処理が失敗する (既存挙動)
+- 再接続を繰り返す: 再適用のたびに保持している要求を適用する
+- 共有 factory の破棄時 (`_releaseSharedFactoryResources`): 保持している要求も破棄する。古い要求を次に生成した ADM へ適用しないため
+- beep 音声が有効: 音声トラックは `audioDeviceId` 無しの `createAudioTrack()` で生成され、選択デバイスは適用されない (既存挙動)
 
 ## 変更対象ファイル
 
-- `lib/src/ffi/webrtc_client.dart` (`setRecordingDeviceByGuid`、`_trySetRecordingDeviceByGuid`、`_restoreSelectedRecordingDevice`)
-- `lib/src/media/sora_media_device_platform.dart` (`setAudioInputDevice` のコメントのみ)
-- `devtools/lib/src/devtools_audio_input_reconnect_policy.dart` (新規、再利用分岐の作り直し可否を判定する純粋関数。再利用分岐の非対称を直す場合のみ)
-- `devtools/test/devtools_audio_input_reconnect_policy_test.dart` (新規、上記の単体テスト)
-- `devtools/lib/src/devtools_models.dart` と `devtools/lib/src/devtools_settings_sections.dart` は変更しない
-- 原因調査用の診断ログは削除済みである。`WebrtcClient.recordingDeviceDebugSink`、`MediaDevices.setRecordingDeviceDebugSink` / `recordingDeviceDebugSink`、`audio_input_reconnect:` ログ、`test/webrtc_client_recording_device_debug_sink_test.dart` は残さない
+- `lib/src/ffi/webrtc_client.dart` (`setRecordingDeviceByGuid`、`_enumerateRecordingDevices`、`shouldDeferRecordingDeviceApply`、`_trySetRecordingDeviceByGuid`、`_restoreSelectedRecordingDevice`、`_releaseSharedFactoryResources`)
+- `test/webrtc_client_recording_device_test.dart` (`shouldDeferRecordingDeviceApply` の単体テストを追加)
+- `lib/src/media/sora_media_device_platform.dart` は変更しない (`setAudioInputDevice` は列挙不能時に例外を投げない経路をそのまま通すため)
+- `devtools/` は変更しない。原因調査用の診断ログは削除済みである。`WebrtcClient.recordingDeviceDebugSink`、`MediaDevices.setRecordingDeviceDebugSink` / `recordingDeviceDebugSink`、`audio_input_reconnect:` ログ、`test/webrtc_client_recording_device_debug_sink_test.dart` は残さない
 
 ## テスト戦略
 
-- ADM が録音デバイスを列挙できない場合に例外を投げず選択を保持することは、`setRecordingDeviceByGuid` が FFI を呼ぶため自動テストしない。実機の `native: windows_audio_restore device=... ok` で確認する
+- 保留の可否判定は純粋関数 `shouldDeferRecordingDeviceApply` に切り出し、`test/webrtc_client_recording_device_test.dart` で単体テストする。列挙失敗 (`-1`) は保留、デバイス無し (`0`) と列挙成功 (`1` 以上) は保留しないことを固定する
+- `setRecordingDeviceByGuid` の FFI 呼び出し部分と `_restoreSelectedRecordingDevice` はネイティブライブラリと Windows 実機が必要なため自動テストしない。実機の `native: windows_audio_restore device=... ok` で確認する
 - `resolveRecordingDeviceIndex` の単体テスト (`test/webrtc_client_recording_device_test.dart`) は既存のものを維持する
-- 再利用分岐の作り直し可否の判定を実装する場合は、純粋関数に切り出して `devtools/test/devtools_audio_input_reconnect_policy_test.dart` で表駆動の単体テストにする。固定する組み合わせは 保持値が未設定 / 同じ ID / 異なる ID / null と null / null と非 null / 非 null と null / 音声トラックなし / beep 有効 / `useAudioDevice` が偽 / `configuredAudio` が偽 とする
 - `_prepareLocalStream` の実処理 (removeTrack / dispose / createAudioTrack / addTrack) はネイティブライブラリと実デバイスが必要なため自動テストしない。モックやスタブは追加しない
 - 実マイクが 2 本以上ある Windows 実機での手動確認を `## 手動確認手順 (Windows 実機)` に従って行う
 
@@ -202,8 +153,10 @@ libwebrtc の `AudioDeviceWindowsCore::RecordingDevices()` は `_RefreshDeviceLi
 
 ### フェーズ 2: 修正 (完了)
 
-- [x] `setRecordingDeviceByGuid` が ADM の列挙不能を例外にせず選択を保持し、復旧後の再適用で切り替えるよう修正した
-- [x] `_restoreSelectedRecordingDevice` が列挙不能時に `windows_audio_restore skipped: ...` を記録し、次の再適用へ委ねるよう修正した
+- [x] `setRecordingDeviceByGuid` が ADM の列挙不能を例外にせず要求を保持し、復旧後の再適用で切り替えるよう修正した
+- [x] ADM を生成できない場合は `StateError` を投げ、接続側が検知できるようにした
+- [x] `_restoreSelectedRecordingDevice` が列挙不能時に `windows_audio_restore skipped: enumerate_failed ...` を記録し、次の再適用へ委ねるよう修正した
+- [x] 保留の可否判定を純粋関数 `shouldDeferRecordingDeviceApply` に切り出し、単体テストを追加した
 - [x] 音声入力デバイスを A から B に変更して再接続すると `native: windows_audio_restore device=<デバイス B の ID> ok` が出力される (Windows 実機で確認)
 - [x] 受信側で B のマイクの音声が届くことを確認した (Windows 実機で確認)
 - [x] 原因調査用の診断ログを削除した
@@ -236,6 +189,7 @@ CI (GitHub Actions の Windows Hosted Runner) には音声入力デバイスが�
 
 - 接続中の音声入力デバイス切り替え。ADM は録音初期化後に `SetRecordingDevice` を -1 で拒否し、UI 側も接続中は `Audio Input` を無効化している。SDK の `SoraConnection.replaceAudioTrack` は音声トラックを `rtpSenderSetTrack` で差し替えるだけで ADM の録音デバイスを切り替えないため、この用途には使えない
 - 接続中にミュートした状態を再接続後も維持する対応。実機確認で維持されないことを確認したが、原因は devtools の UI 状態管理にある。接続中のミュートは `_toggleAudioEnabled` がトラックの `enabled` のみを変更し、`DevToolsPageNotifier.applyToggleAudio` は接続中に `connectAudio` を更新しない (`devtools/lib/src/devtools_models.dart`)。再接続時は `_prepareLocalStream` が音声トラックを `enabled = true` の既定値で新規生成するため、デバイス変更の有無に関係なくミュートが解除される。本 issue の修正対象 (SDK の録音デバイス選択) とは原因も変更対象も別であるため、別 issue に切り出す
+- `_prepareLocalStream` の再利用分岐に音声トラックのデバイス差分検出が無い非対称の解消。到達するのは Sora サーバー起因の切断でデバイスを変更しない場合だけであり、その場合は選択と既存トラックのデバイスが一致するため実害がない。将来 `_clearLocalPreview()` の条件を見直して `_localStream` を保持する経路を増やす場合に別 issue で扱う
 - 前回実デバイスで接続し、今回 beep 音声を有効にして再接続した場合に既存の音声トラックが残り beep トラックが追加されない既存挙動
 - `devtools/README.md` への制限事項の追記。ドキュメント整備は別 issue に切り出す
 

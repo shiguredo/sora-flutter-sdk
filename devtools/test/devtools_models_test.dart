@@ -98,10 +98,9 @@ void main() {
 
     notifier.removeRemoteTracksByConnectionIds(const <String>{'conn-a'});
 
-    expect(
-      notifier.remoteVideos.map((track) => track.trackId),
-      <String>['conn-b-video'],
-    );
+    expect(notifier.remoteVideos.map((track) => track.trackId), <String>[
+      'conn-b-video',
+    ]);
     expect(notifier.remoteAudios, isEmpty);
   });
 

@@ -528,4 +528,30 @@ void main() {
       }
     });
   }, skip: ffiTestEnvironment.skipReason);
+
+  group('Windows 音声デバイス補正のバインディング', () {
+    late DynamicLibrary dylib;
+
+    setUpAll(() {
+      dylib = loadLibWebrtcC();
+    });
+
+    test('補正 API のシンボルを解決できる', () {
+      // late final のフィールドはアクセス時に lookupFunction が走る。
+      // シンボルが無ければここで失敗する。
+      final lib = LibWebrtcC(dylib);
+      expect(() => lib.audioDeviceModuleEnableBuiltInAEC, returnsNormally);
+      expect(
+        () => lib.audioDeviceModuleSetPlayoutDeviceWithWindowsDeviceType,
+        returnsNormally,
+      );
+    });
+
+    test('kWindowsDefaultDevice は libwebrtc の kDefaultDevice (-2) を指す', () {
+      // libwebrtc の AudioDeviceModule::WindowsDeviceType::kDefaultDevice は
+      // -2 で、Windows の CoreAudio ADM では eConsole の既定デバイスへ
+      // 変換される。値が変わった場合は補正の前提を見直すこと。
+      expect(WebrtcConstants(dylib).kWindowsDefaultDevice, -2);
+    });
+  }, skip: ffiTestEnvironment.skipReason);
 }

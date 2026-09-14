@@ -80,7 +80,7 @@ native: windows_audio_restore device=B ok   (PeerConnection 作成直後と pcAd
 
 ## 原因
 
-再接続時、`MediaDevices.createAudioTrack(audioDeviceId: B)` が呼ぶ `AudioDeviceModule` は録音デバイス数を `-1` として返す。`WebrtcClient.setRecordingDeviceByGuid` はこの状態を `StateError('No audio input devices available.')` とし、`MediaDevices.createAudioTrack` がそれをデバイス不存在として握り潰すため、切り替えは行われず、`WebrtcClient._selectedRecordingDevice` は前回のデバイス A のまま残る。その後 `windows_audio_restore` が A を再適用するため、選択した B は使われない。
+再接続時、`MediaDevices.createAudioTrack(audioDeviceId: B)` が呼ぶ `AudioDeviceModule` は録音デバイス数を `-1` として返す。変更前の `WebrtcClient.setRecordingDeviceByGuid` はこの状態を `StateError('No audio input devices available.')` としていたため、`MediaDevices.createAudioTrack` がそれをデバイス不存在として握り潰し、切り替えは行われず、保持していた選択は前回のデバイス A のまま残った。その後 `windows_audio_restore` が A を再適用するため、選択した B は使われない。
 
 libwebrtc の `AudioDeviceWindowsCore::RecordingDevices()` は `_RefreshDeviceList(eCapture)` が失敗すると `-1` を返す。切断時に `Terminate()` が capture collection を解放し、次の PeerConnection 作成まで復旧しないため、トラック生成の時点では列挙できない。
 

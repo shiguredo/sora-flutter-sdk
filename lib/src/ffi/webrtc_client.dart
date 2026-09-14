@@ -82,7 +82,7 @@ class _StatsRequest {
 ///
 /// FFI から独立させて単体テストできるよう、一覧を値で受け取る純粋関数に
 /// している。
-@visibleForTesting
+@internal
 int? resolveRecordingDeviceIndex({
   required List<({int index, String guid, String name})> devices,
   required String deviceId,
@@ -340,8 +340,9 @@ class WebrtcClient {
   // `setRecordingDeviceByGuid` の本体。
   //
   // 成功時は選択内容を保持して null を返す。失敗時は StateError を返し、
-  // 例外は投げない。PeerConnection 作成直後の再適用では、失敗しても接続
-  // 処理を止めないためにこの経路を使う。
+  // それ以外の例外は投げない。ただし共有 factory 未生成の場合は
+  // `sharedAudioDeviceModule` の生成処理が例外を投げ得る。再適用時は
+  // factory 生成済みのため、この経路では発生しない。
   static StateError? _trySetRecordingDeviceByGuid(
     String deviceId, {
     String? labelHint,
@@ -374,7 +375,8 @@ class WebrtcClient {
     final guidBuf = calloc.allocate<Char>(128);
     try {
       // FFI で列挙した一覧を値へ変換し、探索は純粋関数へ任せる。
-      // ADM のインデックスは読み取り失敗で詰めないよう index に保持する。
+      // 読み取りに失敗したデバイスは一覧から除かれるため、位置ではなく
+      // ADM のインデックスを各要素に保持する。
       final devices = <({int index, String guid, String name})>[];
       for (var i = 0; i < count; i++) {
         final rc = sharedLib.audioDeviceModuleRecordingDeviceName(
@@ -691,11 +693,13 @@ class WebrtcClient {
   //
   // 参照中の PeerConnection が 0 になったとき MediaEngine が Terminate し、
   // 次の作成で再び Init される。Init のたびに 1 から 3 が再適用される必要が
-  // あるため、PeerConnection 作成ごとに本補正を呼ぶ。呼び出しは冪等ではなく、
-  // 既に適用済みの場合は ADM 側が -1 を返すだけで実害はない。
+  // あるため、PeerConnection 作成ごとに本補正を呼ぶ。呼び出しは冪等では
+  // ないが、再生や録音が初期化済みの場合は ADM 側が -1 を返すか、未初期化
+  // なら同じ値を再設定するだけで実害はない。
   //
-  // 補正に失敗しても接続処理は継続する。push audio device など実 ADM を
-  // 使わない場合や ADM 未生成の場合は何もしない。
+  // ADM が -1 を返すなどの補正の失敗は無視して接続処理を継続する。
+  // push audio device など実 ADM を使わない場合や ADM 未生成の場合は
+  // 何もしない。
   static void _configureWindowsAudioDeviceAfterPeerConnection({
     required void Function(String message) emitDebug,
   }) {
@@ -732,10 +736,11 @@ class WebrtcClient {
   // 最後に成功した録音デバイス選択を ADM へ再適用する。
   //
   // Windows では PeerConnection 作成時の adm_helpers::Init() が録音
-  // デバイスを既定通信デバイスへ上書きするため、作成直後に呼ぶ。
+  // デバイスを既定通信デバイスへ上書きするため、作成直後と録音開始
+  // (`pcAddTrack`) の直前に呼ぶ。
   // 録音がまだ初期化されていなければ SetRecordingDevice は成功する。
-  // 既に初期化済みで失敗した場合も、その時点のデバイスは上書きされて
-  // いないため無視してよい。
+  // 他クライアントが録音を開始済みの場合は MediaEngine の再 Init が
+  // 走らないため上書きされておらず、失敗しても無視してよい。
   //
   // 補正は接続処理を止めない。選択がない場合や再適用に失敗した場合は
   // 何もしない。

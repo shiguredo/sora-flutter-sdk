@@ -529,7 +529,9 @@ void main() {
     });
   }, skip: ffiTestEnvironment.skipReason);
 
-  group('Windows 音声デバイス補正のバインディング', () {
+  // SORA_FFI_TEST_LIBRARY_PATH が指す libsora_sdk (CI では Linux) で
+  // シンボル解決を検証する。Windows 固有の挙動は実機確認で担保する。
+  group('音声デバイス補正 API のバインディング', () {
     late DynamicLibrary dylib;
 
     setUpAll(() {

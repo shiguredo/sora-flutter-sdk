@@ -69,6 +69,43 @@ void main() {
       expect(index, 1);
     });
 
+    test('preferDefaultDevice が false なら default (labelHint) を選ばない', () {
+      // true 側との対比。default (マイク (USB)) が存在しても labelHint の
+      // 一致を優先する。
+      final index = resolveRecordingDeviceIndex(
+        devices: devices,
+        deviceId: '{unknown}',
+        labelHint: 'マイク (USB)',
+      );
+      expect(index, 0);
+    });
+
+    test('preferDefaultDevice でも完全一致が default (labelHint) より優先される', () {
+      // 完全一致 (index 2)、default (labelHint) (index 1)、labelHint 一致
+      // (index 0) を別々に置き、完全一致が勝つことを検証する。
+      const split = <({int index, String guid, String name})>[
+        (index: 0, guid: '{plain}', name: 'Speaker'),
+        (index: 1, guid: '{default}', name: 'default (Speaker)'),
+        (index: 2, guid: '{exact}', name: 'Speaker USB'),
+      ];
+      final index = resolveRecordingDeviceIndex(
+        devices: split,
+        deviceId: '{exact}',
+        labelHint: 'Speaker',
+        preferDefaultDevice: true,
+      );
+      expect(index, 2);
+    });
+
+    test('labelHint が null なら preferDefaultDevice でも null を返す', () {
+      final index = resolveRecordingDeviceIndex(
+        devices: devices,
+        deviceId: '{unknown}',
+        preferDefaultDevice: true,
+      );
+      expect(index, isNull);
+    });
+
     test('preferDefaultDevice でも default (labelHint) が無ければ labelHint を使う', () {
       final index = resolveRecordingDeviceIndex(
         devices: devices,
@@ -107,9 +144,9 @@ void main() {
       expect(index, isNull);
     });
 
-    test('読み取りに失敗したデバイスを詰めても ADM のインデックスを返す', () {
-      // 一覧の位置ではなく index を返すことを検証する。読み取り失敗で
-      // 詰めた一覧の位置 2 が、ADM のインデックス 5 を指すケース。
+    test('一覧の位置ではなく ADM のインデックスを返す', () {
+      // 読み取りに失敗したデバイスを除いて詰めた一覧を想定し、一覧の位置
+      // 2 が ADM のインデックス 5 を指すケースを検証する。
       const compacted = <({int index, String guid, String name})>[
         (index: 0, guid: '{a}', name: 'mic-a'),
         (index: 2, guid: '{b}', name: 'mic-b'),

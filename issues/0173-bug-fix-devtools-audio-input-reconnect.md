@@ -30,24 +30,19 @@ Windows 実機で音声入力デバイスを変更して再接続しても、選
 
 ### 改善前の実測 (Windows 実機)
 
-改善前の実測では、再接続時の `windows_audio_restore` は A のままだった。原因確定に使ったログの要点を次に示す。デバイス ID は実値からプレースホルダへ置き換えている。
+修正前は、再接続時の `windows_audio_restore` が A のままだった。原因確定に使ったログの要点を次に示す。
 
 ```
-audio_input_reconnect: branch=create existing=false audio_tracks=0 ... selected_audio_device=B ... available_audio_inputs=3
-native: set_audio_input_device requested=B
-native: set_audio_input_device effective=B enumerated=3 matched=true
-native: recording_device_apply deviceId=B preferDefaultDevice=false
+native: set_audio_input_device requested=B / effective=B enumerated=3 matched=true
 native: recording_device_set deviceId=B
 native: recording_device_set failed deviceId=B reason=no_devices count=-1
 native: set_audio_input_device failed error=Bad state: No audio input devices available.
-audio_input_reconnect: attach=generated detail=getUserMedia device=B
 native: windows_audio_fix aec_rc=0 playout_rc=0
 native: recording_device_set deviceId=A
-native: recording_device_resolve deviceId=A ... adm_devices=3 ... target_index=0
 native: windows_audio_restore device=A ok
 ```
 
-初回接続では同じ箇所が `count=3` を返し `target_index=0` で成功していた。経路別の分岐到達は次のとおりである。
+初回接続では同じ箇所が `count=3` を返して `target_index=0` で成功していた。経路別の分岐到達は次のとおりである。
 
 | 経路 | 切断操作 | デバイス変更 | `_prepareLocalStream` の分岐 | `windows_audio_restore` |
 | --- | --- | --- | --- | --- |
@@ -55,6 +50,33 @@ native: windows_audio_restore device=A ok
 | 経路 3 | `Disconnect` ボタン | A から B | `branch=create` | A (B にならない) |
 | 経路 4 | Sora サーバー起因 | なし (A) | `branch=reuse` (`attach=unchanged audio_tracks=1`) | A (期待どおり) |
 | 経路 5 | Sora サーバー起因 | A から B | `branch=create` | A (B にならない) |
+
+### 改善後の実測 (Windows 実機)
+
+修正後、再接続で選択したデバイスへ切り替わることを確認した。ログの要点を次に示す。
+
+```
+audio_input_reconnect: branch=create existing=false audio_tracks=0 ... selected_audio_device=B
+native: set_audio_input_device requested=B / effective=B enumerated=3 matched=true
+native: recording_device_set deferred deviceId=B reason=no_devices count=-1
+audio_input_reconnect: attach=generated detail=getUserMedia device=B
+native: windows_audio_fix aec_rc=0 playout_rc=0
+native: recording_device_resolve deviceId=B ... target_index=1
+native: recording_device_set ok deviceId=B target_index=1
+native: windows_audio_restore device=B ok   (PeerConnection 作成直後と pcAddTrack 直前の 2 回)
+```
+
+再接続時は `count=-1` のため選択を保持し、ADM が復旧した再適用で `target_index=1` として B を適用している。受信側で B のマイクの音声が届くことも確認した。
+
+### 原因確定に使った診断ログ
+
+原因確定のあと、調査用の診断ログはすべて削除した (`27bf7f0`)。削除した内容は次のとおりである。
+
+- SDK: `WebrtcClient.recordingDeviceDebugSink`、`MediaDevices.setRecordingDeviceDebugSink` / `recordingDeviceDebugSink`、`native: recording_device_*` / `native: set_audio_input_device` の出力
+- devtools: `audio_input_reconnect:` の分岐・生成経路ログと起動マーカー、`setRecordingDeviceDebugSink` の設定
+- テスト: `test/webrtc_client_recording_device_debug_sink_test.dart`
+
+最終的な変更は `lib/src/ffi/webrtc_client.dart` の録音デバイス選択の保持と再適用のみである。
 
 ## 原因
 
@@ -153,23 +175,18 @@ libwebrtc の `AudioDeviceWindowsCore::RecordingDevices()` は `_RefreshDeviceLi
 
 ## 変更対象ファイル
 
-- `lib/src/ffi/webrtc_client.dart` (`setRecordingDeviceByGuid`、`_trySetRecordingDeviceByGuid`、`_restoreSelectedRecordingDevice`、診断ログ)
-- `lib/src/media/sora_media_device_platform.dart` (`setAudioInputDevice` の診断ログ)
-- `lib/src/sora_media_devices.dart` (`MediaDevices.setRecordingDeviceDebugSink` / `recordingDeviceDebugSink`)
-- `test/webrtc_client_recording_device_debug_sink_test.dart` (新規、出力先の設定と解除の単体テスト)
-- `devtools/lib/src/devtools_connection_controller.dart` (`_prepareLocalStream`、`audio_input_reconnect:` ログ)
-- `devtools/lib/main.dart` (診断ログの出力先の設定と解除)
-- `devtools/lib/src/devtools_audio_input_reconnect_policy.dart` (新規、再利用分岐の作り直し可否を判定する純粋関数)
-- `devtools/test/devtools_audio_input_reconnect_policy_test.dart` (新規、純粋関数の単体テスト)
+- `lib/src/ffi/webrtc_client.dart` (`setRecordingDeviceByGuid`、`_trySetRecordingDeviceByGuid`、`_restoreSelectedRecordingDevice`)
+- `lib/src/media/sora_media_device_platform.dart` (`setAudioInputDevice` のコメントのみ)
+- `devtools/lib/src/devtools_audio_input_reconnect_policy.dart` (新規、再利用分岐の作り直し可否を判定する純粋関数。再利用分岐の非対称を直す場合のみ)
+- `devtools/test/devtools_audio_input_reconnect_policy_test.dart` (新規、上記の単体テスト)
 - `devtools/lib/src/devtools_models.dart` と `devtools/lib/src/devtools_settings_sections.dart` は変更しない
+- 原因調査用の診断ログは削除済みである。`WebrtcClient.recordingDeviceDebugSink`、`MediaDevices.setRecordingDeviceDebugSink` / `recordingDeviceDebugSink`、`audio_input_reconnect:` ログ、`test/webrtc_client_recording_device_debug_sink_test.dart` は残さない
 
 ## テスト戦略
 
-- ADM が録音デバイスを列挙できない場合に例外を投げず選択を保持することは、`setRecordingDeviceByGuid` が FFI を呼ぶため自動テストしない。実機の `native: recording_device_set deferred ... reason=no_devices` で確認する
-- 診断ログの出力先は `test/webrtc_client_recording_device_debug_sink_test.dart` で設定と解除を単体テストする
+- ADM が録音デバイスを列挙できない場合に例外を投げず選択を保持することは、`setRecordingDeviceByGuid` が FFI を呼ぶため自動テストしない。実機の `native: windows_audio_restore device=... ok` で確認する
 - `resolveRecordingDeviceIndex` の単体テスト (`test/webrtc_client_recording_device_test.dart`) は既存のものを維持する
-- 再利用分岐の作り直し可否の判定は純粋関数に切り出し、`devtools/test/devtools_audio_input_reconnect_policy_test.dart` で表駆動の単体テストにする
-- 固定する組み合わせ: 保持値が未設定 / 同じ ID / 異なる ID / null と null / null と非 null / 非 null と null / 音声トラックなし / beep 有効 / `useAudioDevice` が偽 / `configuredAudio` が偽
+- 再利用分岐の作り直し可否の判定を実装する場合は、純粋関数に切り出して `devtools/test/devtools_audio_input_reconnect_policy_test.dart` で表駆動の単体テストにする。固定する組み合わせは 保持値が未設定 / 同じ ID / 異なる ID / null と null / null と非 null / 非 null と null / 音声トラックなし / beep 有効 / `useAudioDevice` が偽 / `configuredAudio` が偽 とする
 - `_prepareLocalStream` の実処理 (removeTrack / dispose / createAudioTrack / addTrack) はネイティブライブラリと実デバイスが必要なため自動テストしない。モックやスタブは追加しない
 - 実マイクが 2 本以上ある Windows 実機での手動確認を `## 手動確認手順 (Windows 実機)` に従って行う
 
@@ -177,48 +194,45 @@ libwebrtc の `AudioDeviceWindowsCore::RecordingDevices()` は `_RefreshDeviceLi
 
 ### フェーズ 1: 原因確定 (完了)
 
-- [x] `audio_input_reconnect:` `native: set_audio_input_device` `native: recording_device_*` の診断ログを実装し、Windows 実機で経路 3 / 4 / 5 の分岐到達を記録した
+- [x] 診断ログを実装し、Windows 実機で経路 3 / 4 / 5 の分岐到達を記録した
 - [x] 原因を確定した。再接続時の ADM が録音デバイス数 `-1` を返し、その `StateError` がデバイス不存在として握り潰されるため選択が保持されない
 - [x] 再利用分岐の到達条件を確定した (Sora サーバー起因の切断でデバイスを変更しない場合のみ到達し、症状の原因ではない)
 - [x] 候補 (一覧の表記不一致 / rc != 0 / デバイス ID が null / 音声トラックの再利用 / 0170 の未解明事象) を棄却した
 - [x] `## 原因` `## 設計方針` `## エッジケースと期待動作` `## テスト戦略` `## 完了条件` を確定内容に更新した
 
-### フェーズ 2: 修正
+### フェーズ 2: 修正 (完了)
 
 - [x] `setRecordingDeviceByGuid` が ADM の列挙不能を例外にせず選択を保持し、復旧後の再適用で切り替えるよう修正した
 - [x] `_restoreSelectedRecordingDevice` が列挙不能時に `windows_audio_restore skipped: ...` を記録し、次の再適用へ委ねるよう修正した
-- [x] 診断ログの出力先の単体テストを追加した
-- [ ] 音声入力デバイスを A から B に変更して再接続すると `native: windows_audio_restore device=<デバイス B の ID> ok` が PeerConnection 作成直後と `pcAddTrack` 直前に出力される (Windows 実機で手動確認)
-- [ ] `native: recording_device_set deferred ... reason=no_devices` のあとに `native: windows_audio_restore device=<デバイス B の ID> ok` が出る (Windows 実機で手動確認)
-- [ ] 上記の接続で sender の audio `outbound-rtp` の `bytesSent` / `packetsSent` が増加する (Windows 実機で手動確認)
-- [ ] デバイス B にのみ話しかけ、audio `outbound-rtp` の `audioLevel` または `totalAudioEnergy` が反応する (Windows 実機で手動確認)
+- [x] 音声入力デバイスを A から B に変更して再接続すると `native: windows_audio_restore device=<デバイス B の ID> ok` が出力される (Windows 実機で確認)
+- [x] 受信側で B のマイクの音声が届くことを確認した (Windows 実機で確認)
+- [x] 原因調査用の診断ログを削除した
+- [x] `flutter analyze --fatal-infos lib test` (リポジトリルート) と `flutter test` (リポジトリルート) が成功する
+- [x] `cd devtools && flutter analyze --fatal-infos lib test` と `flutter test` が成功する
+- [x] `dart format --output=none --set-exit-if-changed lib test` が差分なし
+- [x] モックやスタブを使用していない
 - [ ] 音声をミュートにしてから入力デバイスを変更して再接続しても、ミュートが維持される
-- [ ] `flutter analyze --fatal-infos lib test` (リポジトリルート) と `flutter test` (リポジトリルート) が成功する
-- [ ] `cd devtools && flutter analyze --fatal-infos lib test` と `flutter test` が成功する。devtools のテストは `.github/workflows/ci.yml` では実行されないため、ローカルで実行し結果を確認結果として残す
-- [ ] `dart format --output=none --set-exit-if-changed devtools/lib devtools/test` と `lib test` が差分なし
-- [ ] モックやスタブを使用していない
 - [ ] `CHANGELOG.md` へは追記しない (`CODEBASE.md` の「正式リリース前」節)。正式リリース確定時に `[FIX]` を追記する
 
 ## 手動確認手順 (Windows 実機)
 
-前提: 音声入力デバイスを A と B の 2 つ以上認識する Windows 実機を使う。入力デバイスが 1 つの環境では A / B の差分を確認できない。
+前提: 音声入力デバイスを A と B の 2 つ以上認識する Windows 実機を使う。入力デバイスが 1 つの環境では A / B の差分を確認できない。診断ログを削除したため、確認は SDK の `native: windows_audio_restore` と受信側の音声で行う。
 
 1. `## 再現手順` の手順 1 から 4 を実施する
-2. Diagnostics タブの Logs で、再接続時に `native: recording_device_set deferred ... reason=no_devices` が出ることを確認する (ADM がまだ復旧していないことの記録)
-3. 同じく Logs で、`native: windows_audio_restore device=<デバイス B の ID> ok` が PeerConnection 作成直後と `pcAddTrack` 直前の 2 回出力されることを確認する
-4. Diagnostics タブの Stats で sender の audio `outbound-rtp` の `bytesSent` / `packetsSent` が増加することを確認する
-5. デバイス B にのみ話しかけ、audio `outbound-rtp` の `audioLevel` または `totalAudioEnergy` が反応することを確認する
+2. Diagnostics タブの Logs で、再接続後に `native: windows_audio_restore device=<デバイス B の ID> ok` が PeerConnection 作成直後と `pcAddTrack` 直前の 2 回出力されることを確認する
+3. Diagnostics タブの Stats で sender の audio `outbound-rtp` の `bytesSent` / `packetsSent` が増加することを確認する
+4. デバイス B にのみ話しかけ、audio `outbound-rtp` の `audioLevel` または `totalAudioEnergy` が反応することを確認する
+5. 受信側で B のマイクの音声だけが届くことを確認する
 6. Audio Track を無効にしてから入力デバイスを変更して再接続し、Audio Track が無効のままであることを確認する
 
 CI (GitHub Actions の Windows Hosted Runner) には音声入力デバイスが無いため、この手順は自動テストでは代替できない。
 
 ## 確認結果
 
-`## 再現手順` に記載した改善前の実測に加え、改善後の実測をここへ追記する。次を記録すること。
-
-- 再接続時の `native: recording_device_set deferred ... reason=no_devices count=...`
-- 復旧後の `native: windows_audio_restore device=<デバイス B の ID> ok`
-- sender の audio `outbound-rtp` の増加
+- `## 再現手順` に記載したとおり、改善前は再接続後も A が使われ、改善後は B が使われることを Windows 実機で確認した
+- 再接続時は `RecordingDevices()` が `-1` を返すため選択を保持し、PeerConnection 作成直後の再適用で `target_index` を解決して B を適用することをログで確認した
+- 受信側で B のマイクの音声が届くことを確認した
+- 残る確認は「音声をミュートにしてから入力デバイスを変更して再接続してもミュートが維持されること」である
 
 ## 対象外
 

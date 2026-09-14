@@ -11,7 +11,6 @@ Sora Flutter SDK の recvonly / sendonly / sendrecv 接続と、2 クライア�
 - **Windows**: プラグインの MethodChannel は実装済み。カメラキャプチャ (0035) と音声デバイス (0036) に対応する。Windows の接続テストは以下の前提で実行する:
   - 音声デバイステスト（`windows_audio_device_test.dart`）は Sora 接続不要のプラットフォーム結合テストで、WASAPI によるデバイス列挙と切り替えのみを検証する
   - `windows_audio_device_test.dart` は GitHub Actions の Windows Hosted Runner では実行しない。ローカル実機または self-hosted runner で実行する
-  - 実音声デバイスの送受信テスト（`windows_audio_real_device_e2e_test.dart`）は Sora 接続と物理マイク、実スピーカーが必要。ローカル実機または self-hosted runner で `TEST_SECRET_KEY` / `TEST_SIGNALING_URLS` / `TEST_CHANNEL_ID_PREFIX` を設定して実行する
   - 音声テストには物理マイクが必要。仮想オーディオデバイス（CABLE Input 等）でも動作する
   - `flutter build windows` でビルドが通る状態であること（不足システムライブラリがある場合は `windows/CMakeLists.txt` に追加する）
 
@@ -140,8 +139,6 @@ cd e2e_test_app
 flutter pub get
 # Sora 接続不要のプラットフォーム結合テスト（物理マイクが必要）
 flutter test integration_test/windows_audio_device_test.dart -d windows
-# 実音声デバイスの送受信テスト（TEST_* の設定と物理マイクが必要）
-flutter test integration_test/windows_audio_real_device_e2e_test.dart -d windows
 ```
 
 Windows で Sora 接続を含むテストを実行する場合は macOS と同様に環境変数を設定してください。ただし `sora_camera_capturer.cpp` に Windows SDK 互換性の問題があるため、カメラを含むテストは現時点では失敗する可能性があります。

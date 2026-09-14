@@ -79,17 +79,33 @@ devtools は MTA で初期化済みだが、e2e_test_app の runner は Flutter 
 ## 完了条件
 
 - [ ] Windows 実機で sendonly / sendrecv の音声送信と recvonly / sendrecv の音声再生が成立する (手動確認)
+- [ ] 音声入力に既定以外のデバイスを選択した接続でも、選択したデバイスが維持される (Windows 実機で手動確認)
 - [ ] `e2e_test_app/integration_test/windows_audio_device_test.dart` が通過する
 - [ ] FFI 依存テスト (`test/webrtc_client_test.dart` ほか) が通過する
 - [ ] `flutter analyze --fatal-infos` がルート / devtools / e2e_test_app で成功する
-- [ ] `CHANGELOG.md` に `[FIX]` を追記し、エコーキャンセルが無効になる副作用を明記する
+- [ ] 正式リリース確定時に `CHANGELOG.md` へ `[FIX]` を追記し、Windows 内蔵 AEC が利用可能な環境でエコーキャンセルが無効になる副作用を明記する (CODEBASE.md の「正式リリース前」節のため、本ブランチでは追記しない)
 - [ ] モックやスタブを使用していない
+
+## 手動確認手順 (Windows 実機)
+
+1. Windows 実機で devtools を起動する
+2. 音声入力と音声出力に実デバイスを選択し、Connect Audio を有効、Send Beep Audio を無効にする
+3. sendonly で接続し、sender の `outbound-rtp` の `bytesSent` / `packetsSent` が増加することを確認する
+4. recvonly で接続し、リモート音声の `inbound-rtp` が増加し、実際に再生されることを確認する
+5. sendrecv で接続し、送信と再生の両方が成立することを確認する
+6. 音声入力に既定以外のデバイスを選択した接続で、既定の通信デバイスへ戻らず選択したデバイスが使われ続けることを確認する
+7. 内蔵 AEC が利用可能な環境ではエコーキャンセルが無効になる副作用を確認する
+
+CI (GitHub Actions の Windows Hosted Runner) には音声入力デバイスがないため、この手順は自動テストでは代替できない。
 
 ## 解決方法
 
 - `lib/src/ffi/webrtc_client.dart` に `WebrtcClient._configureWindowsAudioDeviceAfterPeerConnection` を追加し、`WebrtcClient._ensurePeerConnection` の PeerConnection 作成成功直後に呼ぶようにした
+- `WebrtcClient.setRecordingDeviceByGuid` の選択内容を保持し、PeerConnection 作成直後に `adm_helpers::Init()` が上書きした録音デバイスを再適用するようにした
 - `lib/src/ffi/bindings.dart` に `LibWebrtcC.audioDeviceModuleEnableBuiltInAEC` と `LibWebrtcC.audioDeviceModuleSetPlayoutDeviceWithWindowsDeviceType` を追加し、`WebrtcConstants` に `kWindowsDefaultDevice` を追加した
+- 録音デバイスの探索を純粋関数 `resolveRecordingDeviceIndex` へ分離し、`test/webrtc_client_recording_device_test.dart` に単体テストを追加した
+- `test/webrtc_client_test.dart` に補正 API のシンボル解決と `kWindowsDefaultDevice` の値のテストを追加した
 - `e2e_test_app/windows/runner/main.cpp` の `wWinMain` を `COINIT_MULTITHREADED` に変更し、`e2e_test_app/windows/runner/CMakeLists.txt` に `/utf-8` を追加した
-- `CHANGELOG.md` の `## develop` に `[FIX]` を追記した
-- Windows 実機 (sendonly の sender と recvonly の receiver) で `useAudioDevice: true` の接続を行い、sender の `outbound-rtp` と receiver の `inbound-rtp` が増加することを手動確認した
+- `CHANGELOG.md` への追記は正式リリース確定時に実施する。CODEBASE.md の「正式リリース前」節により、本ブランチでは追記しない。追記内容は `[FIX] Windows で実音声デバイス利用時に音声が送受信できない問題を修正する` とし、内蔵 AEC の無効化、再生デバイスと録音デバイスの補正、Windows 内蔵 AEC が利用可能な環境でエコーキャンセルが無効になる副作用を含める
+- Windows 実機 (sendonly の sender と recvonly の receiver) で `useAudioDevice: true` の接続を行い、sender の `outbound-rtp` と receiver の `inbound-rtp` が増加することを手動確認した。sendrecv と、音声入力に既定以外のデバイスを選択した場合の選択保持は未確認
 - CI では音声入力デバイスが使えないため、実音声デバイスの送受信テストは追加しない。回帰確認は Windows 実機で行う

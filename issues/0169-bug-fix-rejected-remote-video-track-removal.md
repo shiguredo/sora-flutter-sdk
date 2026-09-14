@@ -35,6 +35,14 @@ SDK 側の要因は、リモートトラック削除イベントが「リモー�
 - 通知経路は `SdpNegotiationCallbacks` → `WebrtcClient` の内部イベント（例: `remote_rejected_tracks`、trackId 一覧を載せる）→ `SoraConnection._handleWebrtcEvent` → `RemoteTrackManager`。
 - 既存の参照収支（`issues/closed/0073-bug-fix-remote-video-track-refcount-leak.md` で確定した add / remove イベント分の ref 収支）は維持する。本 issue の打ち消しは「add 分の返却」のみで完結させ、除去イベントは重複発火させない。
 
+### 代替案: `connection.destroyed` 通知による一括 remove
+
+ブラウザの `sora-devtools` はこの問題を「signaling の `connection.destroyed` でトラックごと掃除する」ことで回避している。相手端末の切断時は Sora が必ず `notify` の `connection.destroyed` を送るため、WebRTC の remove イベント（`OnRemoveTrack` / `removetrack` 相当）に依存しなくて済む。libwebrtc 内部に依存せず、ブラウザ devtools と同じ物理的性質を持つ案である。
+
+- `SoraConnection` は既に `notify` を処理しており（`lib/src/sora_connection_signaling.dart` の `_handleNotifyMessage`、通知先は `SoraNotifyEvent`）、`connection.destroyed` の `connection_id` を参照できる。Flutter の devtools も remoteClients の除外にはこの notify を使っている（`devtools/lib/main.dart` の `_updateRemoteClients`）が、`remoteVideos` の掃除には使っていない。
+- 実装イメージ: `connection.destroyed` 受信時に、該当 `connectionId` に属する `RemoteMediaStream`（`_remoteMediaStreams`）の video / audio track を対象に、通常の remove と同じ後始末（sink 解除、ref 返却、renderer 破棄、`onRemoveTrackEvent` 発火）を実行し、`SoraRemoveTrackEvent` を発火する。attach 未了の track は 0169 本体方針と同じ打ち消し（拒否済み trackId 集合、または pending attach への世代打ち消し）で吸収する。
+- 懸念: サーバーが `connection.destroyed` を送らない場合（WebSocket 切断・異常終了時など）は発動しないため、本体方針（answer の port 0 m-line 検出）と併用する場合、あるいは Sora を 2026.1.2 以降に限定する条件付けが必要になる。サンプル実装（`sora-ios-sdk-samples` の Stream 単位粒度、ブラウザ devtools の notify 駆動）はどちらも「トラック単体の remove イベントに依存しない」点で共通している。
+
 ## 完了条件
 
 - [ ] Linux + H.264 のシナリオ（多人数チャネル、recvonly）で、非対応コーデックの映像が黒画面として表示されず、相手端末の切断後に映像トラックが残らない（devtools の Video タブからセルが消える）。

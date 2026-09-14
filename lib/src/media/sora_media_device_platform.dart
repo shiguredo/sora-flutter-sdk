@@ -105,6 +105,9 @@ Future<void> setAudioInputDevice(String? deviceId) async {
       effectiveDeviceId,
       labelHint: selectedDevice?.label,
       preferDefaultDevice: deviceId == null,
+      // 切り替え失敗の内容を利用側のログへ届ける。
+      // 未設定の間は SDK 側で何も出力しない。
+      emitDebug: WebrtcClient.recordingDeviceDebugSink,
     );
     return;
   }

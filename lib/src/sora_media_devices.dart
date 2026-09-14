@@ -72,6 +72,18 @@ abstract final class MediaDevices {
     WebrtcClient.useAudioDevice = value;
   }
 
+  /// 録音デバイス切り替えの診断ログ出力先を指定する。
+  ///
+  /// `createAudioTrack` は録音デバイスの切り替え失敗をデバイス不存在として
+  /// 握り潰すため、失敗の内容は通常は観測できない。この出力先を設定すると、
+  /// ADM が列挙したデバイスと選択した `deviceId` の対応、解決したインデックスが
+  /// 出力される。`sink` に null を渡すと出力を停止する。
+  ///
+  /// 出力される内容はデバイスの列挙結果であり、機密情報は含まない。
+  static void setRecordingDeviceDebugSink(void Function(String message)? sink) {
+    WebrtcClient.recordingDeviceDebugSink = sink;
+  }
+
   /// 空の local MediaStream を生成する。
   static LocalMediaStream createMediaStream() {
     final lib = WebrtcClient.sharedLib;

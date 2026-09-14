@@ -230,6 +230,15 @@ class WebrtcClient {
   // Windows の実 ADM の補正と再適用の対象かどうか。
   static bool get _shouldConfigureWindowsAudioDevice =>
       Platform.isWindows && _useAudioDevice;
+
+  /// 録音デバイス切り替えの診断ログ出力先。
+  ///
+  /// `MediaDevices.createAudioTrack` は録音デバイスの切り替え失敗を
+  /// デバイス不存在として握り潰すため、失敗の内容を利用側のログへ届ける
+  /// 経路が必要になる。利用側 (devtools) が設定し、不要になったら null に
+  /// 戻す。null の間はログを出力しない。
+  static void Function(String message)? recordingDeviceDebugSink;
+
   // テスト専用フック。true の間は AudioDeviceModule の初期化を常に失敗させる。
   // ネイティブ環境 (音声デバイスの有無) に依存せずに共有 factory 生成の
   // 失敗経路を検証するために利用する。通常実行では常に false のまま。
@@ -324,15 +333,21 @@ class WebrtcClient {
   //
   // 失敗時は StateError を投げる。成功した選択内容は、Windows の
   // PeerConnection 作成直後の再適用のために保持する。
+  //
+  // `emitDebug` を渡すと、ADM の列挙結果と一致したインデックスを debug
+  // ログへ出力する。呼び出し元が失敗を握り潰す経路 (devtools の音声入力
+  // デバイス切り替え) で、切り替えが効かない原因を切り分けるために使う。
   static void setRecordingDeviceByGuid(
     String deviceId, {
     String? labelHint,
     bool preferDefaultDevice = false,
+    void Function(String message)? emitDebug,
   }) {
     final error = _trySetRecordingDeviceByGuid(
       deviceId,
       labelHint: labelHint,
       preferDefaultDevice: preferDefaultDevice,
+      emitDebug: emitDebug,
     );
     if (error != null) {
       throw error;
@@ -344,10 +359,14 @@ class WebrtcClient {
   // 成功時は選択内容を保持して null を返す。失敗時は StateError を返す。
   // それ以外の例外は投げない (共有 factory 未生成時に
   // `sharedAudioDeviceModule` が投げる例外を除く)。
+  //
+  // `emitDebug` は任意であり、渡されない場合はログを出力しない。
+  // `emitDebug` 自身の例外はデバイス切り替えの結果へ影響させない。
   static StateError? _trySetRecordingDeviceByGuid(
     String deviceId, {
     String? labelHint,
     bool preferDefaultDevice = false,
+    void Function(String message)? emitDebug,
   }) {
     final adm = sharedAudioDeviceModule;
     if (adm == nullptr) {
@@ -385,6 +404,23 @@ class WebrtcClient {
         labelHint: labelHint,
         preferDefaultDevice: preferDefaultDevice,
       );
+      // デバイス解決の結果を残す。ADM に並ぶデバイスと選択中の deviceId が
+      // 一致しない場合、呼び出し元がデバイス不存在として握り潰すため、
+      // 切り替えが効かない原因がログから分かるようにする。
+      // ログ出力の失敗はデバイス切り替えの結果へ影響させない。
+      if (emitDebug != null) {
+        try {
+          emitDebug(
+            'native: recording_device_resolve deviceId=$deviceId'
+            ' preferred=$preferDefaultDevice'
+            ' adm_devices=${devices.length}'
+            ' adm_guids=${devices.map((device) => device.guid).join(',')}'
+            ' target_index=${targetIndex ?? 'none'}',
+          );
+        } catch (_) {
+          // ログ出力の失敗は無視して切り替えを継続する。
+        }
+      }
       if (targetIndex == null) {
         return StateError('Audio input device not found: $deviceId');
       }
@@ -755,6 +791,7 @@ class WebrtcClient {
         selection.deviceId,
         labelHint: selection.labelHint,
         preferDefaultDevice: selection.preferDefaultDevice,
+        emitDebug: emitDebug,
       );
       if (error == null) {
         emitDebug(

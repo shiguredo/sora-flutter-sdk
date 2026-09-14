@@ -123,6 +123,13 @@ bool shouldDeferRecordingDeviceApply({required int deviceCount}) {
   return deviceCount < 0;
 }
 
+/// `setRecordingDeviceByGuid` が受け取り、再適用まで保持する録音デバイスの選択。
+typedef RecordingDeviceSelection = ({
+  String deviceId,
+  String? labelHint,
+  bool preferDefaultDevice,
+});
+
 /// WebRTC クライアント (dart:ffi 実装)
 class WebrtcClient {
   /// 孤立 stats request の保持上限です。
@@ -239,8 +246,7 @@ class WebrtcClient {
   // ADM が録音デバイスを列挙できない間に要求された選択も保持し、復旧後の
   // 再適用で反映する。書き込みは macOS / Linux を含む全プラットフォーム共通
   // (`setRecordingDeviceByGuid` の要求時) で、読み出しは Windows のみ。
-  static ({String deviceId, String? labelHint, bool preferDefaultDevice})?
-  _requestedRecordingDevice;
+  static RecordingDeviceSelection? _requestedRecordingDevice;
 
   // Windows の実 ADM の補正と再適用の対象かどうか。
   static bool get _shouldConfigureWindowsAudioDevice =>
@@ -348,6 +354,7 @@ class WebrtcClient {
   // 要求された選択は適用の成否にかかわらず保持する。適用できなかった選択を
   // 前回の成功値へ戻すと、どのデバイスを使う要求だったかが失われ、再適用の
   // ログからも判別できなくなるため。
+  @internal
   static void setRecordingDeviceByGuid(
     String deviceId, {
     String? labelHint,
@@ -395,7 +402,7 @@ class WebrtcClient {
   static StateError? _trySetRecordingDeviceByGuid(
     Pointer<WebrtcAudioDeviceModule> adm,
     int count,
-    ({String deviceId, String? labelHint, bool preferDefaultDevice}) selection,
+    RecordingDeviceSelection selection,
   ) {
     final deviceId = selection.deviceId;
     final labelHint = selection.labelHint;
@@ -788,7 +795,7 @@ class WebrtcClient {
   }) {
     final selection = _requestedRecordingDevice;
     if (selection == null) {
-      emitDebug('native: windows_audio_restore skipped: no selection');
+      emitDebug('native: windows_audio_restore skipped: reason=no_selection');
       return;
     }
     try {

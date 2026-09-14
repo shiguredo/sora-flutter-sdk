@@ -143,7 +143,10 @@ Future<String> getDefaultAudioInputDeviceId() async {
 /// - `audio_device_not_found`: iOS と Android の MethodChannel 経路
 /// - `device_not_found`: `deviceId == null` 時に Linux の
 ///   `getDefaultAudioInputDevice` 経路でのみ想定します
-/// - `StateError` 3 種: Dart 変換 1 件と FFI 経路 2 件のデバイス不存在メッセージ
+/// - `StateError` 2 種: Dart 変換 1 件と FFI 経路 1 件のデバイス不存在メッセージ
+///
+/// ADM が録音デバイスを列挙できない場合は `setRecordingDeviceByGuid` が例外を
+/// 投げずに選択を保持するため、ここには到達しません。
 @internal
 bool isAudioInputDeviceNotFoundError(Object error) {
   if (error is PlatformException) {
@@ -152,10 +155,7 @@ bool isAudioInputDeviceNotFoundError(Object error) {
         error.code == 'device_not_found';
   }
   if (error is StateError) {
-    const notFoundMessages = <String>[
-      'Default audio input device not found.',
-      'No audio input devices available.',
-    ];
+    const notFoundMessages = <String>['Default audio input device not found.'];
     if (notFoundMessages.contains(error.message)) {
       return true;
     }

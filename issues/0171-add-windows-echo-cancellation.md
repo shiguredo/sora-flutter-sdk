@@ -16,7 +16,8 @@ Windows の実音声デバイス利用時にエコーキャンセルを有効化
 - `WebRtcVoiceEngine::Init()` は既定 AudioOptions で `echo_cancellation = true` を適用し、Windows 内蔵 AEC が利用可能な場合は `EnableBuiltInAEC(true)` を呼ぶ
 - 内蔵 AEC は録音開始に再生開始を要求するため、`WebrtcClient._configureWindowsAudioDeviceAfterPeerConnection` で `EnableBuiltInAEC(false)` を呼んで無効化している
 - `EnableBuiltInAEC(true)` が成功した時点で `options.echo_cancellation` が false に変更され、APM の `echo_canceller.enabled` も false のままになる。ADM 側の内蔵 AEC だけを無効化しても APM のソフトウェア AEC は復帰しない
-- libwebrtc-c 0.150.3 は `AudioDeviceModule` の `kWindowsCoreAudio2` 用ファクトリ (`CreateWindowsCoreAudioAudioDeviceModule`) を公開しておらず、Sora C++ SDK と同じ新しい CoreAudio ADM へ切り替えられない
+- libwebrtc-c 0.150.3 は定数 `webrtc_AudioDeviceModule_kWindowsCoreAudio2` を公開しているが、新しい CoreAudio ADM 用の専用ファクトリ (`CreateWindowsCoreAudioAudioDeviceModule`) は公開していない
+- libwebrtc の `CreateAudioDeviceModule(env, kWindowsCoreAudio2)` は `AudioDeviceModuleImpl::Create` が nullptr を返すため、定数経由で新しい CoreAudio ADM へ切り替えることはできない。新しい CoreAudio ADM を使うには libwebrtc-c 側への専用ファクトリ API 追加が必要
 
 ## 設計方針
 

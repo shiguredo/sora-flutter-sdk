@@ -1,66 +1,54 @@
-# 非対応コーデックで answer が拒否したリモートビデオトラックが残り続けるバグを修正する
+# devtools: 非対応コーデックで answer が拒否されたリモート映像が切断後も残り続けるバグを修正する
 
 - Created: 2026-09-14
 - Completed: {YYYY-MM-DD}
-- Branch: feature/fix-rejected-remote-video-track-removal
+- Branch: feature/fix-devtools-destroyed-remote-track-cleanup
 - Polished: 2026-09-14
 
 ## 目的
 
-受信側が対応していないコーデック（例: Linux + H.264）の m-line を Sora が送信側から受けた場合、SDK は answer で m-line を拒否するにもかかわらず、そのリモートビデオトラックを表示し続ける。相手端末が切断しても `OnRemoveTrack` が発火しないため `SoraRemoveTrackEvent` が届かず、devtools では黒画面のセルが残り続ける。この残留を解消する。
+受信側が対応していないコーデック（例: Linux + H.264）の m-line を Sora が送信側から受けた場合、devtools の Video タブに黒画面のセルが現れ、相手端末が切断しても消えないバグを修正する。対策は devtools 側で行い、SDK（`lib/`）と libwebrtc / ネイティブ側は変更しない。
 
 ## 現状
 
-再現環境は Linux の devtools（recvonly、多人数チャネル接続）と、H.264 を送信する sendrecv クライアントの組み合わせ。`README.md` の対応コーデック表のとおり、ソフトウェアバックエンドは全プラットフォームで VP8 / VP9 / AV1 のみであり、ハードウェアアクセラレータに該当しない Linux は H.264 をデコードできない。実ログでの流れは次のとおり。
+再現環境は Linux の devtools（recvonly、多人数チャネル接続）と、H.264 を送信する sendrecv クライアントの組み合わせ。`README.md` の対応コーデック表のとおり、ソフトウェアバックエンドは全プラットフォームで VP8 / VP9 / AV1 のみであり、ハードウェアアクセラレータに該当しない Linux は H.264 をデコードできない。実ログでのイベントの流れは次のとおり。
 
-1. Sora から re-offer が届き、相手の video m-line に H.264 のみが含まれる（`a=rtpmap:35 H264/90000`、sendonly）。
-2. `native: ontrack kind=video` が発火し、Dart 側が `RemoteTrackManager.attachRemoteVideoTrack` で renderer / texture を生成し `remote_track_attached` を emit する。これが黒画面の実体（フレームは届かないため黒表示になる）。
-3. 続く CreateAnswer では、H.264 非対応のため該当 video m-line が `m=video 0`（port 0）として拒否される。libwebrtc は拒否時に receiver の track を内部で取り除くが、これはローカル answer に起因する除去であり、`OnRemoveTrack`（`linux/linux_bridge.c` の `bridge_on_remove_track` → `remote_video_track_removed`）は発火しない。
-4. 相手端末切断時に Sora が通知と再ネゴシエーションを送る。実ログでは `native: onremovetrack kind=audio` のみ発火し、video の `onremovetrack` は来ない（track は既に libwebrtc 内部で消えているため）。
-5. Dart 側は attach 済みの track と texture を保持し続け、`SoraRemoveTrackEvent` は発生しない。切断後の再ネゴシエーションで同じ track が再度 offer されると、同様に拒否され続けるが打ち消し経路もない。
+1. Sora から re-offer が届き、相手の video m-line に H.264 のみが含まれる（sendonly）。
+2. libwebrtc が OnTrack を発火し、SDK が onDebugMessage 経由で `remote_track_attached`（renderer / texture 生成）を出力する。これが黒画面の実体（フレームは届かないため黒表示になる）。
+3. CreateAnswer では H.264 非対応のため該当 video m-line が port 0 として拒否されるが、libwebrtc は answer 拒否に起因する track 除去を OnRemoveTrack として発火しない（リモート SDP 由来の除去のみ報告する仕様。ブラウザの `removetrack` も同様の関係になる）。実ログでも相手切断時の再ネゴシエーションで `native: onremovetrack kind=audio` だけが発火している。
+4. そのため SDK の `SoraRemoveTrackEvent` は発生せず、devtools の `remoteVideos` にトラックが残り続ける。
 
-SDK 側の要因は、リモートトラック削除イベントが「リモート SDP 由来の track 除去（OnRemoveTrack）」だけに依存しており、**自 answer が拒否した m-line の track はこの経路に載らない**こと。`lib/src/ffi/callback_handlers.dart` の `SdpNegotiationCallbacks` は生成した answer SDP（`_pendingAnswerSdp`）を保持しているが、answer 内の port 0 m-line は一切検査していない。`lib/src/sora_remote_track_manager.dart` も trackAddress 単位の管理のみで、trackId 単位の拒否を扱う機構はない。
+devtools 側の現状は次のとおり。
 
-同様の状況は他プラットフォームでも、受信側デコーダーが未対応のコーデック（例: 旧 Android 端末での AV1 等）を受けた場合に起こり得る。
+- リモートトラックの表示管理: `devtools/lib/src/devtools_event_handler.dart` は `SoraRemoveTrackEvent` を受けて `DevToolsPageNotifier.removeRemoteTrack`（`devtools/lib/src/devtools_models.dart`）で track 単位に削除する。`notify` の `connection.destroyed` は `DevToolsPageNotifier.remoteClients` の掃除にのみ使われており（`devtools/lib/main.dart` の `_updateRemoteClients`）、`remoteVideos` / `remoteAudios` は削除していない。
+- SDK は `notify` を `SoraNotifyEvent` として公開しており、`connection.destroyed` の `event_type` は `SoraNotifyEvent` の `message` から参照できる。
+
+参考として、ブラウザ版の sora-devtools（別リポジトリ）は相手切断時の UI 掃除を `notify` の `connection.destroyed` で駆動しており、WebRTC の `removetrack` に依存していない。iOS サンプル（sora-ios-sdk samples）は audio + video を 1 つの RTCMediaStream 単位で扱うため、音声 m-line の除去で映像も一緒に外れる。
 
 ## 設計方針
 
-- 自 answer SDP から `m=<media> <port>` が port 0（拒否）の m-line を検出する。検出時点は `onCreateAnswerSuccess`（answer SDP 確定時）で、answer をシグナリング送信する前に行う。
-- 拒否された m-line の mid に対し、**offer SDP** を突き合わせて trackId を特定する。offer の該当 m-line の `a=msid:<stream id> <track id>` の track id（`{connection_id}-video` 形式）を使う。`setRemoteDescription` は offer SDP を引数に受けるが現状保持していないため、`SdpNegotiationCallbacks` にフィールドとして保持する。
-- 特定した拒否 trackId を `RemoteTrackManager` に伝え、次の 2 経路を確立する。
-  - **attach 済み**: trackId で該当エントリを探し、通常の detach と同じ後始末（sink 解除、add 分 ref 返却、renderer 破棄、`_remoteMediaStreams` 更新、`onRemoveTrackEvent` 発火）を行う。renderer 破棄失敗時は既存の `_disposeRetryEntries` を再利用して次回の `detachAllRemoteVideoTracks` で回収する。
-  - **attach 未了 / 追加前**: 拒否済み trackId の集合を `RemoteTrackManager` が保持し、`attachRemoteVideoTrack` の入口と renderer 作成後の確認の両方で打ち消す（add 分の参照を返却）。これは trackAddress に依存する既存の `_removedBeforeAttach` ではカバーできないレース（answer 確定前後に attach が進行するケース）への対処。
-  - 後続 re-offer で同じ trackId が再 offer された場合も同じ集合で打ち消す。
-- audio m-line の拒否（port 0）も対称に処理し、`RemoteTrackManager.handleRemoteAudioTrackRemoved` を trackId のみで呼ぶ（audio は trackAddress を持たないため）。
-- 通知経路は `SdpNegotiationCallbacks` → `WebrtcClient` の内部イベント（例: `remote_rejected_tracks`、trackId 一覧を載せる）→ `SoraConnection._handleWebrtcEvent` → `RemoteTrackManager`。
-- 既存の参照収支（`issues/closed/0073-bug-fix-remote-video-track-refcount-leak.md` で確定した add / remove イベント分の ref 収支）は維持する。本 issue の打ち消しは「add 分の返却」のみで完結させ、除去イベントは重複発火させない。
-
-### 代替案: `connection.destroyed` 通知による一括 remove
-
-ブラウザの `sora-devtools` はこの問題を「signaling の `connection.destroyed` でトラックごと掃除する」ことで回避している。相手端末の切断時は Sora が必ず `notify` の `connection.destroyed` を送るため、WebRTC の remove イベント（`OnRemoveTrack` / `removetrack` 相当）に依存しなくて済む。libwebrtc 内部に依存せず、ブラウザ devtools と同じ物理的性質を持つ案である。
-
-- `SoraConnection` は既に `notify` を処理しており（`lib/src/sora_connection_signaling.dart` の `_handleNotifyMessage`、通知先は `SoraNotifyEvent`）、`connection.destroyed` の `connection_id` を参照できる。Flutter の devtools も remoteClients の除外にはこの notify を使っている（`devtools/lib/main.dart` の `_updateRemoteClients`）が、`remoteVideos` の掃除には使っていない。
-- 実装イメージ: `connection.destroyed` 受信時に、該当 `connectionId` に属する `RemoteMediaStream`（`_remoteMediaStreams`）の video / audio track を対象に、通常の remove と同じ後始末（sink 解除、ref 返却、renderer 破棄、`onRemoveTrackEvent` 発火）を実行し、`SoraRemoveTrackEvent` を発火する。attach 未了の track は 0169 本体方針と同じ打ち消し（拒否済み trackId 集合、または pending attach への世代打ち消し）で吸収する。
-- 懸念: サーバーが `connection.destroyed` を送らない場合（WebSocket 切断・異常終了時など）は発動しないため、本体方針（answer の port 0 m-line 検出）と併用する場合、あるいは Sora を 2026.1.2 以降に限定する条件付けが必要になる。サンプル実装（`sora-ios-sdk-samples` の Stream 単位粒度、ブラウザ devtools の notify 駆動）はどちらも「トラック単体の remove イベントに依存しない」点で共通している。
+- **libwebrtc は変更しない**。本 issue では「answer 拒否で消えた m-line の track について OnRemoveTrack が発火しない」ことを、libwebrtc の仕様として扱う。SDK（`lib/`）のイベント契約も変更しない。
+- **devtools 側で `connection.destroyed` に対処する**。`SoraNotifyEvent` の `event_type == 'connection.destroyed'` を受けたら、該当 `connection_id` に属するリモートトラックを接続単位で削除し、`remoteClients` の既存の削除と合わせて保存状態を整合させる。
+  - 削除対象: `DevToolsPageNotifier.remoteVideos` / `remoteAudios`（`connectionId` が一致する要素）。
+  - 実装場所: `devtools/lib/main.dart` の `_updateRemoteClients`（`connection.destroyed` 分岐）と、`devtools/lib/src/devtools_models.dart` の接続単位削除ヘルパ。
+  - `SoraRemoveTrackEvent`（track 単位）による既存の削除はそのまま維持する。両経路が同じ track を削除しても `removeWhere` は冪等で、接続単位の削除は後から同じ track を消しても表示に影響しない。Video タブ (`devtools_video_panel.dart`) は `remoteVideos` の `List` を直接参照するため、削除後の再描画に特別な対応は不要。
+- `remoteClients`（接続情報ラベル）の削除は現状の実装を維持し、削除順序や既存動作は変えない。
 
 ## 完了条件
 
-- [ ] Linux + H.264 のシナリオ（多人数チャネル、recvonly）で、非対応コーデックの映像が黒画面として表示されず、相手端末の切断後に映像トラックが残らない（devtools の Video タブからセルが消える）。
-- [ ] `native: onremovetrack` が発火しない場合でも、拒否された video track について `SoraRemoveTrackEvent` が 1 回だけ発火し、`RemoteMediaStream` からも除去される。
-- [ ] 対応コーデック（VP8 / VP9 / AV1）の通常受信では挙動が変わらず、既存 E2E（`e2e_test_app/integration_test/remote_media_stream_e2e_test.dart` 等）が通る。
-- [ ] offer / answer のペアから拒否 trackId を正しく抽出するユニットテストと、attach 済み / attach 未了の両レースを exercise するユニットテストが追加され、FFI 依存テスト（Linux CI）が成功する。
-- [ ] `flutter analyze --fatal-infos` が成功する。
+- [ ] Linux + H.264 のシナリオ（多人数チャネル、recvonly）で、相手端末の切断後に devtools の Video タブから黒画面セルが消える（`native: onremovetrack` が発火しない場合でも消える）。
+- [ ] `connection.destroyed` 通知で、該当 `connection_id` の `remoteVideos` / `remoteAudios` / `remoteClients` が同時に削除され状態が整合する。
+- [ ] 対応コーデック（VP8 / VP9 / AV1）の通常受信・切断では従来と挙動が変わらない。`SoraRemoveTrackEvent` が先に届く正常系では従来どおり track 単位で消え、`connection.destroyed` 経由と競合しても二重削除エラーにならない。
+- [ ] `connection.destroyed` を受けて接続単位でトラックを消す処理のユニットテストが `devtools/test/` に追加され、`flutter analyze --fatal-infos` が成功する。
 
 ## 解決方法
 
-- `lib/src/ffi/callback_handlers.dart`: offer SDP の保持、answer SDP の port 0 m-line 検出、拒否 trackId の抽出と通知。
-- `lib/src/ffi/webrtc_client.dart`: `SdpNegotiationCallbacks` からの拒否通知を `_onEvent` 経由で `SoraConnection` へ流す wiring。
-- `lib/src/sora_connection.dart`: `_handleWebrtcEvent` での拒否イベント処理（`_emitRemoveTrackEvent` 経由のイベント発火を含む）。
-- `lib/src/sora_remote_track_manager.dart`: 拒否済み trackId 集合の保持、`attachRemoteVideoTrack` の打ち消し、trackId 指定の detach と `_disposeRetryEntries` の連携。
-- ユニットテストの追加。`CHANGELOG.md` への記載は正式リリース前のため行わない（`CODEBASE.md` の「正式リリース前」節に従う）。
+- `devtools/lib/src/devtools_models.dart`: 接続単位で `remoteVideos` / `remoteAudios` を削除するヘルパ（例: `removeRemoteTracksByConnectionId(String connectionId)`）を追加し、`removeRemoteTrack` と同様に `notifyListeners` 周りは `_mutateView` 経由の規約に従う。
+- `devtools/lib/main.dart`: `_updateRemoteClients` の `connection.destroyed` 分岐で、該当 `connection_id` に対して上記ヘルパを呼ぶ。
+- `devtools/test/devtools_models_test.dart`: `connection.destroyed` 相当の削除（接続単位）と、track 単位 / 接続単位の二重削除が冪等であることを検証するユニットテストを追加する。
+- `CHANGELOG.md` への記載は正式リリース前のため行わない（`CODEBASE.md` の「正式リリース前」節に従う）。正式リリース確定時に `[FIX]` として追記する。
 
 ## 関連
 
-- `issues/0161-bug-fix-remote-track-retry-lifecycle-hardening.md`（破棄失敗時の再試行機構との相互作用を確認する必要がある）
-- `issues/closed/0073-bug-fix-remote-video-track-refcount-leak.md`（ref 収支の確定。本 issue の打ち消しはここに従う）
-- `issues/closed/0012-test-add-remote-media-streams-e2e-coverage.md`（相手切断時の `RemoteMediaStream` 除去の既存 E2E）
+- `issues/closed/0012-test-add-remote-media-streams-e2e-coverage.md`（相手切断時の `RemoteMediaStream` 除去の既存 E2E。SDK 側契約の確認として参照）
+- ブラウザ版 sora-devtools の実装（別リポジトリ。`connection.destroyed` notify 駆動の参考実装）

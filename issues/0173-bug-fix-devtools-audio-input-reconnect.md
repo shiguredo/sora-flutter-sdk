@@ -191,10 +191,11 @@ CI (GitHub Actions の Windows Hosted Runner) には音声入力デバイスが�
 - 接続中にミュートした状態を再接続後も維持する対応。実機確認で維持されないことを確認したが、原因は devtools の UI 状態管理にある。接続中のミュートは `_toggleAudioEnabled` がトラックの `enabled` のみを変更し、`DevToolsPageNotifier.applyToggleAudio` は接続中に `connectAudio` を更新しない (`devtools/lib/src/devtools_models.dart`)。再接続時は `_prepareLocalStream` が音声トラックを `enabled = true` の既定値で新規生成するため、デバイス変更の有無に関係なくミュートが解除される。本 issue の修正対象 (SDK の録音デバイス選択) とは原因も変更対象も別であるため、別 issue に切り出す
 - `_prepareLocalStream` の再利用分岐に音声トラックのデバイス差分検出が無い非対称の解消。到達するのは Sora サーバー起因の切断でデバイスを変更しない場合だけであり、その場合は選択と既存トラックのデバイスが一致するため実害がない。将来 `_clearLocalPreview()` の条件を見直して `_localStream` を保持する経路を増やす場合に別 issue で扱う
 - 前回実デバイスで接続し、今回 beep 音声を有効にして再接続した場合に既存の音声トラックが残り beep トラックが追加されない既存挙動
+- 再適用の 2 箇所 (`_configureWindowsAudioDeviceAfterPeerConnection` と `_addExistingLocalAudioTrack`) の両方で列挙に失敗した場合の追加対策。実機では PeerConnection 作成直後までに ADM が復旧しており、復旧しなかった場合は `native: windows_audio_restore skipped: enumerate_failed count=...` が 2 回出て成功ログが出ないため Diagnostics タブの Logs から判別できる。上位へ通知する手段は `_emitState` の接続エラー経路しかなく、接続自体は成立している状態に対してエラーを出すのは過剰である。実機でこの状態が観測された場合に別 issue で扱う
 - `devtools/README.md` への制限事項の追記。ドキュメント整備は別 issue に切り出す
 
 ## 関連 issue
 
-- 0170: Windows で実音声デバイス利用時に音声が送受信できない問題を修正する (closed)。`setRecordingDeviceByGuid` の選択内容を `_selectedRecordingDevice` に保持し、PeerConnection 作成直後と `pcAddTrack` 直前に再適用する実装を追加した。解決方法と確認結果は `issues/closed/0170-bug-fix-windows-audio-send-receive.md` を参照
+- 0170: Windows で実音声デバイス利用時に音声が送受信できない問題を修正する (closed)。`setRecordingDeviceByGuid` の選択内容を保持し、PeerConnection 作成直後と `pcAddTrack` 直前に再適用する実装を追加した。解決方法と確認結果は `issues/closed/0170-bug-fix-windows-audio-send-receive.md` を参照
 - 0171: Windows でエコーキャンセルを有効化する (open)。本 issue で対象外とした「接続中の切り替え不可」は ADM の `SetRecordingDevice` の制約と関連する
-- 0172: Windows アプリの COM 初期化要件 (MTA) を扱う (open)。ADM を生成できない環境では `setRecordingDeviceByGuid` が `StateError('AudioDeviceModule is not initialized.')` になる (`lib/src/ffi/webrtc_client.dart` の `_trySetRecordingDeviceByGuid`)。原因切り分けでこの状態と混同しないこと
+- 0172: Windows アプリの COM 初期化要件 (MTA) を扱う (open)。ADM を生成できない環境では `setRecordingDeviceByGuid` が `StateError('AudioDeviceModule is not initialized.')` を投げる (`lib/src/ffi/webrtc_client.dart` の `setRecordingDeviceByGuid`)。原因切り分けでこの状態と混同しないこと

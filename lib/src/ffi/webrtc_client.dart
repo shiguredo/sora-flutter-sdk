@@ -736,14 +736,13 @@ class WebrtcClient {
   // 最後に成功した録音デバイス選択を ADM へ再適用する。
   //
   // Windows では PeerConnection 作成時の adm_helpers::Init() が録音
-  // デバイスを既定通信デバイスへ上書きするため、作成直後と録音開始
-  // (`pcAddTrack`) の直前に呼ぶ。
+  // デバイスを既定通信デバイスへ上書きするため、作成直後に呼ぶ。
   // 録音がまだ初期化されていなければ SetRecordingDevice は成功する。
   // 他クライアントが録音を開始済みの場合は MediaEngine の再 Init が
   // 走らないため上書きされておらず、失敗しても無視してよい。
   //
   // 補正は接続処理を止めない。選択がない場合や再適用に失敗した場合は
-  // 何もしない。
+  // debug ログのみで接続処理を継続する。
   static void _restoreSelectedRecordingDevice({
     required void Function(String message) emitDebug,
   }) {
@@ -1925,13 +1924,6 @@ class WebrtcClient {
     Pointer<WebrtcAudioTrackInterfaceRefcounted> audioTrackRef,
   ) {
     if (_pcRef == null) return;
-
-    // 録音開始 (pcAddTrack) の直前にも選択済み録音デバイスを再適用する。
-    // PeerConnection 作成直後の補正で設定済みでも、この時点が録音初期化の
-    // 直前であることを保証できるため、Windows では再度適用する。
-    if (Platform.isWindows && _useAudioDevice) {
-      _restoreSelectedRecordingDevice(emitDebug: _emitDebug);
-    }
 
     final trackRef = _lib.audioTrackCastToMediaStreamTrack(audioTrackRef);
     final streamIds = _createStreamIdVector();

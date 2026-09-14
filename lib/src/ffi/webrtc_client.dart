@@ -368,12 +368,29 @@ class WebrtcClient {
     bool preferDefaultDevice = false,
     void Function(String message)? emitDebug,
   }) {
+    // 切り替えが無言で失敗する経路を切り分けるため、入口で記録する。
+    // 解決ログまで到達しない場合は、この後ろの早期 return のどれかで
+    // 止まっていることになる。出力先が未設定のときは何も出力しない。
+    _emitRecordingDeviceDebug(
+      emitDebug,
+      'native: recording_device_set deviceId=$deviceId',
+    );
     final adm = sharedAudioDeviceModule;
     if (adm == nullptr) {
+      _emitRecordingDeviceDebug(
+        emitDebug,
+        'native: recording_device_set failed'
+        ' deviceId=$deviceId reason=adm_unavailable',
+      );
       return StateError('AudioDeviceModule is not initialized.');
     }
     final count = sharedLib.audioDeviceModuleRecordingDevices(adm);
     if (count <= 0) {
+      _emitRecordingDeviceDebug(
+        emitDebug,
+        'native: recording_device_set failed'
+        ' deviceId=$deviceId reason=no_devices count=$count',
+      );
       return StateError('No audio input devices available.');
     }
     final nameBuf = calloc.allocate<Char>(128);
@@ -407,20 +424,14 @@ class WebrtcClient {
       // デバイス解決の結果を残す。ADM に並ぶデバイスと選択中の deviceId が
       // 一致しない場合、呼び出し元がデバイス不存在として握り潰すため、
       // 切り替えが効かない原因がログから分かるようにする。
-      // ログ出力の失敗はデバイス切り替えの結果へ影響させない。
-      if (emitDebug != null) {
-        try {
-          emitDebug(
-            'native: recording_device_resolve deviceId=$deviceId'
-            ' preferred=$preferDefaultDevice'
-            ' adm_devices=${devices.length}'
-            ' adm_guids=${devices.map((device) => device.guid).join(',')}'
-            ' target_index=${targetIndex ?? 'none'}',
-          );
-        } catch (_) {
-          // ログ出力の失敗は無視して切り替えを継続する。
-        }
-      }
+      _emitRecordingDeviceDebug(
+        emitDebug,
+        'native: recording_device_resolve deviceId=$deviceId'
+        ' preferred=$preferDefaultDevice'
+        ' adm_devices=${devices.length}'
+        ' adm_guids=${devices.map((device) => device.guid).join(',')}'
+        ' target_index=${targetIndex ?? 'none'}',
+      );
       if (targetIndex == null) {
         return StateError('Audio input device not found: $deviceId');
       }
@@ -429,10 +440,20 @@ class WebrtcClient {
         targetIndex,
       );
       if (rc != 0) {
+        _emitRecordingDeviceDebug(
+          emitDebug,
+          'native: recording_device_set failed'
+          ' deviceId=$deviceId reason=set_failed rc=$rc',
+        );
         return StateError(
           'SetRecordingDevice failed: deviceId=$deviceId rc=$rc',
         );
       }
+      _emitRecordingDeviceDebug(
+        emitDebug,
+        'native: recording_device_set ok deviceId=$deviceId'
+        ' target_index=$targetIndex',
+      );
     } finally {
       calloc.free(nameBuf);
       calloc.free(guidBuf);
@@ -445,6 +466,24 @@ class WebrtcClient {
       preferDefaultDevice: preferDefaultDevice,
     );
     return null;
+  }
+
+  // 録音デバイス切り替えの診断ログを出力する。
+  //
+  // `emitDebug` が null のときは何も出力しない。`emitDebug` 自身の例外は
+  // デバイス切り替えの結果へ影響させない。
+  static void _emitRecordingDeviceDebug(
+    void Function(String message)? emitDebug,
+    String message,
+  ) {
+    if (emitDebug == null) {
+      return;
+    }
+    try {
+      emitDebug(message);
+    } catch (_) {
+      // ログ出力の失敗は無視して切り替えを継続する。
+    }
   }
 
   /// 共有 `PeerConnectionFactory` と関連スレッド群を必要時に 1 回だけ生成する。

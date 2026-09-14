@@ -84,6 +84,13 @@ abstract final class MediaDevices {
     WebrtcClient.recordingDeviceDebugSink = sink;
   }
 
+  /// 録音デバイス切り替えの診断ログ出力先を返す。
+  ///
+  /// 未設定の場合は null を返す。出力先が有効かどうかを起動時に確認する
+  /// 用途を想定している。
+  static void Function(String message)? get recordingDeviceDebugSink =>
+      WebrtcClient.recordingDeviceDebugSink;
+
   /// 空の local MediaStream を生成する。
   static LocalMediaStream createMediaStream() {
     final lib = WebrtcClient.sharedLib;

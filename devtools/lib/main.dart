@@ -514,6 +514,11 @@ class _DevToolsPageState extends State<DevToolsPage>
     // `MediaDevices.createAudioTrack` は切り替え失敗をデバイス不存在として
     // 握り潰すため、再接続時に選択が反映されない原因を切り分けるために使う。
     MediaDevices.setRecordingDeviceDebugSink(_appendLog);
+    // 診断ログの出力先が有効かどうかを起動時に 1 行だけ残す。
+    // この行が出ない場合、SDK 側の変更を含まないビルドが動いている。
+    MediaDevices.recordingDeviceDebugSink?.call(
+      'audio_input_reconnect: diagnostic_sink=attached',
+    );
     // プラットフォームがサポートする Video Codec 一覧を動的に取得する。
     try {
       final codecTypes = Sora.supportedVideoCodecTypes;

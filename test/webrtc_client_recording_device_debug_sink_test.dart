@@ -11,6 +11,7 @@ void main() {
     tearDown(() {
       // テスト間で出力先が残らないようにする。
       WebrtcClient.recordingDeviceDebugSink = null;
+      MediaDevices.setRecordingDeviceDebugSink(null);
     });
 
     test('初期状態では出力先が未設定である', () {

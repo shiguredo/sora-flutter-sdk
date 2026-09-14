@@ -524,7 +524,12 @@ void main() {
     expect(_findTabText('Diagnostics'), findsOneWidget);
     expect(find.text('Log Type'), findsOneWidget);
     expect(find.text('Search Logs'), findsOneWidget);
-    expect(find.text('No logs yet'), findsOneWidget);
+    // 起動時に録音デバイス切り替えの診断ログ出力先が有効かどうかを 1 行だけ残す。
+    // ログ本文は複数行を 1 つの Text にまとめて表示するため部分一致で確認する。
+    expect(
+      find.textContaining('audio_input_reconnect: diagnostic_sink=attached'),
+      findsOneWidget,
+    );
     expect(find.text('Follow latest'), findsOneWidget);
     expect(find.text('Clear Logs'), findsOneWidget);
 

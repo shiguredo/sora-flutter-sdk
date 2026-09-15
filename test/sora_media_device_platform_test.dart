@@ -66,17 +66,12 @@ void main() {
       );
     });
 
-    test('Dart 変換と FFI 経路の固定文言は無視対象になる', () {
-      // 固定文言 2 件は完全一致で判定することを検証する。
+    test('Dart 変換の固定文言は無視対象になる', () {
+      // 完全一致で判定することを検証する。ADM が録音デバイスを列挙できない
+      // 場合はこの分類を通らず、例外を投げずに選択を保持する。
       expect(
         media_device_platform.isAudioInputDeviceNotFoundError(
           StateError('Default audio input device not found.'),
-        ),
-        isTrue,
-      );
-      expect(
-        media_device_platform.isAudioInputDeviceNotFoundError(
-          StateError('No audio input devices available.'),
         ),
         isTrue,
       );

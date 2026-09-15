@@ -67,6 +67,69 @@ class _StatsRequest {
   bool operator ==(Object other) => identical(this, other);
 }
 
+/// 録音デバイス一覧から [deviceId] に一致するデバイスのインデックスを解決する。
+///
+/// 各要素の `index` は ADM のデバイスインデックス、`guid` と `name` は
+/// デバイス情報を表す。名前の読み取りに失敗したデバイスは一覧に含めない
+/// 前提のため、戻り値は一覧の位置ではなく `index` をそのまま返す。
+///
+/// [deviceId] は guid または name の完全一致で探す。macOS の ADM は guid が
+/// 空になるケースがあるため、一致しない場合は [labelHint] と
+/// `default ([labelHint])` をフォールバック候補にする。
+///
+/// [preferDefaultDevice] が true の場合は `default ([labelHint])` を
+/// [labelHint] より優先する。一致がなければ null を返す。
+///
+/// FFI から独立させて単体テストできるよう、一覧を値で受け取る純粋関数に
+/// している。
+@internal
+int? resolveRecordingDeviceIndex({
+  required List<({int index, String guid, String name})> devices,
+  required String deviceId,
+  String? labelHint,
+  bool preferDefaultDevice = false,
+}) {
+  int? labelMatchIndex;
+  int? defaultLabelMatchIndex;
+  for (final device in devices) {
+    if (device.guid == deviceId || device.name == deviceId) {
+      return device.index;
+    }
+    if (labelHint != null && device.name == labelHint) {
+      labelMatchIndex ??= device.index;
+    }
+    if (preferDefaultDevice &&
+        labelHint != null &&
+        device.name == 'default ($labelHint)') {
+      defaultLabelMatchIndex ??= device.index;
+    }
+  }
+  if (preferDefaultDevice && defaultLabelMatchIndex != null) {
+    return defaultLabelMatchIndex;
+  }
+  return labelMatchIndex;
+}
+
+/// ADM が録音デバイスを列挙できないため、切り替えを後続の再適用へ委ねるかどうかを返す。
+///
+/// `RecordingDevices()` は列挙に失敗すると負の値を返す。Windows では切断直後に
+/// これが起き、次の PeerConnection 作成まで復旧しないため、その時点の切り替えは
+/// 必ず失敗する。復旧後の再適用に委ねる判断をここに集約する。
+///
+/// 列挙できたかどうか (負の値かどうか) だけを入力に取る純粋関数にして、
+/// ネイティブライブラリ無しで判断を単体テストできるようにしている。
+@internal
+bool shouldDeferRecordingDeviceApply({required int deviceCount}) {
+  return deviceCount < 0;
+}
+
+/// `setRecordingDeviceByGuid` が受け取り、再適用まで保持する録音デバイスの選択。
+typedef RecordingDeviceSelection = ({
+  String deviceId,
+  String? labelHint,
+  bool preferDefaultDevice,
+});
+
 /// WebRTC クライアント (dart:ffi 実装)
 class WebrtcClient {
   /// 孤立 stats request の保持上限です。
@@ -182,6 +245,17 @@ class WebrtcClient {
   // 音声デバイスを利用するかどうか。共有 factory の生成前に設定する。
   // false の場合は push audio device が選択される。
   static bool _useAudioDevice = true;
+  // 最後に要求された録音デバイス選択。ADM へ適用できたとは限らない。
+  // Windows では PeerConnection 作成時の libwebrtc の初期化が録音デバイスを
+  // 既定通信デバイスへ上書きするため、作成直後と録音開始前に再適用する。
+  // ADM が録音デバイスを列挙できない間に要求された選択も保持し、復旧後の
+  // 再適用で反映する。書き込みは macOS / Linux を含む全プラットフォーム共通
+  // (`setRecordingDeviceByGuid` の要求時) で、読み出しは Windows のみ。
+  static RecordingDeviceSelection? _requestedRecordingDevice;
+
+  // Windows の実 ADM の補正と再適用の対象かどうか。
+  static bool get _shouldConfigureWindowsAudioDevice =>
+      Platform.isWindows && _useAudioDevice;
   // テスト専用フック。true の間は AudioDeviceModule の初期化を常に失敗させる。
   // ネイティブ環境 (音声デバイスの有無) に依存せずに共有 factory 生成の
   // 失敗経路を検証するために利用する。通常実行では常に false のまま。
@@ -279,25 +353,77 @@ class WebrtcClient {
   //
   // macOS の ADM は guid が空になるケースがあるため、必要に応じて
   // `labelHint` や `default (label)` もフォールバック候補として探す。
+  //
+  // 一致するデバイスが無い場合、ADM を利用できない場合、`SetRecordingDevice` が
+  // 失敗した場合は StateError を投げる。
+  //
+  // ADM が録音デバイスを列挙できない状態 (`RecordingDevices()` が負の値) だけは
+  // 例外にせず、選択を保持して後続の再適用へ委ねる。Windows では切断後に ADM の
+  // デバイス一覧が解放され、次の PeerConnection 作成まで復旧しないため、
+  // トラック生成時点で切り替えると必ず失敗する。復旧後の再適用で反映する。
+  //
+  // 要求された選択は適用の成否にかかわらず保持する。適用できなかった選択を
+  // 前回の成功値へ戻すと、どのデバイスを使う要求だったかが失われ、再適用の
+  // ログからも判別できなくなるため。
+  @internal
   static void setRecordingDeviceByGuid(
     String deviceId, {
     String? labelHint,
     bool preferDefaultDevice = false,
   }) {
-    final adm = sharedAudioDeviceModule;
-    if (adm == nullptr) {
+    final selection = (
+      deviceId: deviceId,
+      labelHint: labelHint,
+      preferDefaultDevice: preferDefaultDevice,
+    );
+    _requestedRecordingDevice = selection;
+    final enumerated = _enumerateRecordingDevices();
+    if (enumerated == null) {
+      // ADM を生成できなかった。列挙不能と違って復旧しないため、
+      // 選択を保持しても反映されない。接続側が検知できるよう例外にする。
       throw StateError('AudioDeviceModule is not initialized.');
     }
-    final count = sharedLib.audioDeviceModuleRecordingDevices(adm);
-    if (count <= 0) {
-      throw StateError('No audio input devices available.');
+    if (shouldDeferRecordingDeviceApply(deviceCount: enumerated.count)) {
+      // 切断後に ADM のデバイス一覧が解放されている。復旧後の再適用へ委ねる。
+      return;
     }
+    final error = _trySetRecordingDeviceByGuid(
+      enumerated.adm,
+      enumerated.count,
+      selection,
+    );
+    if (error != null) {
+      throw error;
+    }
+  }
+
+  // 共有 ADM と録音デバイス数を返す。ADM を生成できない場合は null を返す。
+  static ({Pointer<WebrtcAudioDeviceModule> adm, int count})?
+  _enumerateRecordingDevices() {
+    final adm = sharedAudioDeviceModule;
+    if (adm == nullptr) {
+      return null;
+    }
+    return (adm: adm, count: sharedLib.audioDeviceModuleRecordingDevices(adm));
+  }
+
+  // 録音デバイスを切り替える。ADM の列挙結果と選択が揃っている前提で呼ぶ。
+  //
+  // 成功時は null を返す。失敗時は StateError を返す。
+  static StateError? _trySetRecordingDeviceByGuid(
+    Pointer<WebrtcAudioDeviceModule> adm,
+    int count,
+    RecordingDeviceSelection selection,
+  ) {
+    final deviceId = selection.deviceId;
+    final labelHint = selection.labelHint;
+    final preferDefaultDevice = selection.preferDefaultDevice;
     final nameBuf = calloc.allocate<Char>(128);
     final guidBuf = calloc.allocate<Char>(128);
     try {
-      int? targetIndex;
-      int? labelMatchIndex;
-      int? defaultLabelMatchIndex;
+      // 読み取りに失敗したデバイスは除き、ADM のインデックスを保持して
+      // 純粋関数へ渡す。
+      final devices = <({int index, String guid, String name})>[];
       for (var i = 0; i < count; i++) {
         final rc = sharedLib.audioDeviceModuleRecordingDeviceName(
           adm,
@@ -308,34 +434,27 @@ class WebrtcClient {
         if (rc != 0) {
           continue;
         }
-        final guidStr = guidBuf.cast<Utf8>().toDartString();
-        final nameStr = nameBuf.cast<Utf8>().toDartString();
-        if (guidStr == deviceId || nameStr == deviceId) {
-          targetIndex = i;
-          break;
-        }
-        if (labelHint != null && nameStr == labelHint) {
-          labelMatchIndex ??= i;
-        }
-        if (preferDefaultDevice &&
-            labelHint != null &&
-            nameStr == 'default ($labelHint)') {
-          defaultLabelMatchIndex ??= i;
-        }
+        devices.add((
+          index: i,
+          guid: guidBuf.cast<Utf8>().toDartString(),
+          name: nameBuf.cast<Utf8>().toDartString(),
+        ));
       }
-      if (targetIndex == null && preferDefaultDevice) {
-        targetIndex = defaultLabelMatchIndex;
-      }
-      targetIndex ??= labelMatchIndex;
+      final targetIndex = resolveRecordingDeviceIndex(
+        devices: devices,
+        deviceId: deviceId,
+        labelHint: labelHint,
+        preferDefaultDevice: preferDefaultDevice,
+      );
       if (targetIndex == null) {
-        throw StateError('Audio input device not found: $deviceId');
+        return StateError('Audio input device not found: $deviceId');
       }
       final rc = sharedLib.audioDeviceModuleSetRecordingDevice(
         adm,
         targetIndex,
       );
       if (rc != 0) {
-        throw StateError(
+        return StateError(
           'SetRecordingDevice failed: deviceId=$deviceId rc=$rc',
         );
       }
@@ -343,6 +462,8 @@ class WebrtcClient {
       calloc.free(nameBuf);
       calloc.free(guidBuf);
     }
+
+    return null;
   }
 
   /// 共有 `PeerConnectionFactory` と関連スレッド群を必要時に 1 回だけ生成する。
@@ -640,6 +761,146 @@ class WebrtcClient {
     }
   }
 
+  // Windows で実 ADM を使う際の PeerConnection 作成直後の補正を行う。
+  //
+  // libwebrtc は PeerConnection 作成時に MediaEngine を初期化し、
+  // `WebRtcVoiceEngine::Init()` から `adm_helpers::Init()` と初期
+  // AudioOptions の適用を行う。Windows の CoreAudio ADM ではこれにより
+  // 次の 3 点が発生する。
+  //
+  // 1. Windows 内蔵 AEC (CWMAudioAEC DMO) が有効化され、APM のソフトウェア
+  //    エコーキャンセラが無効化される。内蔵 AEC は再生開始済みであることを
+  //    録音開始の前提とするため、受信ストリームが無い sendonly や、再生開始
+  //    前に送信を開始した接続では録音が開始されず音声が送信されない。
+  //    内蔵 AEC を無効化して録音と再生の依存を解消する。
+  // 2. 再生デバイスに既定通信デバイス (eCommunications) が選ばれる。Windows
+  //    の既定通信デバイスが 2ch 非対応 (4ch のみ等) の場合、ADM の
+  //    `InitPlayout()` が対応フォーマットを見つけられず失敗し、受信音声を
+  //    再生できない。メディア向けの既定デバイス (eConsole) へ切り替える。
+  // 3. 録音デバイスにも既定通信デバイス (eCommunications) が選ばれ、
+  //    利用者が選択したマイクが失われる。最後に選択された録音デバイスを
+  //    再適用する。
+  //
+  // 1 により Windows ではエコーキャンセルが無効になる。APM のソフトウェア
+  // エコーキャンセラは内蔵 AEC の有効化時に無効化されており、ADM 側だけを
+  // 戻しても復帰しないため、録音できない状態より優先して無効のままとする。
+  //
+  // 参照中の PeerConnection が 0 になったとき MediaEngine が Terminate し、
+  // 次の作成で再び Init される。Init のたびに 1 から 3 が再適用される必要が
+  // あるため、PeerConnection 作成ごとに本補正を呼ぶ。呼び出しは冪等では
+  // ないが、再生や録音が初期化済みの場合は ADM 側が -1 を返すか、未初期化
+  // なら同じ値を再設定するだけで実害はない。
+  //
+  // 補正の失敗 (ADM が -1 を返す、例外が発生する等) は debug ログに記録し、
+  // 接続処理は継続する。push audio device など実 ADM を使わない場合や ADM
+  // 未生成の場合は何もしない。
+  static void _configureWindowsAudioDeviceAfterPeerConnection({
+    required void Function(String message) emitDebug,
+  }) {
+    if (!_shouldConfigureWindowsAudioDevice) {
+      return;
+    }
+    final admRef = _sharedAdmRef;
+    if (admRef == null) {
+      // ADM を生成できなかった。ここでは補正できない。この状態は音声トラック
+      // 生成時の `setRecordingDeviceByGuid` が StateError として検知する。
+      return;
+    }
+    try {
+      final adm = sharedLib.audioDeviceModuleRefcountedGet(admRef);
+
+      // 内蔵 AEC を無効化する。録音初期化済みなどで失敗しても、その場合は
+      // 既に録音が開始されているか内蔵 AEC が使われていないため無視する。
+      final aecRc = sharedLib.audioDeviceModuleEnableBuiltInAEC(adm, 0);
+
+      // 再生デバイスをメディア向け既定デバイスへ切り替える。既に再生が初期化
+      // 済みなどで失敗しても、その場合は再生デバイスが確定済みのため無視する。
+      final playoutRc = sharedLib
+          .audioDeviceModuleSetPlayoutDeviceWithWindowsDeviceType(
+            adm,
+            sharedConsts.kWindowsDefaultDevice,
+          );
+
+      // 失敗時の切り分けができるよう、補正の結果を debug ログに残す。
+      emitDebug(
+        'native: windows_audio_fix aec_rc=$aecRc playout_rc=$playoutRc',
+      );
+
+      // 録音デバイスを最後に選択されたデバイスへ戻す。デバイスが消えている
+      // などで失敗しても、その場合は録音開始時に既定デバイスが使われる。
+      _restoreSelectedRecordingDevice(emitDebug: emitDebug);
+    } catch (error) {
+      // 例外 (シンボル解決失敗、メモリ不足等) でも接続処理は継続する。
+      emitDebug('native: windows_audio_fix failed error=$error');
+    }
+  }
+
+  // 保持している録音デバイスの要求を ADM へ再適用する。
+  //
+  // Windows では PeerConnection 作成時の adm_helpers::Init() が録音
+  // デバイスを既定通信デバイスへ上書きするため、作成直後と録音開始
+  // (`pcAddTrack`) の直前に呼ぶ。
+  // 作成直後の再適用は rc=0 を返しても実機で録音に反映されない事象が
+  // あるため、録音初期化の直前にも再適用する。
+  // 録音がまだ初期化されていなければ SetRecordingDevice は成功する。
+  // 他クライアントが録音を開始済みの場合は MediaEngine の再 Init が
+  // 走らないため上書きされておらず、失敗しても無視してよい。
+  //
+  // `MediaDevices.createAudioTrack` の時点で ADM が録音デバイスを列挙できない
+  // 場合、要求は保持だけされてここで初めて ADM へ適用される。切断後の ADM は
+  // 次の PeerConnection 作成まで一覧を復旧しないため、この経路が切り替えの
+  // 本線になる。
+  //
+  // 補正は接続処理を止めない。選択がない場合や再適用に失敗した場合は
+  // debug ログのみで接続処理を継続する。
+  static void _restoreSelectedRecordingDevice({
+    required void Function(String message) emitDebug,
+  }) {
+    final selection = _requestedRecordingDevice;
+    if (selection == null) {
+      emitDebug('native: windows_audio_restore skipped: reason=no_selection');
+      return;
+    }
+    try {
+      final enumerated = _enumerateRecordingDevices();
+      if (enumerated == null) {
+        emitDebug('native: windows_audio_restore skipped: adm_unavailable');
+        return;
+      }
+      final count = enumerated.count;
+      if (shouldDeferRecordingDeviceApply(deviceCount: count)) {
+        // ADM のデバイス一覧がまだ復旧していない。次の再適用へ委ねる。
+        emitDebug(
+          'native: windows_audio_restore skipped: enumerate_failed count=$count',
+        );
+        return;
+      }
+      if (count == 0) {
+        // 録音デバイスが 1 つも無い。復旧しないため再適用しても成功しない。
+        emitDebug('native: windows_audio_restore skipped: no_devices count=0');
+        return;
+      }
+      // 失敗しても接続処理は継続するため、戻り値はログにのみ使う。
+      final error = _trySetRecordingDeviceByGuid(
+        enumerated.adm,
+        count,
+        selection,
+      );
+      if (error == null) {
+        emitDebug(
+          'native: windows_audio_restore device=${selection.deviceId} ok',
+        );
+      } else {
+        emitDebug(
+          'native: windows_audio_restore device=${selection.deviceId} '
+          'error=${error.message}',
+        );
+      }
+    } catch (error) {
+      emitDebug('native: windows_audio_restore failed error=$error');
+    }
+  }
+
   // `_ensureSharedFactory` が途中で失敗した場合に、作成済みの thread / deps /
   // ADM / simulcast factory を解放して static field をリセットする。
   //
@@ -658,6 +919,9 @@ class WebrtcClient {
       );
       _sharedAdmRef = null;
     }
+    // 共有 factory を破棄したので、ADM に適用済みの録音デバイス選択も無効になる。
+    // 要求を残すと、次に生成した ADM へ古い要求を適用してしまう。
+    _requestedRecordingDevice = null;
 
     // 生成途中で保持していた SimulcastVideoEncoderFactory も解放する。
     // dispose() はネイティブへ所有権移譲済み (_native == nullptr) でも
@@ -1757,6 +2021,12 @@ class WebrtcClient {
     calloc.free(errorPtr);
     _lib.pcDependenciesDelete(pcDeps);
     _lib.rtcConfigurationDelete(rtcConfig);
+
+    // Windows では作成直後に ADM を補正する (失敗しても接続は継続)。
+    if (errMsg == null && _pcRef != null) {
+      _configureWindowsAudioDeviceAfterPeerConnection(emitDebug: _emitDebug);
+    }
+
     return errMsg == null && _pcRef != null;
   }
 
@@ -1787,6 +2057,12 @@ class WebrtcClient {
     Pointer<WebrtcAudioTrackInterfaceRefcounted> audioTrackRef,
   ) {
     if (_pcRef == null) return;
+
+    // 録音開始 (pcAddTrack) の直前にも再適用する。PeerConnection 作成直後の
+    // 再適用は rc=0 を返しても実機で録音に反映されない事象があるため。
+    if (_shouldConfigureWindowsAudioDevice) {
+      _restoreSelectedRecordingDevice(emitDebug: _emitDebug);
+    }
 
     final trackRef = _lib.audioTrackCastToMediaStreamTrack(audioTrackRef);
     final streamIds = _createStreamIdVector();

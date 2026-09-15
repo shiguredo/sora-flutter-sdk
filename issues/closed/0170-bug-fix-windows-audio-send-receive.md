@@ -16,7 +16,7 @@ Windows で `useAudioDevice: true` の実音声デバイス (Windows CoreAudio A
 - 0036: Windows 音声デバイス (WASAPI) の列挙と選択を実装する
 - 0171: Windows でエコーキャンセルを有効化する
 - 0172: Windows アプリの COM 初期化要件 (MTA) を扱う
-- 0173: devtools で再接続時に音声入力デバイスの選択が反映されない問題を修正する
+- 0173: Windows で再接続時に選択した音声入力デバイスが使われない問題を修正する
 - 0174: Windows の DLL で補正 API のシンボル解決を検証する CI を追加する
 
 ## 再現手順

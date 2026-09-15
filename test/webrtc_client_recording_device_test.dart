@@ -195,4 +195,23 @@ void main() {
       );
     });
   });
+
+  // ADM の列挙結果だけを入力に取り、切り替えを再適用へ委ねるかどうかを判定する。
+  // FFI を呼ばない純粋関数のため、ネイティブライブラリ無しで実行できる。
+  group('shouldDeferRecordingDeviceApply', () {
+    test('列挙に失敗した場合は再適用へ委ねる', () {
+      // libwebrtc の RecordingDevices() は列挙に失敗すると負の値を返す。
+      expect(shouldDeferRecordingDeviceApply(deviceCount: -1), isTrue);
+    });
+
+    test('デバイスが 1 つも無い場合は再適用へ委ねない', () {
+      // 復旧しない状態なので、保持しても再適用では反映されない。
+      expect(shouldDeferRecordingDeviceApply(deviceCount: 0), isFalse);
+    });
+
+    test('列挙できた場合は再適用へ委ねない', () {
+      expect(shouldDeferRecordingDeviceApply(deviceCount: 1), isFalse);
+      expect(shouldDeferRecordingDeviceApply(deviceCount: 3), isFalse);
+    });
+  });
 }

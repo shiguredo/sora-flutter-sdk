@@ -1,7 +1,7 @@
 # WebRTC client の worker thread を network thread に統一する
 
 - Created: 2026-09-15
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-15
 - Branch: feature/refactor-unify-worker-thread
 - Polished: {YYYY-MM-DD}
 
@@ -38,6 +38,19 @@ libwebrtc の issue 558821261「Deprecate and remove PeerConnectionFactoryDepend
 - [ ] `flutter analyze` と `flutter test` が成功する。
 - [ ] モックやスタブを使用していない。
 - [ ] `CHANGELOG.md` への記載は正式リリース前のため行わない (`CODEBASE.md` の「正式リリース前」節に従う)。正式リリース確定時に追記する。
+
+## 解決方法
+
+WebRTC client の worker thread として network thread を使うようにした。
+
+- `lib/src/ffi/webrtc_client.dart` から `_sharedWorkerThread` フィールドと worker thread の生成、開始、破棄を削除し、`pcFactoryDependenciesSetWorkerThread` に network thread を渡すようにした
+- テスト用フック `hasSharedFactoryResourcesForTest` と `_releaseSharedFactoryResources` を 2 スレッド構成に合わせた
+- `test/webrtc_client_test.dart` のコメントを 2 スレッドに更新した
+
+確認:
+
+- `flutter analyze --fatal-infos lib test` が通ることを確認した
+- `flutter test` が通ることを確認した（175 passed。`SORA_FFI_TEST_LIBRARY_PATH` が未設定のため FFI 依存のテストは skip）
 
 ## 関連
 

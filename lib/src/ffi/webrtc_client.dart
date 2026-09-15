@@ -229,7 +229,6 @@ class WebrtcClient {
   static WebrtcConstants? _sharedConsts;
   static DynamicLibrary? _sharedDynLib;
   static Pointer<WebrtcThreadUnique>? _sharedNetworkThread;
-  static Pointer<WebrtcThreadUnique>? _sharedWorkerThread;
   static Pointer<WebrtcThreadUnique>? _sharedSignalingThread;
   static Pointer<WebrtcPeerConnectionFactoryInterfaceRefcounted>?
   _sharedFactoryRef;
@@ -286,13 +285,13 @@ class WebrtcClient {
   static bool get hasSharedFactoryForTest => _sharedFactoryRef != null;
 
   // テスト専用フック。共有 factory 生成途中で確保されるリソース
-  // (3 スレッド / ADM / simulcast factory) が保持されているかを返す。
-  // 失敗経路のクリーンアップ検証に利用する。simulcast factory は ADM
-  // やスレッドより後で生成されるため、後段失敗時の解放検証に効く。
+  // (2 スレッド / ADM / simulcast factory) が保持されているかを返す。
+  // worker thread には network thread を使うため判定対象に含めない。失敗経路のクリーンアップ検証に利用する。
+  // simulcast factory は ADM やスレッドより後で生成されるため、後段失敗時の
+  // 解放検証に効く。
   @visibleForTesting
   static bool get hasSharedFactoryResourcesForTest =>
       _sharedNetworkThread != null ||
-      _sharedWorkerThread != null ||
       _sharedSignalingThread != null ||
       _sharedAdmRef != null ||
       _sharedSimulcastVideoEncoderFactory != null;
@@ -468,9 +467,9 @@ class WebrtcClient {
 
   /// 共有 `PeerConnectionFactory` と関連スレッド群を必要時に 1 回だけ生成する。
   ///
-  /// network / worker / signaling thread、ADM、encoder/decoder factory、
+  /// network / signaling thread、ADM、encoder/decoder factory、
   /// audio processing をまとめて依存オブジェクトへ積み、最後に modular
-  /// factory を構築する。
+  /// factory を構築する。worker thread には network thread を使う。
   ///
   /// ADM 初期化が失敗するなど途中で例外が発生した場合は、作成済みの
   /// thread / deps / ADM / simulcast factory を解放して static field を
@@ -489,10 +488,8 @@ class WebrtcClient {
 
     try {
       _sharedNetworkThread = sharedLib.threadCreateWithSocketServer();
-      _sharedWorkerThread = sharedLib.threadCreate();
       _sharedSignalingThread = sharedLib.threadCreate();
       sharedLib.threadStart(sharedLib.threadUniqueGet(_sharedNetworkThread!));
-      sharedLib.threadStart(sharedLib.threadUniqueGet(_sharedWorkerThread!));
       sharedLib.threadStart(sharedLib.threadUniqueGet(_sharedSignalingThread!));
 
       final deps = sharedLib.pcFactoryDependenciesNew();
@@ -501,9 +498,11 @@ class WebrtcClient {
         deps,
         sharedLib.threadUniqueGet(_sharedNetworkThread!),
       );
+      // worker thread には network thread を使う。未設定にすると libwebrtc
+      // 内部で専用の worker thread が生成されるため、明示的に渡す。
       sharedLib.pcFactoryDependenciesSetWorkerThread(
         deps,
-        sharedLib.threadUniqueGet(_sharedWorkerThread!),
+        sharedLib.threadUniqueGet(_sharedNetworkThread!),
       );
       sharedLib.pcFactoryDependenciesSetSignalingThread(
         deps,
@@ -934,8 +933,6 @@ class WebrtcClient {
 
     _destroySharedThread(_sharedNetworkThread);
     _sharedNetworkThread = null;
-    _destroySharedThread(_sharedWorkerThread);
-    _sharedWorkerThread = null;
     _destroySharedThread(_sharedSignalingThread);
     _sharedSignalingThread = null;
   }

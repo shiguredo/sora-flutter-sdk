@@ -36,17 +36,24 @@ devtools 側の現状は次のとおり。
 
 ## 完了条件
 
-- [ ] Linux + H.264 のシナリオ（多人数チャネル、recvonly）で、相手端末の切断後に devtools の Video タブから黒画面セルが消える（`native: onremovetrack` が発火しない場合でも消える）。
-- [ ] `connection.destroyed` 通知で、該当 `connection_id` の `remoteVideos` / `remoteAudios` / `remoteClients` が同時に削除され状態が整合する。
-- [ ] 対応コーデック（VP8 / VP9 / AV1）の通常受信・切断では従来と挙動が変わらない。`SoraRemoveTrackEvent` が先に届く正常系では従来どおり track 単位で消え、`connection.destroyed` 経由と競合しても二重削除エラーにならない。
-- [ ] `connection.destroyed` を受けて接続単位でトラックを消す処理のユニットテストが `devtools/test/` に追加され、`flutter analyze --fatal-infos` が成功する。
+- [x] Linux + H.264 のシナリオ（多人数チャネル、recvonly）で、相手端末の切断後に devtools の Video タブから黒画面セルが消える（`native: onremovetrack` が発火しない場合でも消える）。(他の担当者が実機で確認)
+- [x] `connection.destroyed` 通知で、該当 `connection_id` の `remoteVideos` / `remoteAudios` / `remoteClients` が同時に削除され状態が整合する。
+- [x] 対応コーデック（VP8 / VP9 / AV1）の通常受信・切断では従来と挙動が変わらない。`SoraRemoveTrackEvent` が先に届く正常系では従来どおり track 単位で消え、`connection.destroyed` 経由と競合しても二重削除エラーにならない。
+- [x] `connection.destroyed` を受けて接続単位でトラックを消す処理のユニットテストが `devtools/test/` に追加され、`flutter analyze --fatal-infos` が成功する。
+- [ ] ドキュメントにこの issue の問題について FAQ を書く。
 
 ## 解決方法
 
-- `devtools/lib/src/devtools_models.dart`: 接続単位で `remoteVideos` / `remoteAudios` を削除するヘルパ（例: `removeRemoteTracksByConnectionId(String connectionId)`）を追加し、`removeRemoteTrack` と同様に `notifyListeners` 周りは `_mutateView` 経由の規約に従う。
-- `devtools/lib/main.dart`: `_updateRemoteClients` の `connection.destroyed` 分岐で、該当 `connection_id` に対して上記ヘルパを呼ぶ。
-- `devtools/test/devtools_models_test.dart`: `connection.destroyed` 相当の削除（接続単位）と、track 単位 / 接続単位の二重削除が冪等であることを検証するユニットテストを追加する。
+- `devtools/lib/src/devtools_models.dart`: 接続単位で `remoteVideos` / `remoteAudios` を削除する `removeRemoteTracksByConnectionIds(Set<String>)` を追加した。既存の `removeRemoteClientsByConnectionIds` と同じ流儀に合わせ、`connection.destroyed` 通知が複数のクライアント情報を運ぶケースにも対応する。`removeRemoteTrack` と同じく `notifyListeners` は呼ばず、呼び出し元の `_mutateView` 経由で通知する規約に従う。
+- `devtools/lib/main.dart`: `_updateRemoteClients` の `connection.destroyed` 分岐で、`candidateIds` に対して `removeRemoteTracksByConnectionIds` を呼ぶようにした。`removeRemoteClientsByConnectionIds` と同じ `_mutateView` 内で実行するため、トラックとクライアントの削除は 1 回の通知でまとめて反映される。
+- `devtools/test/devtools_models_test.dart`: 接続単位の削除で該当トラックだけが消えることと、track 単位の削除（`SoraRemoveTrackEvent` の正常系）と競合しても冪等に終わることを検証するユニットテストを追加した。
 - `CHANGELOG.md` への記載は正式リリース前のため行わない（`CODEBASE.md` の「正式リリース前」節に従う）。正式リリース確定時に `[FIX]` として追記する。
+
+## 確認結果
+
+- Linux + H.264 のシナリオ（多人数チャネル、recvonly）の実機確認を他の担当者が実施し、相手端末の切断後に Video タブから黒画面セルが消えることを確認した
+- `devtools` で `flutter analyze --fatal-infos` を実行し、問題がないことを確認した
+- `devtools` で `flutter test` を実行し、全 46 件が成功した（追加した接続単位削除と冪等性の 2 件を含む）
 
 ## 関連
 

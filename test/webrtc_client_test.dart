@@ -181,7 +181,7 @@ void main() {
           ),
         );
 
-        // 失敗後は作成済みリソース (3 スレッド / deps / ADM) が全て
+        // 失敗後は作成済みリソース (2 スレッド / deps / ADM) が全て
         // 解放され、static field がリセットされる
         expect(WebrtcClient.hasSharedFactoryForTest, false);
         expect(WebrtcClient.hasSharedFactoryResourcesForTest, false);

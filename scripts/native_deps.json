@@ -1,0 +1,51 @@
+{
+  "libwebrtc_c": {
+    "version": "0.150.3",
+    "base_url": "https://github.com/shiguredo/webrtc-rs/releases/download",
+    "apple_xcframework": {
+      "base_url": "https://github.com/shiguredo/webrtc-rs/releases/download",
+      "artifact": "libwebrtc_c.xcframework.zip",
+      "checksum": "0b830c49d9bdfe7a16a24624765bed70c7d773347b9f466f4836555f4c275c23"
+    },
+    "archives": {
+      "android_arm64": {
+        "file": "libwebrtc_c-android_arm64.tar.gz",
+        "sha256": "cf166d261bbccd0c69ca9433444b94d19d6b459af530db0ad008789c9f60b28d"
+      },
+      "linux_ubuntu_22_04_x86_64": {
+        "file": "libwebrtc_c-ubuntu-22.04_x86_64.tar.gz",
+        "sha256": "24e129c8e74a6743671f3e4c4a1c4cec8d742fedfd6f47f3d51030302c695a61"
+      },
+      "linux_ubuntu_24_04_x86_64": {
+        "file": "libwebrtc_c-ubuntu-24.04_x86_64.tar.gz",
+        "sha256": "e07ed13b7f18f8f88157c6907488503919f9d46042028996bb120c534b996131"
+      },
+      "windows_x86_64": {
+        "file": "libwebrtc_c-windows_x86_64.tar.gz",
+        "sha256": "a99d782fd693687b80e2376740c5e4a9e76ec256bd77653fb0145b62c39be17e"
+      }
+    }
+  },
+  "webrtc": {
+    "version": "m150.7871.3.1",
+    "base_url": "https://github.com/shiguredo-webrtc-build/webrtc-build/releases/download",
+    "archives": {
+      "android_arm64": {
+        "file": "webrtc.android.tar.gz",
+        "sha256": "f8af34a6930d2d3dd89005e1f126a5cca6906f88c5f00093109560341b51f300"
+      },
+      "linux_ubuntu_22_04_x86_64": {
+        "file": "webrtc.ubuntu-22.04_x86_64.tar.gz",
+        "sha256": "b94ce9403f2303ab11eee796b7643d4713c25a0900a1e702582524d854a2328d"
+      },
+      "linux_ubuntu_24_04_x86_64": {
+        "file": "webrtc.ubuntu-24.04_x86_64.tar.gz",
+        "sha256": "4fd5a7b6d88b3460ed77b6a55aeffcd54c7171be32ca80ade6a6ac5d05c174bf"
+      },
+      "windows_x86_64": {
+        "file": "webrtc.windows_x86_64.zip",
+        "sha256": "6b63edbc0ad4ab2a736f02503c51e0a4f26dddc258d078dd39dba60111a247d7"
+      }
+    }
+  }
+}

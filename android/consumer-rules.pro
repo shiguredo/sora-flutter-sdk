@@ -1,0 +1,4 @@
+-keep class org.jni_zero.** { *; }
+-keep class org.webrtc.** { *; }
+-keep class jp.shiguredo.** { *; }
+-keepattributes InnerClasses,EnclosingMethod,*Annotation*

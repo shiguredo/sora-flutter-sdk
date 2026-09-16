@@ -1,0 +1,9 @@
+_main
+_webrtc_*
+_libyuv_*
+_std_string_*
+_sora_*
+_sora_observer_bridge_*
+_apple_rendering_sink_*
+_OBJC_CLASS_$*
+_$s8sora_sdk*

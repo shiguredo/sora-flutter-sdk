@@ -1,0 +1,3022 @@
+// ignore_for_file: public_member_api_docs
+// dart:ffi で libwebrtc-c の C API を直接呼び出して
+// WebRTC のコアロジック (PeerConnectionFactory, PeerConnection,
+// SDP ネゴシエーション, ICE, DataChannel, Stats) を管理する。
+
+import 'dart:async';
+import 'dart:ffi';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:ffi/ffi.dart';
+import 'package:meta/meta.dart';
+
+import '../sora_codec_type.dart';
+import '../sora_error_code.dart';
+import 'bindings.dart';
+import 'callback_handlers.dart' show SdpNegotiationCallbacks;
+import 'library_loader.dart';
+import 'memory.dart';
+import 'simulcast_video_encoder_factory.dart';
+
+/// WebRTC クライアントのイベントコールバック型
+typedef WebrtcClientEventCallback =
+    void Function(String type, Map<String, Object?> data);
+
+/// DataChannel のリソースを束ねる内部クラス。
+class _DataChannelResources {
+  /// DataChannel のポインタ
+  Pointer<WebrtcDataChannelInterface>? dc;
+
+  /// sora_observer_bridge_setup_dc の戻り値
+  Pointer<Void>? ctx;
+
+  /// DataChannel に登録した NativeCallable 群
+  final List<NativeCallable<dynamic>> callables = [];
+}
+
+/// `getStats()` 1 回分の Dart / native リソースを束ねる。
+class _StatsRequest {
+  _StatsRequest({
+    required this.id,
+    this.completer,
+    this.cbsPtr,
+    this.nativeCallable,
+    this.timer,
+  });
+
+  /// request を一意に識別するための世代番号。
+  final int id;
+
+  /// public API 側へ結果を返すための completer。
+  Completer<String?>? completer;
+
+  /// libwebrtc-c へ渡す callback 構造体。
+  Pointer<RTCStatsCollectorCallbackCbs>? cbsPtr;
+
+  /// Dart callback を native function pointer として保持する。
+  NativeCallable<Function>? nativeCallable;
+
+  /// `getStats()` の応答待ちを打ち切る timer。
+  Timer? timer;
+
+  @override
+  int get hashCode => id;
+
+  @override
+  bool operator ==(Object other) => identical(this, other);
+}
+
+/// 録音デバイス一覧から [deviceId] に一致するデバイスのインデックスを解決する。
+///
+/// 各要素の `index` は ADM のデバイスインデックス、`guid` と `name` は
+/// デバイス情報を表す。名前の読み取りに失敗したデバイスは一覧に含めない
+/// 前提のため、戻り値は一覧の位置ではなく `index` をそのまま返す。
+///
+/// [deviceId] は guid または name の完全一致で探す。macOS の ADM は guid が
+/// 空になるケースがあるため、一致しない場合は [labelHint] と
+/// `default ([labelHint])` をフォールバック候補にする。
+///
+/// [preferDefaultDevice] が true の場合は `default ([labelHint])` を
+/// [labelHint] より優先する。一致がなければ null を返す。
+///
+/// FFI から独立させて単体テストできるよう、一覧を値で受け取る純粋関数に
+/// している。
+@internal
+int? resolveRecordingDeviceIndex({
+  required List<({int index, String guid, String name})> devices,
+  required String deviceId,
+  String? labelHint,
+  bool preferDefaultDevice = false,
+}) {
+  int? labelMatchIndex;
+  int? defaultLabelMatchIndex;
+  for (final device in devices) {
+    if (device.guid == deviceId || device.name == deviceId) {
+      return device.index;
+    }
+    if (labelHint != null && device.name == labelHint) {
+      labelMatchIndex ??= device.index;
+    }
+    if (preferDefaultDevice &&
+        labelHint != null &&
+        device.name == 'default ($labelHint)') {
+      defaultLabelMatchIndex ??= device.index;
+    }
+  }
+  if (preferDefaultDevice && defaultLabelMatchIndex != null) {
+    return defaultLabelMatchIndex;
+  }
+  return labelMatchIndex;
+}
+
+/// ADM が録音デバイスを列挙できないため、切り替えを後続の再適用へ委ねるかどうかを返す。
+///
+/// `RecordingDevices()` は列挙に失敗すると負の値を返す。Windows では切断直後に
+/// これが起き、次の PeerConnection 作成まで復旧しないため、その時点の切り替えは
+/// 必ず失敗する。復旧後の再適用に委ねる判断をここに集約する。
+///
+/// 列挙できたかどうか (負の値かどうか) だけを入力に取る純粋関数にして、
+/// ネイティブライブラリ無しで判断を単体テストできるようにしている。
+@internal
+bool shouldDeferRecordingDeviceApply({required int deviceCount}) {
+  return deviceCount < 0;
+}
+
+/// `setRecordingDeviceByGuid` が受け取り、再適用まで保持する録音デバイスの選択。
+typedef RecordingDeviceSelection = ({
+  String deviceId,
+  String? labelHint,
+  bool preferDefaultDevice,
+});
+
+/// WebRTC クライアント (dart:ffi 実装)
+class WebrtcClient {
+  /// 孤立 stats request の保持上限です。
+  ///
+  /// 遅延コールバック到着時の native クラッシュを避けるため、孤立 request の
+  /// 即時解放は行いません。上限に達した新規 `getStats()` は `StateError` で
+  /// 拒否することで、無制限の滞留を抑えます。1 切断・タイムアウトで最大 1 件の
+  /// 孤立が生じるため、10 サイクル分の余裕を持たせています。
+  static const int maxOrphanedStatsRequests = 10;
+
+  final LibWebrtcC _lib;
+  final WebrtcConstants _consts;
+  final Map<String, Object?> _config;
+  final WebrtcClientEventCallback _onEvent;
+  bool _disposed = false;
+  int? _sessionGeneration;
+
+  // テスト専用に `connect` の disposed 経路で解放した audio ref 数を記録する。
+  //
+  // 正常系の release では加算しない。disposed 時の即時解放の検証に使う。
+  int _disposedAudioTrackReleaseCountForTest = 0;
+
+  /// テスト専用に `connect` の disposed 経路で解放した audio ref 数を返す。
+  ///
+  /// 正常系の release では加算しない。
+  @visibleForTesting
+  int get disposedAudioTrackReleaseCountForTest =>
+      _disposedAudioTrackReleaseCountForTest;
+
+  // テスト専用に `connect` の disposed 経路で解放した video ref 数を記録する。
+  //
+  // 正常系の release では加算しない。disposed 時の即時解放の検証に使う。
+  int _disposedVideoTrackReleaseCountForTest = 0;
+
+  /// テスト専用に `connect` の disposed 経路で解放した video ref 数を返す。
+  ///
+  /// 正常系の release では加算しない。
+  @visibleForTesting
+  int get disposedVideoTrackReleaseCountForTest =>
+      _disposedVideoTrackReleaseCountForTest;
+
+  // PeerConnectionFactory / PeerConnection
+  Pointer<WebrtcPeerConnectionFactoryInterfaceRefcounted>? _factoryRef;
+  Pointer<WebrtcPeerConnectionInterfaceRefcounted>? _pcRef;
+
+  // 進行中の getStats() を後始末するための追跡フィールド
+  _StatsRequest? _pendingStatsRequest;
+  final Set<_StatsRequest> _orphanedStatsRequests = <_StatsRequest>{};
+  int _statsRequestGeneration = 0;
+
+  // C コールバックブリッジ (PeerConnectionObserver + リモートビデオ管理)
+  Pointer<SoraObserverBridge>? _observerBridge;
+  // NativeCallable を保持する (C ブリッジのライフタイムに合わせる)
+  final List<NativeCallable<dynamic>> _nativeCallables = [];
+
+  // SDP ネゴシエーション
+  SdpNegotiationCallbacks? _sdpCallbacks;
+
+  // connect(stream) で受け取った local track を offer 応答まで保持する。
+  Pointer<WebrtcAudioTrackInterfaceRefcounted>? _pendingLocalAudioTrackRef;
+  Pointer<WebrtcVideoTrackInterfaceRefcounted>? _pendingLocalVideoTrackRef;
+  String? _pendingLocalStreamId;
+
+  // Audio / Video RtpSender
+  Pointer<WebrtcRtpSenderInterface>? _audioRtpSender;
+
+  // ビデオ RtpSender (simulcast encodings 設定用)
+  Pointer<WebrtcRtpSenderInterface>? _videoRtpSender;
+
+  // offer から受け取った encodings (simulcast 用)
+  List<Map<String, Object?>>? _pendingEncodings;
+
+  // DataChannel (notify)
+  final _notifyDc = _DataChannelResources();
+  // DataChannel (push)
+  final _pushDc = _DataChannelResources();
+  // DataChannel (rpc)
+  final _rpcDc = _DataChannelResources();
+  // DataChannel (stats)
+  final _statsDc = _DataChannelResources();
+  // DataChannel (signaling)
+  final _signalingDc = _DataChannelResources();
+  // DataChannel (カスタムラベル)
+  final Map<String, _DataChannelResources> _customDataChannels = {};
+
+  WebrtcClient._({
+    required LibWebrtcC lib,
+    required WebrtcConstants consts,
+    required Map<String, Object?> config,
+    required WebrtcClientEventCallback onEvent,
+  }) : _lib = lib,
+       _consts = consts,
+       _config = config,
+       _onEvent = onEvent;
+
+  static LibWebrtcC? _sharedLib;
+  static WebrtcConstants? _sharedConsts;
+  static DynamicLibrary? _sharedDynLib;
+  static Pointer<WebrtcThreadUnique>? _sharedNetworkThread;
+  static Pointer<WebrtcThreadUnique>? _sharedWorkerThread;
+  static Pointer<WebrtcThreadUnique>? _sharedSignalingThread;
+  static Pointer<WebrtcPeerConnectionFactoryInterfaceRefcounted>?
+  _sharedFactoryRef;
+  // macOS / Windows / Linux で明示生成した AudioDeviceModule の参照を保持する。
+  // Dart 側で SetRecordingDevice を呼ぶために PCF に渡した後も release せず持ち続ける。
+  static Pointer<WebrtcAudioDeviceModuleRefcounted>? _sharedAdmRef;
+  static SimulcastVideoEncoderFactory? _sharedSimulcastVideoEncoderFactory;
+  // 共有 factory の MediaEngine を Terminate させないための keep-alive
+  // PeerConnection を保持するクライアント。
+  //
+  // 詳細は `_createSharedKeepAlivePeerConnection()` を参照する。
+  static WebrtcClient? _sharedKeepAliveClient;
+  // 音声デバイスを利用するかどうか。共有 factory の生成前に設定する。
+  // false の場合は push audio device が選択される。
+  static bool _useAudioDevice = true;
+  // 最後に要求された録音デバイス選択。ADM へ適用できたとは限らない。
+  // Windows では PeerConnection 作成時の libwebrtc の初期化が録音デバイスを
+  // 既定通信デバイスへ上書きするため、作成直後と録音開始前に再適用する。
+  // ADM が録音デバイスを列挙できない間に要求された選択も保持し、復旧後の
+  // 再適用で反映する。書き込みは macOS / Linux を含む全プラットフォーム共通
+  // (`setRecordingDeviceByGuid` の要求時) で、読み出しは Windows のみ。
+  static RecordingDeviceSelection? _requestedRecordingDevice;
+
+  // Windows の実 ADM の補正と再適用の対象かどうか。
+  static bool get _shouldConfigureWindowsAudioDevice =>
+      Platform.isWindows && _useAudioDevice;
+  // テスト専用フック。true の間は AudioDeviceModule の初期化を常に失敗させる。
+  // ネイティブ環境 (音声デバイスの有無) に依存せずに共有 factory 生成の
+  // 失敗経路を検証するために利用する。通常実行では常に false のまま。
+  // Android は ADM 初期化を行わないため本フックは無効。
+  @visibleForTesting
+  static bool forceAudioDeviceModuleInitFailureForTest = false;
+  // テスト専用フック。true の間は modular PeerConnectionFactory の生成を
+  // 常に nullptr で失敗させる。deps へ factory 群が揃った後段の失敗経路
+  // (simulcast factory の dispose・static field のリセット) を検証するために
+  // 利用する。通常実行では常に false のまま。
+  @visibleForTesting
+  static bool forceCreateModularPeerConnectionFactoryFailureForTest = false;
+
+  /// 共有 factory の音声デバイス使用設定を変更する。
+  ///
+  /// 共有 factory の生成後に異なる値へ変更することはできない。
+  static set useAudioDevice(bool value) {
+    if (_sharedFactoryRef != null && _useAudioDevice != value) {
+      throw StateError(
+        'Shared PeerConnectionFactory audio device setting cannot be changed.',
+      );
+    }
+    _useAudioDevice = value;
+  }
+
+  // テスト専用フック。共有 factory が生成済みかどうかを返す。
+  @visibleForTesting
+  static bool get hasSharedFactoryForTest => _sharedFactoryRef != null;
+
+  // テスト専用フック。共有 factory 生成途中で確保されるリソース
+  // (3 スレッド / ADM / simulcast factory) が保持されているかを返す。
+  // 失敗経路のクリーンアップ検証に利用する。simulcast factory は ADM
+  // やスレッドより後で生成されるため、後段失敗時の解放検証に効く。
+  @visibleForTesting
+  static bool get hasSharedFactoryResourcesForTest =>
+      _sharedNetworkThread != null ||
+      _sharedWorkerThread != null ||
+      _sharedSignalingThread != null ||
+      _sharedAdmRef != null ||
+      _sharedSimulcastVideoEncoderFactory != null;
+
+  // テスト専用フック。共有 factory の MediaEngine を Terminate させない
+  // keep-alive PeerConnection が生成済みかを返す。
+  @visibleForTesting
+  static bool get hasSharedKeepAlivePeerConnectionForTest =>
+      _sharedKeepAliveClient != null;
+
+  // `LibWebrtcC` の共有インスタンスを返す。
+  //
+  // 初回アクセス時だけ共有ライブラリをロードし、以降は全クライアントで同じ
+  // FFI バインディングと定数キャッシュを使い回す。
+  static LibWebrtcC get sharedLib {
+    if (_sharedLib == null) {
+      _sharedDynLib = loadLibWebrtcC();
+      _sharedLib = LibWebrtcC(_sharedDynLib!);
+      _sharedConsts = WebrtcConstants(_sharedDynLib!);
+    }
+    return _sharedLib!;
+  }
+
+  // 共有ライブラリから読み取ったランタイム定数群を返す。
+  //
+  // `sharedLib` の初期化に依存するため、必要なら先にそちらを起動する。
+  static WebrtcConstants get sharedConsts {
+    if (_sharedConsts == null) {
+      // sharedLib のアクセスで初期化される
+      sharedLib;
+    }
+    return _sharedConsts!;
+  }
+
+  // `MediaStream` / Track 生成にも使う共有 `PeerConnectionFactory` を返す。
+  //
+  // `PeerConnectionFactoryInterfaceRefcounted` を raw pointer 化して返すが、
+  // 寿命自体は静的共有フィールドで管理する。
+  static Pointer<WebrtcPeerConnectionFactoryInterface> get sharedFactory {
+    _ensureSharedFactory();
+    return sharedLib.pcFactoryRefcountedGet(_sharedFactoryRef!);
+  }
+
+  // macOS / Windows / Linux で保持している `AudioDeviceModule` の raw pointer を返す。
+  //
+  // 録音デバイスの切り替え API で再利用するため、PCF に渡した後も
+  // `_sharedAdmRef` を握り続けている。未生成プラットフォームでは `nullptr`。
+  static Pointer<WebrtcAudioDeviceModule> get sharedAudioDeviceModule {
+    _ensureSharedFactory();
+    final ref = _sharedAdmRef;
+    if (ref == null) {
+      return nullptr;
+    }
+    return sharedLib.audioDeviceModuleRefcountedGet(ref);
+  }
+
+  // `deviceId` と一致する録音デバイスへ `AudioDeviceModule` を切り替える。
+  //
+  // macOS の ADM は guid が空になるケースがあるため、必要に応じて
+  // `labelHint` や `default (label)` もフォールバック候補として探す。
+  //
+  // 一致するデバイスが無い場合、ADM を利用できない場合、`SetRecordingDevice` が
+  // 失敗した場合は StateError を投げる。
+  //
+  // ADM が録音デバイスを列挙できない状態 (`RecordingDevices()` が負の値) だけは
+  // 例外にせず、選択を保持して後続の再適用へ委ねる。Windows では切断後に ADM の
+  // デバイス一覧が解放され、次の PeerConnection 作成まで復旧しないため、
+  // トラック生成時点で切り替えると必ず失敗する。復旧後の再適用で反映する。
+  //
+  // 要求された選択は適用の成否にかかわらず保持する。適用できなかった選択を
+  // 前回の成功値へ戻すと、どのデバイスを使う要求だったかが失われ、再適用の
+  // ログからも判別できなくなるため。
+  @internal
+  static void setRecordingDeviceByGuid(
+    String deviceId, {
+    String? labelHint,
+    bool preferDefaultDevice = false,
+  }) {
+    final selection = (
+      deviceId: deviceId,
+      labelHint: labelHint,
+      preferDefaultDevice: preferDefaultDevice,
+    );
+    _requestedRecordingDevice = selection;
+    final enumerated = _enumerateRecordingDevices();
+    if (enumerated == null) {
+      // ADM を生成できなかった。列挙不能と違って復旧しないため、
+      // 選択を保持しても反映されない。接続側が検知できるよう例外にする。
+      throw StateError('AudioDeviceModule is not initialized.');
+    }
+    if (shouldDeferRecordingDeviceApply(deviceCount: enumerated.count)) {
+      // 切断後に ADM のデバイス一覧が解放されている。復旧後の再適用へ委ねる。
+      return;
+    }
+    final error = _trySetRecordingDeviceByGuid(
+      enumerated.adm,
+      enumerated.count,
+      selection,
+    );
+    if (error != null) {
+      throw error;
+    }
+  }
+
+  // 共有 ADM と録音デバイス数を返す。ADM を生成できない場合は null を返す。
+  static ({Pointer<WebrtcAudioDeviceModule> adm, int count})?
+  _enumerateRecordingDevices() {
+    final adm = sharedAudioDeviceModule;
+    if (adm == nullptr) {
+      return null;
+    }
+    return (adm: adm, count: sharedLib.audioDeviceModuleRecordingDevices(adm));
+  }
+
+  // 録音デバイスを切り替える。ADM の列挙結果と選択が揃っている前提で呼ぶ。
+  //
+  // 成功時は null を返す。失敗時は StateError を返す。
+  static StateError? _trySetRecordingDeviceByGuid(
+    Pointer<WebrtcAudioDeviceModule> adm,
+    int count,
+    RecordingDeviceSelection selection,
+  ) {
+    final deviceId = selection.deviceId;
+    final labelHint = selection.labelHint;
+    final preferDefaultDevice = selection.preferDefaultDevice;
+    final nameBuf = calloc.allocate<Char>(128);
+    final guidBuf = calloc.allocate<Char>(128);
+    try {
+      // 読み取りに失敗したデバイスは除き、ADM のインデックスを保持して
+      // 純粋関数へ渡す。
+      final devices = <({int index, String guid, String name})>[];
+      for (var i = 0; i < count; i++) {
+        final rc = sharedLib.audioDeviceModuleRecordingDeviceName(
+          adm,
+          i,
+          nameBuf,
+          guidBuf,
+        );
+        if (rc != 0) {
+          continue;
+        }
+        devices.add((
+          index: i,
+          guid: guidBuf.cast<Utf8>().toDartString(),
+          name: nameBuf.cast<Utf8>().toDartString(),
+        ));
+      }
+      final targetIndex = resolveRecordingDeviceIndex(
+        devices: devices,
+        deviceId: deviceId,
+        labelHint: labelHint,
+        preferDefaultDevice: preferDefaultDevice,
+      );
+      if (targetIndex == null) {
+        return StateError('Audio input device not found: $deviceId');
+      }
+      final rc = sharedLib.audioDeviceModuleSetRecordingDevice(
+        adm,
+        targetIndex,
+      );
+      if (rc != 0) {
+        return StateError(
+          'SetRecordingDevice failed: deviceId=$deviceId rc=$rc',
+        );
+      }
+    } finally {
+      calloc.free(nameBuf);
+      calloc.free(guidBuf);
+    }
+
+    return null;
+  }
+
+  /// 共有 `PeerConnectionFactory` と関連スレッド群を必要時に 1 回だけ生成する。
+  ///
+  /// network / worker / signaling thread、ADM、encoder/decoder factory、
+  /// audio processing をまとめて依存オブジェクトへ積み、最後に modular
+  /// factory を構築する。
+  ///
+  /// ADM 初期化が失敗するなど途中で例外が発生した場合は、作成済みの
+  /// thread / deps / ADM / simulcast factory を解放して static field を
+  /// リセットし、例外をそのまま伝播させる。これにより失敗後の再試行で
+  /// リソースが二重に確保されることを防ぐ。
+  static void _ensureSharedFactory() {
+    if (_sharedFactoryRef != null) {
+      return;
+    }
+
+    final requestedUseAudioDevice = _useAudioDevice;
+
+    // 途中失敗時の解放対象を catch 節から参照する。成功時は delete 後に
+    // null へ戻して catch 節での二重解放を防ぐ。
+    Pointer<WebrtcPeerConnectionFactoryDependencies>? depsToRelease;
+
+    try {
+      _sharedNetworkThread = sharedLib.threadCreateWithSocketServer();
+      _sharedWorkerThread = sharedLib.threadCreate();
+      _sharedSignalingThread = sharedLib.threadCreate();
+      sharedLib.threadStart(sharedLib.threadUniqueGet(_sharedNetworkThread!));
+      sharedLib.threadStart(sharedLib.threadUniqueGet(_sharedWorkerThread!));
+      sharedLib.threadStart(sharedLib.threadUniqueGet(_sharedSignalingThread!));
+
+      final deps = sharedLib.pcFactoryDependenciesNew();
+      depsToRelease = deps;
+      sharedLib.pcFactoryDependenciesSetNetworkThread(
+        deps,
+        sharedLib.threadUniqueGet(_sharedNetworkThread!),
+      );
+      sharedLib.pcFactoryDependenciesSetWorkerThread(
+        deps,
+        sharedLib.threadUniqueGet(_sharedWorkerThread!),
+      );
+      sharedLib.pcFactoryDependenciesSetSignalingThread(
+        deps,
+        sharedLib.threadUniqueGet(_sharedSignalingThread!),
+      );
+
+      if (Platform.isAndroid) {
+        final env = sharedLib.createEnvironment();
+        final adm = sharedLib.createAndroidAudioDeviceModule(env);
+        sharedLib.environmentDelete(env);
+        if (adm != nullptr) {
+          sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+          sharedLib.audioDeviceModuleRelease(
+            sharedLib.audioDeviceModuleRefcountedGet(adm),
+          );
+        }
+      } else if (Platform.isMacOS) {
+        if (requestedUseAudioDevice) {
+          final env = sharedLib.createEnvironment();
+          final adm = sharedLib.createAudioDeviceModule(
+            env,
+            sharedConsts.kPlatformDefaultAudio,
+          );
+          sharedLib.environmentDelete(env);
+          if (adm != nullptr) {
+            sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+            // Dart から SetRecordingDevice を呼ぶために参照を保持しておく
+            if (_sharedAdmRef != null) {
+              sharedLib.audioDeviceModuleRelease(
+                sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+              );
+            }
+            _sharedAdmRef = adm;
+            final initRcMac = _initAudioDeviceModule(adm);
+            if (initRcMac != 0) {
+              throw StateError('AudioDeviceModule init failed: rc=$initRcMac');
+            }
+          }
+        } else {
+          final adm = sharedLib.soraCreatePushAudioDevice();
+          if (adm != nullptr) {
+            sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+            if (_sharedAdmRef != null) {
+              sharedLib.audioDeviceModuleRelease(
+                sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+              );
+            }
+            _sharedAdmRef = adm;
+            final initRcMac = _initAudioDeviceModule(adm);
+            if (initRcMac != 0) {
+              throw StateError('AudioDeviceModule init failed: rc=$initRcMac');
+            }
+          }
+        }
+      } else if (Platform.isWindows) {
+        if (requestedUseAudioDevice) {
+          // Windows: setjmp/longjmp で abort を捕捉して安全に ADM を作成する
+          final env = sharedLib.createEnvironment();
+          final adm = sharedLib.soraCreateAudioDeviceModule(
+            env,
+            sharedConsts.kPlatformDefaultAudio,
+          );
+          sharedLib.environmentDelete(env);
+          if (adm != nullptr) {
+            sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+            if (_sharedAdmRef != null) {
+              sharedLib.audioDeviceModuleRelease(
+                sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+              );
+            }
+            _sharedAdmRef = adm;
+            final initRcWin = _initAudioDeviceModule(adm);
+            if (initRcWin != 0) {
+              throw StateError('AudioDeviceModule init failed: rc=$initRcWin');
+            }
+          }
+        } else {
+          final adm = sharedLib.soraCreatePushAudioDevice();
+          if (adm != nullptr) {
+            sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+            if (_sharedAdmRef != null) {
+              sharedLib.audioDeviceModuleRelease(
+                sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+              );
+            }
+            _sharedAdmRef = adm;
+            final initRcWin = _initAudioDeviceModule(adm);
+            if (initRcWin != 0) {
+              throw StateError('AudioDeviceModule init failed: rc=$initRcWin');
+            }
+          }
+        }
+      } else if (Platform.isLinux) {
+        if (requestedUseAudioDevice) {
+          final env = sharedLib.createEnvironment();
+          final adm = sharedLib.createAudioDeviceModule(
+            env,
+            sharedConsts.kPlatformDefaultAudio,
+          );
+          sharedLib.environmentDelete(env);
+          if (adm != nullptr) {
+            sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+            if (_sharedAdmRef != null) {
+              sharedLib.audioDeviceModuleRelease(
+                sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+              );
+            }
+            _sharedAdmRef = adm;
+            final initRcLinux = _initAudioDeviceModule(adm);
+            if (initRcLinux != 0) {
+              throw StateError(
+                'AudioDeviceModule init failed: rc=$initRcLinux',
+              );
+            }
+          }
+        } else {
+          final adm = sharedLib.soraCreatePushAudioDevice();
+          if (adm != nullptr) {
+            sharedLib.pcFactoryDependenciesSetAdm(deps, adm);
+            if (_sharedAdmRef != null) {
+              sharedLib.audioDeviceModuleRelease(
+                sharedLib.audioDeviceModuleRefcountedGet(_sharedAdmRef!),
+              );
+            }
+            _sharedAdmRef = adm;
+            final initRcLinux = _initAudioDeviceModule(adm);
+            if (initRcLinux != 0) {
+              throw StateError(
+                'AudioDeviceModule init failed: rc=$initRcLinux',
+              );
+            }
+          }
+        }
+      }
+
+      final eventLogFactory = sharedLib.rtcEventLogFactoryCreate();
+      sharedLib.pcFactoryDependenciesSetEventLogFactory(deps, eventLogFactory);
+
+      final audioEnc = sharedLib.createBuiltinAudioEncoderFactory();
+      final audioDec = sharedLib.createBuiltinAudioDecoderFactory();
+      sharedLib.pcFactoryDependenciesSetAudioEncoderFactory(deps, audioEnc);
+      sharedLib.pcFactoryDependenciesSetAudioDecoderFactory(deps, audioDec);
+      // deps が保持する参照とは別に確保したローカル参照をここで解放する。
+      // Set 直後に release しても deps 側の参照は残るため、後段の video
+      // factory 生成が失敗しても audioEnc / audioDec は deps delete で解放される。
+      // (video factory 系は unique ポインタで所有権が deps へ移譲されるため
+      // ローカル参照の release は不要)
+      sharedLib.audioEncoderFactoryRelease(
+        sharedLib.audioEncoderFactoryRefcountedGet(audioEnc),
+      );
+      sharedLib.audioDecoderFactoryRelease(
+        sharedLib.audioDecoderFactoryRefcountedGet(audioDec),
+      );
+
+      final videoEnc = _createDefaultVideoEncoderFactory();
+      _sharedSimulcastVideoEncoderFactory = SimulcastVideoEncoderFactory(
+        sharedLib,
+        videoEnc,
+      );
+      final videoDec = _createDefaultVideoDecoderFactory();
+      sharedLib.pcFactoryDependenciesSetVideoEncoderFactory(
+        deps,
+        _sharedSimulcastVideoEncoderFactory!.native(),
+      );
+      sharedLib.pcFactoryDependenciesSetVideoDecoderFactory(deps, videoDec);
+
+      final apBuilder = sharedLib.builtinAudioProcessingBuilderCreate();
+      sharedLib.pcFactoryDependenciesSetAudioProcessingBuilder(deps, apBuilder);
+      sharedLib.enableMedia(deps);
+      final factoryRef = _createSharedModularPeerConnectionFactory(deps);
+      if (factoryRef == nullptr) {
+        // nullptr は Dart の null ではなくアドレス 0 の Pointer のため、
+        // `_sharedFactoryRef == null` 判定では捕捉できない。明示的に検査して
+        // throw することで catch のクリーンアップ経路に乗せ、リトライを可能にする。
+        throw StateError('Failed to create PeerConnectionFactory.');
+      }
+      _sharedFactoryRef = factoryRef;
+      sharedLib.pcFactoryDependenciesDelete(deps);
+      depsToRelease = null;
+
+      final options = sharedLib.pcFactoryOptionsNew();
+      sharedLib.pcFactoryOptionsSetDisableEncryption(options, 0);
+      sharedLib.pcFactoryOptionsSetSslMaxVersion(
+        options,
+        sharedConsts.sslProtocolDtls12,
+      );
+      // `sharedFactory` getter は `_ensureSharedFactory` を再入するため、
+      // 生成済みの参照を直接使って options を適用する。
+      sharedLib.pcFactorySetOptions(
+        sharedLib.pcFactoryRefcountedGet(_sharedFactoryRef!),
+        options,
+      );
+      sharedLib.pcFactoryOptionsDelete(options);
+
+      // 共有 factory の MediaEngine をプロセス生存期間中 Terminate させない。
+      // 生成の要否は `_createSharedKeepAlivePeerConnection()` 内で判定する。
+      _createSharedKeepAlivePeerConnection();
+    } catch (_) {
+      // factory 生成 (成功) 後の例外では factory とその資源 (スレッド /
+      // ADM) が生きているため破棄しない。生成前の失敗 (ADM init 失敗等)
+      // のみ、作成済みの thread / deps / ADM を解放して static field を
+      // リセットし、リトライで再生成できるようにする。
+      if (_sharedFactoryRef == null) {
+        _releaseSharedFactoryResources(depsToRelease);
+      }
+      rethrow;
+    }
+  }
+
+  // 共有 factory の MediaEngine が Terminate されるのを防ぐ keep-alive
+  // PeerConnection を 1 つだけ生成して保持する。
+  //
+  // libwebrtc は最後の PeerConnection が破棄されると
+  // `ConnectionContext::ReleaseMediaEngine()` から
+  // `WebRtcVoiceEngine::Terminate()` を呼び、共有 ADM の `Terminate()` まで
+  // 実行する。Linux の PulseAudio ADM は `Terminate()` で `quit_` を立てるが
+  // `Init()` で false に戻さないため、次の PeerConnection 作成時に再生成される
+  // 録音・再生スレッドが即終了し、2 回目以降の接続で音声が送信されなくなる。
+  // 実際には接続しない PeerConnection を 1 つプロセス生存期間中保持して
+  // MediaEngine の参照カウントを 0 にしないことで、Sora C++ SDK が
+  // `ConnectionContext::MediaEngineReference` を保持するのと同じ効果を得る。
+  //
+  // この処理は libwebrtc の MediaEngine 初期化タイミングを最初の
+  // PeerConnection 作成から共有 factory 生成直後へ前倒しする効果もある。
+  // これにより `adm_helpers::Init()` による録音デバイスのデフォルト復帰が
+  // `MediaDevices.createAudioTrack()` のデバイス選択より先に完了する。
+  //
+  // keep-alive は接続処理を阻害しないことを優先し、生成に失敗した場合は
+  // 何もせず既存の接続経路へフォールバックする。
+  static void _createSharedKeepAlivePeerConnection() {
+    // 同じ問題が確認されている Linux のみで生成する。macOS の ADM は
+    // `Init()` で `_isShutDown` を false に戻すため Terminate / Init を
+    // 跨いでも録音スレッドは正常に再開する。
+    if (!Platform.isLinux) {
+      return;
+    }
+    if (_sharedKeepAliveClient != null) {
+      return;
+    }
+    try {
+      final client = WebrtcClient._(
+        lib: sharedLib,
+        consts: sharedConsts,
+        config: const <String, Object?>{'role': 'recvonly'},
+        onEvent: (String type, Map<String, Object?> data) {},
+      );
+      if (!client._ensurePeerConnection(null)) {
+        // 失敗時は `_ensurePeerConnection` 内で observer bridge と
+        // NativeCallable が解放される。client 自体を破棄して終了する。
+        return;
+      }
+      _sharedKeepAliveClient = client;
+    } catch (_) {
+      // keep-alive の生成失敗は接続処理へ影響させない。
+    }
+  }
+
+  // Windows で実 ADM を使う際の PeerConnection 作成直後の補正を行う。
+  //
+  // libwebrtc は PeerConnection 作成時に MediaEngine を初期化し、
+  // `WebRtcVoiceEngine::Init()` から `adm_helpers::Init()` と初期
+  // AudioOptions の適用を行う。Windows の CoreAudio ADM ではこれにより
+  // 次の 3 点が発生する。
+  //
+  // 1. Windows 内蔵 AEC (CWMAudioAEC DMO) が有効化され、APM のソフトウェア
+  //    エコーキャンセラが無効化される。内蔵 AEC は再生開始済みであることを
+  //    録音開始の前提とするため、受信ストリームが無い sendonly や、再生開始
+  //    前に送信を開始した接続では録音が開始されず音声が送信されない。
+  //    内蔵 AEC を無効化して録音と再生の依存を解消する。
+  // 2. 再生デバイスに既定通信デバイス (eCommunications) が選ばれる。Windows
+  //    の既定通信デバイスが 2ch 非対応 (4ch のみ等) の場合、ADM の
+  //    `InitPlayout()` が対応フォーマットを見つけられず失敗し、受信音声を
+  //    再生できない。メディア向けの既定デバイス (eConsole) へ切り替える。
+  // 3. 録音デバイスにも既定通信デバイス (eCommunications) が選ばれ、
+  //    利用者が選択したマイクが失われる。最後に選択された録音デバイスを
+  //    再適用する。
+  //
+  // 1 により Windows ではエコーキャンセルが無効になる。APM のソフトウェア
+  // エコーキャンセラは内蔵 AEC の有効化時に無効化されており、ADM 側だけを
+  // 戻しても復帰しないため、録音できない状態より優先して無効のままとする。
+  //
+  // 参照中の PeerConnection が 0 になったとき MediaEngine が Terminate し、
+  // 次の作成で再び Init される。Init のたびに 1 から 3 が再適用される必要が
+  // あるため、PeerConnection 作成ごとに本補正を呼ぶ。呼び出しは冪等では
+  // ないが、再生や録音が初期化済みの場合は ADM 側が -1 を返すか、未初期化
+  // なら同じ値を再設定するだけで実害はない。
+  //
+  // 補正の失敗 (ADM が -1 を返す、例外が発生する等) は debug ログに記録し、
+  // 接続処理は継続する。push audio device など実 ADM を使わない場合や ADM
+  // 未生成の場合は何もしない。
+  static void _configureWindowsAudioDeviceAfterPeerConnection({
+    required void Function(String message) emitDebug,
+  }) {
+    if (!_shouldConfigureWindowsAudioDevice) {
+      return;
+    }
+    final admRef = _sharedAdmRef;
+    if (admRef == null) {
+      // ADM を生成できなかった。ここでは補正できない。この状態は音声トラック
+      // 生成時の `setRecordingDeviceByGuid` が StateError として検知する。
+      return;
+    }
+    try {
+      final adm = sharedLib.audioDeviceModuleRefcountedGet(admRef);
+
+      // 内蔵 AEC を無効化する。録音初期化済みなどで失敗しても、その場合は
+      // 既に録音が開始されているか内蔵 AEC が使われていないため無視する。
+      final aecRc = sharedLib.audioDeviceModuleEnableBuiltInAEC(adm, 0);
+
+      // 再生デバイスをメディア向け既定デバイスへ切り替える。既に再生が初期化
+      // 済みなどで失敗しても、その場合は再生デバイスが確定済みのため無視する。
+      final playoutRc = sharedLib
+          .audioDeviceModuleSetPlayoutDeviceWithWindowsDeviceType(
+            adm,
+            sharedConsts.kWindowsDefaultDevice,
+          );
+
+      // 失敗時の切り分けができるよう、補正の結果を debug ログに残す。
+      emitDebug(
+        'native: windows_audio_fix aec_rc=$aecRc playout_rc=$playoutRc',
+      );
+
+      // 録音デバイスを最後に選択されたデバイスへ戻す。デバイスが消えている
+      // などで失敗しても、その場合は録音開始時に既定デバイスが使われる。
+      _restoreSelectedRecordingDevice(emitDebug: emitDebug);
+    } catch (error) {
+      // 例外 (シンボル解決失敗、メモリ不足等) でも接続処理は継続する。
+      emitDebug('native: windows_audio_fix failed error=$error');
+    }
+  }
+
+  // 保持している録音デバイスの要求を ADM へ再適用する。
+  //
+  // Windows では PeerConnection 作成時の adm_helpers::Init() が録音
+  // デバイスを既定通信デバイスへ上書きするため、作成直後と録音開始
+  // (`pcAddTrack`) の直前に呼ぶ。
+  // 作成直後の再適用は rc=0 を返しても実機で録音に反映されない事象が
+  // あるため、録音初期化の直前にも再適用する。
+  // 録音がまだ初期化されていなければ SetRecordingDevice は成功する。
+  // 他クライアントが録音を開始済みの場合は MediaEngine の再 Init が
+  // 走らないため上書きされておらず、失敗しても無視してよい。
+  //
+  // `MediaDevices.createAudioTrack` の時点で ADM が録音デバイスを列挙できない
+  // 場合、要求は保持だけされてここで初めて ADM へ適用される。切断後の ADM は
+  // 次の PeerConnection 作成まで一覧を復旧しないため、この経路が切り替えの
+  // 本線になる。
+  //
+  // 補正は接続処理を止めない。選択がない場合や再適用に失敗した場合は
+  // debug ログのみで接続処理を継続する。
+  static void _restoreSelectedRecordingDevice({
+    required void Function(String message) emitDebug,
+  }) {
+    final selection = _requestedRecordingDevice;
+    if (selection == null) {
+      emitDebug('native: windows_audio_restore skipped: reason=no_selection');
+      return;
+    }
+    try {
+      final enumerated = _enumerateRecordingDevices();
+      if (enumerated == null) {
+        emitDebug('native: windows_audio_restore skipped: adm_unavailable');
+        return;
+      }
+      final count = enumerated.count;
+      if (shouldDeferRecordingDeviceApply(deviceCount: count)) {
+        // ADM のデバイス一覧がまだ復旧していない。次の再適用へ委ねる。
+        emitDebug(
+          'native: windows_audio_restore skipped: enumerate_failed count=$count',
+        );
+        return;
+      }
+      if (count == 0) {
+        // 録音デバイスが 1 つも無い。復旧しないため再適用しても成功しない。
+        emitDebug('native: windows_audio_restore skipped: no_devices count=0');
+        return;
+      }
+      // 失敗しても接続処理は継続するため、戻り値はログにのみ使う。
+      final error = _trySetRecordingDeviceByGuid(
+        enumerated.adm,
+        count,
+        selection,
+      );
+      if (error == null) {
+        emitDebug(
+          'native: windows_audio_restore device=${selection.deviceId} ok',
+        );
+      } else {
+        emitDebug(
+          'native: windows_audio_restore device=${selection.deviceId} '
+          'error=${error.message}',
+        );
+      }
+    } catch (error) {
+      emitDebug('native: windows_audio_restore failed error=$error');
+    }
+  }
+
+  // `_ensureSharedFactory` が途中で失敗した場合に、作成済みの thread / deps /
+  // ADM / simulcast factory を解放して static field をリセットする。
+  //
+  // deps は成功時に delete 済みで null になっているため、失敗時のみ解放する。
+  static void _releaseSharedFactoryResources(
+    Pointer<WebrtcPeerConnectionFactoryDependencies>? deps,
+  ) {
+    if (deps != null) {
+      sharedLib.pcFactoryDependenciesDelete(deps);
+    }
+
+    final adm = _sharedAdmRef;
+    if (adm != null) {
+      sharedLib.audioDeviceModuleRelease(
+        sharedLib.audioDeviceModuleRefcountedGet(adm),
+      );
+      _sharedAdmRef = null;
+    }
+    // 共有 factory を破棄したので、ADM に適用済みの録音デバイス選択も無効になる。
+    // 要求を残すと、次に生成した ADM へ古い要求を適用してしまう。
+    _requestedRecordingDevice = null;
+
+    // 生成途中で保持していた SimulcastVideoEncoderFactory も解放する。
+    // dispose() はネイティブへ所有権移譲済み (_native == nullptr) でも
+    // `_cleaned` ガードにより二重解放されず、生成前なら何もしない。
+    final simulcast = _sharedSimulcastVideoEncoderFactory;
+    if (simulcast != null) {
+      simulcast.dispose();
+      _sharedSimulcastVideoEncoderFactory = null;
+    }
+
+    _destroySharedThread(_sharedNetworkThread);
+    _sharedNetworkThread = null;
+    _destroySharedThread(_sharedWorkerThread);
+    _sharedWorkerThread = null;
+    _destroySharedThread(_sharedSignalingThread);
+    _sharedSignalingThread = null;
+  }
+
+  // 共有 factory 用スレッドを停止して delete する。
+  static void _destroySharedThread(Pointer<WebrtcThreadUnique>? thread) {
+    if (thread == null) {
+      return;
+    }
+    sharedLib.threadStop(sharedLib.threadUniqueGet(thread));
+    sharedLib.threadUniqueDelete(thread);
+  }
+
+  // AudioDeviceModule を初期化し、失敗時の返り値 (rc) を返す。
+  //
+  // テスト専用フック `forceAudioDeviceModuleInitFailureForTest` が立っている
+  // 間はネイティブ初期化を呼ばずに失敗を模擬する。通常実行ではネイティブ
+  // 呼び出しと同等の結果を返す。
+  static int _initAudioDeviceModule(
+    Pointer<WebrtcAudioDeviceModuleRefcounted> adm,
+  ) {
+    if (forceAudioDeviceModuleInitFailureForTest) {
+      return 1;
+    }
+    return sharedLib.audioDeviceModuleInit(
+      sharedLib.audioDeviceModuleRefcountedGet(adm),
+    );
+  }
+
+  // modular PeerConnectionFactory を生成し、失敗時は nullptr を返す。
+  //
+  // テスト専用フック `forceCreateModularPeerConnectionFactoryFailureForTest` が
+  // 立っている間はネイティブ生成を呼ばずに nullptr を返して失敗を模擬する。
+  // 通常実行ではネイティブ呼び出しと同じ結果を返す。
+  static Pointer<WebrtcPeerConnectionFactoryInterfaceRefcounted>
+  _createSharedModularPeerConnectionFactory(
+    Pointer<WebrtcPeerConnectionFactoryDependencies> deps,
+  ) {
+    if (forceCreateModularPeerConnectionFactoryFailureForTest) {
+      return nullptr;
+    }
+    return sharedLib.createModularPeerConnectionFactory(deps);
+  }
+
+  /// 設定とイベント出力先を束ねた `WebrtcClient` を生成する。
+  static WebrtcClient create({
+    required Map<String, Object?> config,
+    required WebrtcClientEventCallback onEvent,
+  }) {
+    return WebrtcClient._(
+      lib: sharedLib,
+      consts: sharedConsts,
+      config: config,
+      onEvent: onEvent,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // 接続制御
+  // ---------------------------------------------------------------------------
+
+  /// 接続開始要求を受け取り、ローカルトラックを一時保持して PC 作成へ進む。
+  ///
+  /// 実際の `PeerConnection` 生成は offer 受信時まで遅延されるが、
+  /// connect 呼び出し時点で state は `connecting` へ遷移させる。
+  ///
+  /// 受け取った owned ref は保持し、初回 offer かつ送信 role かつ
+  /// config 有効の場合に sender 追加で消費し、それ以外は
+  /// `closePeerConnection` で解放する。
+  /// dispose 済みの場合は保持せず即時解放する。
+  ///
+  /// [sessionGeneration] は `SoraConnection` のセッション世代。
+  /// 全 state_changed イベントに付与され、旧セッションの遅延イベント抑制に使われる。
+  void connect({
+    Pointer<WebrtcAudioTrackInterfaceRefcounted>? localAudioTrackRef,
+    Pointer<WebrtcVideoTrackInterfaceRefcounted>? localVideoTrackRef,
+    String? localStreamId,
+    required int sessionGeneration,
+  }) {
+    if (_disposed) {
+      // 呼び出し側が確保した owned ref のため、受け取り側で必ず解放する。
+      // `closePeerConnection` と同一の順序 (audio から video) で解放する。
+      if (localAudioTrackRef != null) {
+        _lib.audioTrackRelease(
+          _lib.audioTrackRefcountedGet(localAudioTrackRef),
+        );
+        _disposedAudioTrackReleaseCountForTest++;
+      }
+      if (localVideoTrackRef != null) {
+        _lib.videoTrackRelease(
+          _lib.videoTrackRefcountedGet(localVideoTrackRef),
+        );
+        _disposedVideoTrackReleaseCountForTest++;
+      }
+      return;
+    }
+    _sessionGeneration = sessionGeneration;
+    _emitState('connecting', null, null, sessionGeneration: sessionGeneration);
+    _pendingLocalAudioTrackRef = localAudioTrackRef;
+    _pendingLocalVideoTrackRef = localVideoTrackRef;
+    _pendingLocalStreamId = localStreamId;
+    _createPeerConnectionFactory();
+  }
+
+  /// 現在の `PeerConnection` 一式だけを破棄して切断状態へ戻す。
+  ///
+  /// shared factory や共有スレッドは残すため、同じプロセス内での再接続は
+  /// 軽量に行える。
+  void disconnect() {
+    if (_disposed) return;
+    closePeerConnection();
+    _emitState(
+      'disconnected',
+      'closed',
+      null,
+      sessionGeneration: _sessionGeneration,
+    );
+    _sessionGeneration = null;
+  }
+
+  /// インスタンス寿命を終了させ、以後の利用を禁止する。
+  ///
+  /// `disconnect()` 相当の片付けを行ったうえで、
+  /// 以降のシグナリング入力や sender 操作を無効化する。
+  ///
+  /// 孤立 stats request の即時解放は行いません。遅延コールバック到着時に
+  /// 解放済みメモリを参照して native 側がクラッシュする恐れがあるためです。
+  /// 孤立の増加は `maxOrphanedStatsRequests` による背圧で有界にします。
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+
+    closePeerConnection();
+    _factoryRef = null;
+  }
+
+  /// PeerConnection と関連リソースを解放する
+  ///
+  /// 解放順序:
+  /// 1. DataChannel の Observer 解除と解放
+  /// 2. 進行中の getStats の Dart 側追跡解除
+  ///    (native callback リソースは `_handleStatsDelivered` が自己解放)
+  /// 3. ローカルビデオトラックの解放
+  /// 4. PeerConnection の解放
+  /// 5. C コールバックブリッジの破棄
+  /// 6. NativeCallable の解放
+  ///
+  /// リモートビデオトラックは呼び出し元が本メソッドの前に解放する
+  /// (例: `SoraConnection._teardownNativeSession` は
+  /// `RemoteTrackManager.detachAllRemoteVideoTracks` を先に実行する)。
+  /// PeerConnection の Release 後だと VideoTrack のデストラクタが
+  /// 無効な VideoSource に対して UnregisterObserver を呼んでクラッシュする。
+  ///
+  /// 進行中の getStats は Dart 側追跡だけを外し、native 資源は孤立保持する
+  /// (遅延コールバック到着時の native クラッシュ回避)。孤立の増加は
+  /// `maxOrphanedStatsRequests` による背圧で有界にする。
+  @visibleForTesting
+  void closePeerConnection() {
+    // DataChannel をクリーンアップする
+    _cleanupNotifyDataChannel();
+    _cleanupPushDataChannel();
+    _cleanupRpcDataChannel();
+    _cleanupStatsDataChannel();
+    _cleanupCustomDataChannels();
+    _cleanupSignalingDataChannel();
+
+    // 進行中の getStats があればエラー完了させる。
+    // native callback リソース (cbsPtr, NativeCallable) は
+    // callback 未到達の可能性があるため、アクティブな request から切り離して
+    // callback 到着時に自身の request だけを解放させる。
+    //
+    // libwebrtc-c m148 系では、`pcRelease()` 後に pending callback が
+    // 必ず到達する契約は確認できない。
+    // `pcGetStats` は callback 登録付きの非同期要求だが、`pcRelease` は
+    // `Close` の callback 完了待ち契約を持たないため、破棄タイミング次第で
+    // stats callback が drop されうる。
+    // そのため callback 未到達時は孤立 request が残りうるが、
+    // 解放済みメモリ参照の回避を優先して意図的に許容する。
+    // 孤立の増加は `maxOrphanedStatsRequests` による背圧で有界にする。
+    // `dispose` 時の即時解放は行わない (遅延コールバック到着時の
+    // native クラッシュを避けるため)。
+    cleanupPendingStatsRequest()?.completeError(
+      StateError('PeerConnection closed during getStats.'),
+    );
+
+    if (_audioRtpSender != null) {
+      _lib.rtpSenderRelease(_audioRtpSender!);
+      _audioRtpSender = null;
+    }
+
+    // ビデオ RtpSender を解放する
+    if (_videoRtpSender != null) {
+      _lib.rtpSenderRelease(_videoRtpSender!);
+      _videoRtpSender = null;
+    }
+    _pendingEncodings = null;
+    if (_pendingLocalAudioTrackRef != null) {
+      _lib.audioTrackRelease(
+        _lib.audioTrackRefcountedGet(_pendingLocalAudioTrackRef!),
+      );
+    }
+    if (_pendingLocalVideoTrackRef != null) {
+      _lib.videoTrackRelease(
+        _lib.videoTrackRefcountedGet(_pendingLocalVideoTrackRef!),
+      );
+    }
+    _pendingLocalAudioTrackRef = null;
+    _pendingLocalVideoTrackRef = null;
+    _pendingLocalStreamId = null;
+
+    // PeerConnection を解放する
+    if (_pcRef != null) {
+      _lib.pcRelease(_lib.pcRefcountedGet(_pcRef!));
+      _pcRef = null;
+    }
+
+    // C コールバックブリッジを破棄する (observer も含む)
+    if (_observerBridge != null) {
+      _lib.soraObserverBridgeDestroy(_observerBridge!);
+      _observerBridge = null;
+    }
+
+    // NativeCallable を閉じる
+    for (final nc in _nativeCallables) {
+      nc.close();
+    }
+    _nativeCallables.clear();
+
+    // SDP コールバックをクリアする
+    _sdpCallbacks?.cancel();
+    _sdpCallbacks = null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // シグナリングメッセージ処理
+  // ---------------------------------------------------------------------------
+
+  /// 初回 offer を処理し、必要なら `PeerConnection` を生成して answer へ進む。
+  ///
+  /// simulcast 用 encodings の退避、offer config の PC 反映、
+  /// `SdpNegotiationCallbacks` の初期化までをまとめて行う。
+  void handleOffer(Map<String, Object?> message) {
+    if (_disposed) return;
+    final sdp = message['sdp'] as String?;
+    if (sdp == null) {
+      _emitState(
+        'error',
+        SoraErrorCode.offerInvalid,
+        'Offer SDP is null.',
+        sessionGeneration: _sessionGeneration,
+      );
+      return;
+    }
+
+    // offer メッセージから encodings を保存する (simulcast 用)
+    final encodingsRaw = message['encodings'];
+    if (encodingsRaw is List<Object?>) {
+      _pendingEncodings = encodingsRaw
+          .whereType<Map<Object?, Object?>>()
+          .map(
+            (Map<Object?, Object?> entry) => Map<String, Object?>.from(
+              entry.map(
+                (Object? key, Object? value) => MapEntry('$key', value),
+              ),
+            ),
+          )
+          .toList();
+      _emitDebug(
+        'native: offer encodings=${_pendingEncodings!.length} entries',
+      );
+    }
+
+    final offerConfig = message['config'] as Map<String, Object?>?;
+    if (!_ensurePeerConnection(offerConfig)) {
+      return;
+    }
+    if (_pcRef == null) {
+      _emitState(
+        'error',
+        SoraErrorCode.offerInvalid,
+        'PeerConnection is not available.',
+        sessionGeneration: _sessionGeneration,
+      );
+      return;
+    }
+
+    _sdpCallbacks?.cancel();
+    final capturedEncodings = _pendingEncodings;
+    _sdpCallbacks = SdpNegotiationCallbacks(
+      lib: _lib,
+      consts: _consts,
+      emitState: _emitState,
+      emitDebug: _emitDebug,
+      emitSignalingMessage: _emitSignalingMessage,
+      addLocalTracks: _addLocalTracks,
+      applyEncodings: capturedEncodings != null && capturedEncodings.isNotEmpty
+          ? () => _applySimulcastEncodings(capturedEncodings)
+          : null,
+    );
+    _sdpCallbacks!.setRemoteDescription(_pcRef!, sdp);
+  }
+
+  /// 再ネゴシエーション用 re-offer を処理する。
+  ///
+  /// 既存 `PeerConnection` を使い回し、ローカルトラック追加はスキップしたまま
+  /// `re-answer` を返す。
+  void handleReOffer(Map<String, Object?> message) {
+    if (_disposed) return;
+    final sdp = message['sdp'] as String?;
+    if (sdp == null) {
+      _emitState(
+        'error',
+        SoraErrorCode.reofferInvalid,
+        'Re-offer SDP is null.',
+        sessionGeneration: _sessionGeneration,
+      );
+      return;
+    }
+    if (_pcRef == null) {
+      _emitState(
+        'error',
+        SoraErrorCode.reofferInvalid,
+        'PeerConnection is not available.',
+        sessionGeneration: _sessionGeneration,
+      );
+      return;
+    }
+
+    _sdpCallbacks?.cancel();
+    _sdpCallbacks = SdpNegotiationCallbacks(
+      lib: _lib,
+      consts: _consts,
+      emitState: _emitState,
+      emitDebug: _emitDebug,
+      emitSignalingMessage: _emitSignalingMessage,
+      addLocalTracks: _addLocalTracks,
+      applyEncodings: null,
+    );
+    _sdpCallbacks!.setRemoteDescription(
+      _pcRef!,
+      sdp,
+      answerType: 're-answer',
+      isReOffer: true,
+    );
+  }
+
+  /// リモートから受け取った ICE candidate を parse・追加する。
+  ///
+  /// parse 失敗時は `SdpParseError` から説明文字列を取り出し、接続エラーとして
+  /// Dart 側へ返す。
+  void handleCandidate(Map<String, Object?> message) {
+    if (_disposed || _pcRef == null) return;
+    final candidateStr = message['candidate'] as String?;
+    if (candidateStr == null) return;
+    final sdpMid = message['sdpMid'] as String? ?? '';
+    final sdpMLineIndex = (message['sdpMLineIndex'] as num?)?.toInt() ?? 0;
+
+    _emitDebug('native: remote_candidate mid=$sdpMid text=$candidateStr');
+
+    final midUtf8 = sdpMid.toNativeUtf8();
+    final midNative = midUtf8.cast<Char>();
+    final candUtf8 = candidateStr.toNativeUtf8();
+    final candidateNative = candUtf8.cast<Char>();
+    final parseErrorPtr = calloc<Pointer<WebrtcSdpParseErrorUnique>>();
+
+    final ice = _lib.createIceCandidate(
+      midNative,
+      midUtf8.length,
+      sdpMLineIndex,
+      candidateNative,
+      candUtf8.length,
+      parseErrorPtr,
+    );
+
+    if (ice != nullptr) {
+      _lib.pcAddIceCandidate(_lib.pcRefcountedGet(_pcRef!), ice);
+      _lib.iceCandidateDelete(ice);
+    } else if (parseErrorPtr.value != nullptr) {
+      final descPtr = calloc<Pointer<Char>>();
+      final lenPtr = calloc<Size>();
+      _lib.sdpParseErrorDescription(
+        _lib.sdpParseErrorUniqueGet(parseErrorPtr.value),
+        descPtr,
+        lenPtr,
+      );
+      final desc = lenPtr.value > 0
+          ? descPtr.value.cast<Utf8>().toDartString(length: lenPtr.value)
+          : '';
+      calloc.free(descPtr);
+      calloc.free(lenPtr);
+      _lib.sdpParseErrorUniqueDelete(parseErrorPtr.value);
+      _emitState(
+        'error',
+        'candidate_parse_failed',
+        'Candidate parse failed: $desc',
+        sessionGeneration: _sessionGeneration,
+      );
+    }
+
+    calloc.free(parseErrorPtr);
+    calloc.free(midNative);
+    calloc.free(candidateNative);
+  }
+
+  // サーバー主導の disconnect メッセージを state イベントへ変換する。
+  void handleDisconnect() {
+    if (_disposed) return;
+    _emitState(
+      'disconnected',
+      SoraDisconnectReason.serverDisconnect,
+      null,
+      sessionGeneration: _sessionGeneration,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Stats
+  // ---------------------------------------------------------------------------
+
+  /// 進行中の getStats の Dart 側追跡 (Completer / Timer) を解除し、
+  /// 未完了の Completer を返す。
+  ///
+  /// NativeCallable と cbsPtr はアクティブな request から切り離し、
+  /// 遅延 callback の到着に備えて孤立 request として保持し続ける。
+  /// これらは onStatsDelivered コールバック自身が到着時に解放する。
+  ///
+  /// disconnect() / dispose() 時は Dart 側追跡だけを解除し、
+  /// native リソースの解放は onStatsDelivered コールバックへ委譲する。
+  ///
+  /// タイムアウト後にネイティブリソースを解放すると、
+  /// 遅延コールバック到着時に native 側のクラッシュを起こすため解放しない。
+  ///
+  /// 二重呼び出しへの対策として、2 回目以降は null を返すようにしている。
+  @visibleForTesting
+  Completer<String?>? cleanupPendingStatsRequest() {
+    final request = _pendingStatsRequest;
+    if (request == null) {
+      return null;
+    }
+    _pendingStatsRequest = null;
+    return _detachStatsRequestDartSide(request);
+  }
+
+  @visibleForTesting
+  void setupPendingStatsForTest(
+    Completer<String?>? completer,
+    Timer? timer, {
+    Pointer<RTCStatsCollectorCallbackCbs>? cbsPtr,
+    NativeCallable<Function>? nativeCallable,
+  }) {
+    if (completer == null &&
+        timer == null &&
+        cbsPtr == null &&
+        nativeCallable == null) {
+      _pendingStatsRequest = null;
+      return;
+    }
+
+    final request = _StatsRequest(
+      id: ++_statsRequestGeneration,
+      completer: completer,
+      timer: timer,
+      cbsPtr: cbsPtr,
+      nativeCallable: nativeCallable,
+    );
+
+    if (completer == null && timer == null) {
+      _orphanedStatsRequests.add(request);
+    } else {
+      _pendingStatsRequest = request;
+    }
+  }
+
+  @visibleForTesting
+  bool get hasPendingStatsRequestForTest => _pendingStatsRequest != null;
+
+  @visibleForTesting
+  int get orphanedStatsRequestCountForTest => _orphanedStatsRequests.length;
+
+  // アクティブな request から Dart 側の待ち合わせだけを外す。
+  //
+  // native callback リソースは libwebrtc-c が後から参照する可能性があるため、
+  // callback 到着時まで孤立 request として保持する。
+  Completer<String?>? _detachStatsRequestDartSide(_StatsRequest request) {
+    final completer = request.completer;
+    final timer = request.timer;
+    request.completer = null;
+    request.timer = null;
+    timer?.cancel();
+
+    if (request.cbsPtr != null || request.nativeCallable != null) {
+      _orphanedStatsRequests.add(request);
+    }
+    return completer;
+  }
+
+  // callback 到着時に request をアクティブ / 孤立の管理対象から外す。
+  //
+  // callback は自身が捕捉した request だけを掃除する。これにより、
+  // 古い callback が新しい `getStats()` の request を閉じることを防ぐ。
+  Completer<String?>? _takeStatsRequestForCallback(_StatsRequest request) {
+    if (identical(_pendingStatsRequest, request)) {
+      _pendingStatsRequest = null;
+    } else {
+      _orphanedStatsRequests.remove(request);
+    }
+
+    final completer = request.completer;
+    final timer = request.timer;
+    request.completer = null;
+    request.timer = null;
+    timer?.cancel();
+    return completer;
+  }
+
+  // callback 到着後に native callback リソースを解放する。
+  //
+  // timeout / closePeerConnection の時点では libwebrtc-c がまだ callback
+  // ポインタを保持している可能性があるため、ここでのみ解放する。
+  void _releaseStatsRequestNativeResources(_StatsRequest request) {
+    request.nativeCallable?.close();
+    request.nativeCallable = null;
+
+    final cbsPtr = request.cbsPtr;
+    if (cbsPtr != null) {
+      calloc.free(cbsPtr);
+      request.cbsPtr = null;
+    }
+  }
+
+  // `RTCStatsReport` の参照だけを解放する。
+  void _releaseStatsReport(Pointer<WebrtcRTCStatsReportRefcounted> reportRef) {
+    if (reportRef == nullptr) {
+      return;
+    }
+    final report = _lib.rtcStatsReportRefcountedGet(reportRef);
+    _lib.rtcStatsReportRelease(report);
+  }
+
+  // `RTCStatsReport` を JSON へ変換し、最後に参照を必ず解放する。
+  String? _statsReportToJson(
+    Pointer<WebrtcRTCStatsReportRefcounted> reportRef,
+  ) {
+    if (reportRef == nullptr) {
+      return null;
+    }
+    final report = _lib.rtcStatsReportRefcountedGet(reportRef);
+    try {
+      final stats = _lib.rtcStatsReportToJson(report);
+      return stdStringToDart(_lib, stats);
+    } finally {
+      _lib.rtcStatsReportRelease(report);
+    }
+  }
+
+  // `getStats()` の native callback を処理する。
+  void _handleStatsDelivered(
+    _StatsRequest request,
+    Pointer<WebrtcRTCStatsReportRefcounted> reportRef,
+  ) {
+    final completer = _takeStatsRequestForCallback(request);
+    _releaseStatsRequestNativeResources(request);
+
+    if (_pcRef == null || completer == null || completer.isCompleted) {
+      _releaseStatsReport(reportRef);
+      return;
+    }
+
+    try {
+      final json = _statsReportToJson(reportRef);
+      completer.complete(json);
+    } catch (error, stackTrace) {
+      completer.completeError(error, stackTrace);
+    }
+  }
+
+  /// WebRTC 統計情報を取得する。
+  ///
+  /// 公開 API の `RTCPeerConnection.getStats()` 互換を保つため、
+  /// `get` をあえて残している。
+  ///
+  /// 孤立 request が `maxOrphanedStatsRequests` に達している場合は、
+  /// 新規発行せず同期的に `StateError` を throw する。上限到達時は PC 未生成か
+  /// 否かにかかわらず throw し、上限未達で PC 未生成の場合は null を返す。
+  /// 進行中の request がある場合はそちらの future を返す。
+  /// 上限到達後はコールバック到着による自然減まで拒否が続く。
+  /// 自然減が起きない場合はクライアント再生成が必要になる。
+  Future<String?> getStats() {
+    if (_disposed) {
+      return Future<String?>.value(null);
+    }
+    // Future 共有: 進行中の getStats() がある場合、その future を返す
+    final pendingCompleter = _pendingStatsRequest?.completer;
+    if (pendingCompleter != null) {
+      return pendingCompleter.future;
+    }
+    // 通常は発生しないが、アクティブな request に Dart 側の待ち合わせがない場合は
+    // 多重に native request を発行せず null を返す。
+    if (_pendingStatsRequest != null) {
+      return Future<String?>.value(null);
+    }
+    // 孤立 request の無制限滞留を抑えるため、上限到達時は新規発行を拒否する。
+    // 孤立側の即時解放は行わない (遅延コールバック到着時の native クラッシュを
+    // 避けるため)。
+    if (_orphanedStatsRequests.length >= maxOrphanedStatsRequests) {
+      throw StateError(
+        'Too many orphaned getStats requests '
+        '(${_orphanedStatsRequests.length}).',
+      );
+    }
+    if (_pcRef == null) {
+      return Future<String?>.value(null);
+    }
+
+    final completer = Completer<String?>();
+    final cbsPtr = calloc<RTCStatsCollectorCallbackCbs>();
+    final request = _StatsRequest(
+      id: ++_statsRequestGeneration,
+      completer: completer,
+      cbsPtr: cbsPtr,
+    );
+    _pendingStatsRequest = request;
+
+    final onStatsDelivered =
+        NativeCallable<
+          Void Function(Pointer<WebrtcRTCStatsReportRefcounted>, Pointer<Void>)
+        >.listener((
+          Pointer<WebrtcRTCStatsReportRefcounted> reportRef,
+          Pointer<Void> _,
+        ) {
+          _handleStatsDelivered(request, reportRef);
+        });
+    request.nativeCallable = onStatsDelivered;
+
+    // タイムアウトは 5 秒とする
+    request.timer = Timer(const Duration(seconds: 5), () {
+      cleanupPendingStatsRequest()?.completeError(
+        TimeoutException('getStats() timed out.', const Duration(seconds: 5)),
+      );
+    });
+
+    cbsPtr.ref.onStatsDelivered = onStatsDelivered.nativeFunction;
+    _lib.pcGetStats(_lib.pcRefcountedGet(_pcRef!), cbsPtr, nullptr);
+    return completer.future;
+  }
+
+  /// 既存の audio sender に別の audio track を差し替える。
+  ///
+  /// `AudioTrack -> MediaStreamTrack` への cast を挟み、参照解放は
+  /// `finally` で必ず行う。
+  void replaceAudioTrack(
+    Pointer<WebrtcAudioTrackInterfaceRefcounted> audioTrackRef,
+  ) {
+    final sender = _audioRtpSender;
+    if (sender == null) {
+      throw StateError('Audio sender is not available.');
+    }
+
+    final trackRef = _lib.audioTrackCastToMediaStreamTrack(audioTrackRef);
+    try {
+      final result = _lib.rtpSenderSetTrack(
+        sender,
+        _lib.mediaStreamTrackRefcountedGet(trackRef),
+      );
+      if (result == 0) {
+        throw StateError('Failed to replace audio track on sender.');
+      }
+    } finally {
+      _lib.mediaStreamTrackRelease(
+        _lib.mediaStreamTrackRefcountedGet(trackRef),
+      );
+    }
+  }
+
+  /// 既存の video sender に別の video track を差し替える。
+  void replaceVideoTrack(
+    Pointer<WebrtcVideoTrackInterfaceRefcounted> videoTrackRef,
+  ) {
+    final sender = _videoRtpSender;
+    if (sender == null) {
+      throw StateError('Video sender is not available.');
+    }
+
+    final trackRef = _lib.videoTrackCastToMediaStreamTrack(videoTrackRef);
+    try {
+      final result = _lib.rtpSenderSetTrack(
+        sender,
+        _lib.mediaStreamTrackRefcountedGet(trackRef),
+      );
+      if (result == 0) {
+        throw StateError('Failed to replace video track on sender.');
+      }
+    } finally {
+      _lib.mediaStreamTrackRelease(
+        _lib.mediaStreamTrackRefcountedGet(trackRef),
+      );
+    }
+  }
+
+  /// audio sender から track を外し、送信を停止する。
+  void removeAudioTrack() {
+    final sender = _audioRtpSender;
+    if (sender == null) {
+      throw StateError('Audio sender is not available.');
+    }
+    final result = _lib.rtpSenderSetTrack(sender, nullptr);
+    if (result == 0) {
+      throw StateError('Failed to remove audio track from sender.');
+    }
+  }
+
+  /// video sender から track を外し、映像送信を停止する。
+  void removeVideoTrack() {
+    final sender = _videoRtpSender;
+    if (sender == null) {
+      throw StateError('Video sender is not available.');
+    }
+    final result = _lib.rtpSenderSetTrack(sender, nullptr);
+    if (result == 0) {
+      throw StateError('Failed to remove video track from sender.');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // PeerConnectionFactory
+  // ---------------------------------------------------------------------------
+
+  // インスタンス側で使う `PeerConnectionFactory` 参照を共有 factory へ向ける。
+  //
+  // factory 本体は shared 側の寿命に従うため、ここでは参照を保持するだけ。
+  void _createPeerConnectionFactory() {
+    if (_factoryRef != null) return;
+    _ensureSharedFactory();
+    _factoryRef = _sharedFactoryRef;
+  }
+
+  // ---------------------------------------------------------------------------
+  // PeerConnection
+  // ---------------------------------------------------------------------------
+
+  // `PeerConnection` 未生成なら構成を反映して新規生成する。
+  //
+  // RTCConfiguration、ICE サーバー、observer bridge、DataChannel 受信口を
+  // まとめて初期化し、生成エラーは Dart 側 event として返す。
+  bool _ensurePeerConnection(Map<String, Object?>? offerConfig) {
+    if (_pcRef != null) return true;
+    _createPeerConnectionFactory();
+    // _sessionGeneration をクロージャでキャプチャする。
+    // これにより旧 connect() 由来の遅延イベントが新 connect() の世代で
+    // タグ付けされるのを防ぐ。
+    final sessionGen = _sessionGeneration;
+
+    final rtcConfig = _lib.rtcConfigurationNew();
+    _lib.rtcConfigurationSetSdpSemantics(
+      rtcConfig,
+      _consts.sdpSemanticsUnifiedPlan,
+    );
+    _lib.rtcConfigurationSetEnableGcmCryptoSuites(rtcConfig, 1);
+
+    // ICE Transport Policy
+    final iceTransportPolicy = offerConfig?['iceTransportPolicy'] as String?;
+    if (iceTransportPolicy == 'relay') {
+      _lib.rtcConfigurationSetType(rtcConfig, _consts.iceTransportsTypeRelay);
+      _emitDebug('native: ice_transport_policy=relay');
+    }
+
+    // ICE サーバー
+    final iceServers = offerConfig?['iceServers'] as List<Object?>?;
+    if (iceServers != null && iceServers.isNotEmpty) {
+      final servers = _lib.rtcConfigurationGetServers(rtcConfig);
+      for (final serverObj in iceServers) {
+        if (serverObj is! Map) continue;
+        final serverMap = Map<String, Object?>.from(
+          serverObj.map((k, v) => MapEntry('$k', v)),
+        );
+        final server = _lib.iceServerNew();
+        // URL
+        final urlVector = _lib.iceServerGetUrls(server);
+        final urls = serverMap['urls'];
+        if (urls is List) {
+          for (final u in urls) {
+            if (u is String) {
+              final urlStr = u.toNativeUtf8().cast<Char>();
+              final stdStr = _lib.stdStringNewFromCstr(urlStr);
+              _lib.stdStringVectorPushBack(
+                urlVector,
+                _lib.stdStringUniqueGet(stdStr),
+              );
+              _lib.stdStringUniqueDelete(stdStr);
+              calloc.free(urlStr);
+            }
+          }
+        } else if (urls is String) {
+          final urlStr = urls.toNativeUtf8().cast<Char>();
+          final stdStr = _lib.stdStringNewFromCstr(urlStr);
+          _lib.stdStringVectorPushBack(
+            urlVector,
+            _lib.stdStringUniqueGet(stdStr),
+          );
+          _lib.stdStringUniqueDelete(stdStr);
+          calloc.free(urlStr);
+        }
+        // ユーザー名
+        final username = serverMap['username'] as String?;
+        if (username != null) {
+          final usernameNative = username.toNativeUtf8();
+          _lib.iceServerSetUsername(
+            server,
+            usernameNative.cast<Char>(),
+            usernameNative.length,
+          );
+          calloc.free(usernameNative);
+        }
+        // パスワード
+        final credential = serverMap['credential'] as String?;
+        if (credential != null) {
+          final credNative = credential.toNativeUtf8();
+          _lib.iceServerSetPassword(
+            server,
+            credNative.cast<Char>(),
+            credNative.length,
+          );
+          calloc.free(credNative);
+        }
+        _lib.iceServerVectorPushBack(servers, server);
+        _lib.iceServerDelete(server);
+      }
+    }
+
+    // C コールバックブリッジ経由で PeerConnectionObserver を作成する
+    // NativeCallable.listener には FFI 互換のプリミティブ型（整数・raw pointer）のみ
+    // 渡されるため、Dart GC の干渉を受けず安全
+    final ncConnectionChange =
+        NativeCallable<Void Function(Int32, Pointer<Void>)>.listener(
+          (int state, Pointer<Void> _) =>
+              _onConnectionChange(state, sessionGeneration: sessionGen),
+        );
+    final ncIceConnectionChange =
+        NativeCallable<Void Function(Int32, Pointer<Void>)>.listener(
+          (int state, Pointer<Void> _) =>
+              _onStandardizedIceConnectionChange(state),
+        );
+    final ncIceGatheringChange =
+        NativeCallable<Void Function(Int32, Pointer<Void>)>.listener(
+          (int state, Pointer<Void> _) => _onIceGatheringChange(state),
+        );
+    final ncIceCandidate =
+        NativeCallable<
+          Void Function(Pointer<Char>, Pointer<Char>, Int32, Pointer<Void>)
+        >.listener((
+          Pointer<Char> sdp,
+          Pointer<Char> mid,
+          int mlineIndex,
+          Pointer<Void> _,
+        ) {
+          _onIceCandidateExtracted(sdp, mid, mlineIndex);
+        });
+    final ncOnTrack =
+        NativeCallable<
+          Void Function(
+            Pointer<Void>,
+            Pointer<Char>,
+            Pointer<Char>,
+            Pointer<Void>,
+          )
+        >.listener((
+          Pointer<Void> trackPtr,
+          Pointer<Char> kindPtr,
+          Pointer<Char> trackIdPtr,
+          Pointer<Void> _,
+        ) {
+          final kind = kindPtr == nullptr
+              ? ''
+              : kindPtr.cast<Utf8>().toDartString();
+          final trackId = trackIdPtr == nullptr
+              ? null
+              : trackIdPtr.cast<Utf8>().toDartString();
+          if (kindPtr != nullptr) {
+            malloc.free(kindPtr);
+          }
+          if (trackIdPtr != nullptr) {
+            malloc.free(trackIdPtr);
+          }
+          _onEvent('remote_track_added', {
+            'kind': kind,
+            if (trackPtr != nullptr) 'trackAddress': trackPtr.address,
+            if (trackId != null && trackId.isNotEmpty) 'trackId': trackId,
+          });
+          if (kind == 'video') {
+            // C 側で AddRef 済みのビデオトラックポインタを受け取る
+            if (trackPtr != nullptr) {
+              _onEvent('remote_video_track_added', {
+                'trackAddress': trackPtr.address,
+                if (trackId != null && trackId.isNotEmpty) 'trackId': trackId,
+              });
+            }
+          }
+        });
+    final ncOnRemoveTrack =
+        NativeCallable<
+          Void Function(
+            Pointer<Void>,
+            Pointer<Char>,
+            Pointer<Char>,
+            Pointer<Void>,
+          )
+        >.listener((
+          Pointer<Void> trackPtr,
+          Pointer<Char> kindPtr,
+          Pointer<Char> trackIdPtr,
+          Pointer<Void> _,
+        ) {
+          final kind = kindPtr == nullptr
+              ? ''
+              : kindPtr.cast<Utf8>().toDartString();
+          final trackId = trackIdPtr == nullptr
+              ? null
+              : trackIdPtr.cast<Utf8>().toDartString();
+          if (kindPtr != nullptr) {
+            malloc.free(kindPtr);
+          }
+          if (trackIdPtr != nullptr) {
+            malloc.free(trackIdPtr);
+          }
+          _onEvent('remote_track_removed', {
+            'kind': kind,
+            if (trackPtr != nullptr) 'trackAddress': trackPtr.address,
+            if (trackId != null && trackId.isNotEmpty) 'trackId': trackId,
+          });
+          if (kind == 'video') {
+            if (trackPtr != nullptr) {
+              _onEvent('remote_video_track_removed', {
+                'trackAddress': trackPtr.address,
+                if (trackId != null && trackId.isNotEmpty) 'trackId': trackId,
+              });
+            }
+          }
+        });
+    final ncOnDataChannel =
+        NativeCallable<
+          Void Function(Pointer<Void>, Pointer<Char>, Pointer<Void>)
+        >.listener((
+          Pointer<Void> dcPtr,
+          Pointer<Char> labelPtr,
+          Pointer<Void> _,
+        ) {
+          final label = labelPtr == nullptr
+              ? ''
+              : labelPtr.cast<Utf8>().toDartString();
+          if (labelPtr != nullptr) malloc.free(labelPtr);
+          _onDataChannelFromBridge(dcPtr, label);
+        });
+    final ncOnDebug =
+        NativeCallable<Void Function(Pointer<Char>, Pointer<Void>)>.listener((
+          Pointer<Char> msg,
+          Pointer<Void> _,
+        ) {
+          _onDebugFromBridge(msg);
+        });
+
+    _nativeCallables.addAll([
+      ncConnectionChange,
+      ncIceConnectionChange,
+      ncIceGatheringChange,
+      ncIceCandidate,
+      ncOnTrack,
+      ncOnRemoveTrack,
+      ncOnDataChannel,
+      ncOnDebug,
+    ]);
+
+    _observerBridge = _lib.soraObserverBridgeCreate(
+      ncConnectionChange.nativeFunction,
+      ncIceConnectionChange.nativeFunction,
+      ncIceGatheringChange.nativeFunction,
+      ncIceCandidate.nativeFunction,
+      ncOnTrack.nativeFunction,
+      ncOnRemoveTrack.nativeFunction,
+      ncOnDataChannel.nativeFunction,
+      ncOnDebug.nativeFunction,
+      nullptr,
+    );
+    if (_observerBridge == null) {
+      _cleanupNativeCallablesFromRegistries([
+        ncConnectionChange,
+        ncIceConnectionChange,
+        ncIceGatheringChange,
+        ncIceCandidate,
+        ncOnTrack,
+        ncOnRemoveTrack,
+        ncOnDataChannel,
+        ncOnDebug,
+      ]);
+      _nativeCallables.clear();
+      _lib.rtcConfigurationDelete(rtcConfig);
+      _emitState(
+        'error',
+        SoraErrorCode.observerBridgeCreationFailed,
+        'Failed to create observer bridge.',
+        sessionGeneration: _sessionGeneration,
+      );
+      return false;
+    }
+    final pcObserver = _lib.soraObserverBridgeGetObserver(_observerBridge!);
+    if (pcObserver == nullptr) {
+      _lib.soraObserverBridgeDestroy(_observerBridge!);
+      _observerBridge = null;
+      _cleanupNativeCallablesFromRegistries([
+        ncConnectionChange,
+        ncIceConnectionChange,
+        ncIceGatheringChange,
+        ncIceCandidate,
+        ncOnTrack,
+        ncOnRemoveTrack,
+        ncOnDataChannel,
+        ncOnDebug,
+      ]);
+      _nativeCallables.clear();
+      _lib.rtcConfigurationDelete(rtcConfig);
+      _emitState(
+        'error',
+        SoraErrorCode.observerBridgeObserverCreationFailed,
+        'Failed to create peer connection observer.',
+        sessionGeneration: _sessionGeneration,
+      );
+      return false;
+    }
+
+    final pcDeps = _lib.pcDependenciesNew(pcObserver);
+    if (Platform.isAndroid) {
+      // libwebrtc の限定的な組み込みルート CA 一覧ではなく、
+      // Android のシステム信頼ストアで TURN-TLS 証明書を検証する。
+      _lib.androidSetSystemTlsCertVerifier(pcDeps);
+    } else if (Platform.isIOS || Platform.isMacOS) {
+      // Apple の Security framework へ証明書チェーンを渡し、
+      // システム信頼ストアで TURN-TLS 証明書を検証する。
+      _lib.appleSetSystemTlsCertVerifier(pcDeps);
+    }
+    final pcRefPtr = calloc<Pointer<WebrtcPeerConnectionInterfaceRefcounted>>();
+    final errorPtr = calloc<Pointer<WebrtcRTCErrorUnique>>();
+
+    _lib.pcFactoryCreatePeerConnectionOrError(
+      _lib.pcFactoryRefcountedGet(_factoryRef!),
+      rtcConfig,
+      pcDeps,
+      pcRefPtr,
+      errorPtr,
+    );
+
+    _pcRef = pcRefPtr.value == nullptr ? null : pcRefPtr.value;
+    final errMsg = rtcErrorMessage(_lib, errorPtr.value);
+    if (errMsg != null) {
+      _emitState(
+        'error',
+        SoraErrorCode.createPeerConnectionFailed,
+        errMsg,
+        sessionGeneration: _sessionGeneration,
+      );
+    }
+    if (errMsg != null || _pcRef == null) {
+      if (errMsg == null) {
+        _emitState(
+          'error',
+          SoraErrorCode.createPeerConnectionFailed,
+          'PeerConnection creation returned null.',
+          sessionGeneration: _sessionGeneration,
+        );
+      }
+      if (_pcRef != null) {
+        _lib.pcRelease(_lib.pcRefcountedGet(_pcRef!));
+        _pcRef = null;
+      }
+      if (_observerBridge != null) {
+        _lib.soraObserverBridgeDestroy(_observerBridge!);
+        _observerBridge = null;
+      }
+      _cleanupNativeCallablesFromRegistries(
+        List<NativeCallable<dynamic>>.from(_nativeCallables),
+      );
+    }
+
+    calloc.free(pcRefPtr);
+    calloc.free(errorPtr);
+    _lib.pcDependenciesDelete(pcDeps);
+    _lib.rtcConfigurationDelete(rtcConfig);
+
+    // Windows では作成直後に ADM を補正する (失敗しても接続は継続)。
+    if (errMsg == null && _pcRef != null) {
+      _configureWindowsAudioDeviceAfterPeerConnection(emitDebug: _emitDebug);
+    }
+
+    return errMsg == null && _pcRef != null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // ローカルトラック追加
+  // ---------------------------------------------------------------------------
+
+  // connect 時に預かったローカルトラックを role / publish 設定に応じて追加する。
+  void _addLocalTracks() {
+    final role = _config['role'] as String?;
+    final isSend = role == 'sendonly' || role == 'sendrecv';
+    if (!isSend) return;
+
+    // connect(stream) で渡された track だけを sender に追加する。
+    if (_config['audio'] != false && _pendingLocalAudioTrackRef != null) {
+      _addExistingLocalAudioTrack(_pendingLocalAudioTrackRef!);
+    }
+    if (_config['video'] != false && _pendingLocalVideoTrackRef != null) {
+      _addExistingLocalVideoTrack(_pendingLocalVideoTrackRef!);
+    }
+  }
+
+  // connect 時に受け取った audio track を `pcAddTrack` で sender へ紐付ける。
+  //
+  // `pcAddTrack` 成功時は sender を AddRef して保持し、後続の track 差し替えや
+  // remove 操作で再利用する。
+  void _addExistingLocalAudioTrack(
+    Pointer<WebrtcAudioTrackInterfaceRefcounted> audioTrackRef,
+  ) {
+    if (_pcRef == null) return;
+
+    // 録音開始 (pcAddTrack) の直前にも再適用する。PeerConnection 作成直後の
+    // 再適用は rc=0 を返しても実機で録音に反映されない事象があるため。
+    if (_shouldConfigureWindowsAudioDevice) {
+      _restoreSelectedRecordingDevice(emitDebug: _emitDebug);
+    }
+
+    final trackRef = _lib.audioTrackCastToMediaStreamTrack(audioTrackRef);
+    final streamIds = _createStreamIdVector();
+    final senderRefPtr = calloc<Pointer<WebrtcRtpSenderInterfaceRefcounted>>();
+    final errorPtr = calloc<Pointer<WebrtcRTCErrorUnique>>();
+
+    _lib.pcAddTrack(
+      _lib.pcRefcountedGet(_pcRef!),
+      trackRef,
+      streamIds,
+      senderRefPtr,
+      errorPtr,
+    );
+
+    final errMsg = rtcErrorMessage(_lib, errorPtr.value);
+    if (errMsg != null) {
+      _emitState(
+        'error',
+        SoraErrorCode.addAudioTrackFailed,
+        'Failed to add audio track: $errMsg',
+        sessionGeneration: _sessionGeneration,
+      );
+    } else {
+      _emitDebug('native: local_audio_track_added');
+    }
+
+    if (senderRefPtr.value != nullptr) {
+      final sender = _lib.rtpSenderRefcountedGet(senderRefPtr.value);
+      _lib.rtpSenderAddRef(sender);
+      _audioRtpSender = sender;
+      _lib.rtpSenderRelease(_lib.rtpSenderRefcountedGet(senderRefPtr.value));
+    } else if (errMsg == null) {
+      _emitState(
+        'error',
+        SoraErrorCode.addAudioTrackFailed,
+        'Failed to get audio sender after pcAddTrack.',
+        sessionGeneration: _sessionGeneration,
+      );
+    }
+    calloc.free(senderRefPtr);
+    calloc.free(errorPtr);
+    _lib.stdStringVectorDelete(streamIds);
+    _lib.mediaStreamTrackRelease(_lib.mediaStreamTrackRefcountedGet(trackRef));
+    _lib.audioTrackRelease(_lib.audioTrackRefcountedGet(audioTrackRef));
+    if (_pendingLocalAudioTrackRef == audioTrackRef) {
+      _pendingLocalAudioTrackRef = null;
+    }
+  }
+
+  // connect 時に受け取った video track を sender に追加する。
+  //
+  // 映像 sender は simulcast parameter 更新で再利用するため、
+  // 成功時に `_videoRtpSender` へ保持する。
+  void _addExistingLocalVideoTrack(
+    Pointer<WebrtcVideoTrackInterfaceRefcounted> videoTrackRef,
+  ) {
+    if (_pcRef == null) {
+      return;
+    }
+
+    final trackRef = _lib.videoTrackCastToMediaStreamTrack(videoTrackRef);
+    final streamIds = _createStreamIdVector();
+    final senderRefPtr = calloc<Pointer<WebrtcRtpSenderInterfaceRefcounted>>();
+    final errorPtr = calloc<Pointer<WebrtcRTCErrorUnique>>();
+
+    _lib.pcAddTrack(
+      _lib.pcRefcountedGet(_pcRef!),
+      trackRef,
+      streamIds,
+      senderRefPtr,
+      errorPtr,
+    );
+
+    final errMsg = rtcErrorMessage(_lib, errorPtr.value);
+    if (errMsg != null) {
+      _emitState(
+        'error',
+        SoraErrorCode.addVideoTrackFailed,
+        'Failed to add video track: $errMsg',
+        sessionGeneration: _sessionGeneration,
+      );
+    } else {
+      _emitDebug('native: local_video_track_added');
+    }
+
+    if (senderRefPtr.value != nullptr) {
+      // simulcast encodings 設定用に RtpSender を保持する
+      final sender = _lib.rtpSenderRefcountedGet(senderRefPtr.value);
+      _lib.rtpSenderAddRef(sender);
+      _videoRtpSender = sender;
+      _lib.rtpSenderRelease(_lib.rtpSenderRefcountedGet(senderRefPtr.value));
+    } else if (errMsg == null) {
+      _emitState(
+        'error',
+        SoraErrorCode.addVideoTrackFailed,
+        'Failed to get video sender after pcAddTrack.',
+        sessionGeneration: _sessionGeneration,
+      );
+    }
+    calloc.free(senderRefPtr);
+    calloc.free(errorPtr);
+    _lib.stdStringVectorDelete(streamIds);
+    _lib.mediaStreamTrackRelease(_lib.mediaStreamTrackRefcountedGet(trackRef));
+    _lib.videoTrackRelease(_lib.videoTrackRefcountedGet(videoTrackRef));
+    if (_pendingLocalVideoTrackRef == videoTrackRef) {
+      _pendingLocalVideoTrackRef = null;
+    }
+  }
+
+  // `pcAddTrack` 用の stream id vector を構築する。
+  //
+  // libwebrtc-c 側は `std::string` vector を要求するため、Dart 文字列を
+  // 一時的に `std_string_unique` 化して push したあと即座に delete する。
+  Pointer<StdStringVector> _createStreamIdVector() {
+    final streamIds = _lib.stdStringVectorNew(0);
+    final streamId = _pendingLocalStreamId;
+    if (streamId == null || streamId.isEmpty) {
+      return streamIds;
+    }
+
+    final streamIdNative = streamId.toNativeUtf8().cast<Char>();
+    final stdString = _lib.stdStringNewFromCstr(streamIdNative);
+    _lib.stdStringVectorPushBack(streamIds, _lib.stdStringUniqueGet(stdString));
+    _lib.stdStringUniqueDelete(stdString);
+    calloc.free(streamIdNative);
+    return streamIds;
+  }
+
+  // offer の encodings を RtpSender に適用する (simulcast 用)
+  //
+  // active フラグは setRemoteDescription 後でないと反映されないため、
+  // setRemoteDescription 完了後に 1 回だけ呼ぶ。
+  // 引数で encodings を受け取り、_pendingEncodings への上書き競合を避ける。
+  void _applySimulcastEncodings(List<Map<String, Object?>>? encodings) {
+    if (encodings == null || encodings.isEmpty) return;
+    if (_videoRtpSender == null) return;
+
+    final params = _lib.rtpSenderGetParameters(_videoRtpSender!);
+    if (params == nullptr) return;
+
+    final existingEncodings = _lib.rtpParametersGetEncodings(params);
+    final existingSize = _lib.rtpEncodingParametersVectorSize(
+      existingEncodings,
+    );
+
+    // 既存の encodings 数と offer の encodings 数が一致する場合のみ更新する
+    // (WebRTC の制約上、encodings の数は変更できない)
+    if (existingSize == encodings.length) {
+      for (var i = 0; i < encodings.length; i++) {
+        final enc = encodings[i];
+        final nativeEnc = _lib.rtpEncodingParametersVectorGet(
+          existingEncodings,
+          i,
+        );
+
+        // rid
+        final rid = enc['rid'] as String?;
+        if (rid != null) {
+          final ridNative = rid.toNativeUtf8();
+          _lib.rtpEncodingParametersSetRid(
+            nativeEnc,
+            ridNative.cast<Char>(),
+            ridNative.length,
+          );
+          calloc.free(ridNative);
+        }
+
+        // active
+        if (enc.containsKey('active')) {
+          final active = enc['active'] == true ? 1 : 0;
+          _lib.rtpEncodingParametersSetActive(nativeEnc, active);
+        }
+
+        // C API の Int32 制約に合わせて maxBitrate をクランプする。
+        // 負の値は無効としてスキップ、上限超過は 0x7FFFFFFF (約 2.1 Gbps) に制限する。
+        final maxBitrate = enc['maxBitrate'] as num?;
+        if (maxBitrate != null) {
+          final intValue = maxBitrate.toInt();
+          if (intValue >= 0) {
+            final value = intValue > 0x7FFFFFFF ? 0x7FFFFFFF : intValue;
+            final valuePtr = calloc<Int32>();
+            valuePtr.value = value;
+            _lib.rtpEncodingParametersSetMaxBitrateBps(nativeEnc, 1, valuePtr);
+            calloc.free(valuePtr);
+          }
+        }
+
+        // minBitrate も同様に Int32 範囲を制限する。
+        final minBitrate = enc['minBitrate'] as num?;
+        if (minBitrate != null) {
+          final intValue = minBitrate.toInt();
+          if (intValue >= 0) {
+            final value = intValue > 0x7FFFFFFF ? 0x7FFFFFFF : intValue;
+            final valuePtr = calloc<Int32>();
+            valuePtr.value = value;
+            _lib.rtpEncodingParametersSetMinBitrateBps(nativeEnc, 1, valuePtr);
+            calloc.free(valuePtr);
+          }
+        }
+
+        // scaleResolutionDownBy
+        final scaleDown = enc['scaleResolutionDownBy'] as num?;
+        if (scaleDown != null) {
+          final valuePtr = calloc<Double>();
+          valuePtr.value = scaleDown.toDouble();
+          _lib.rtpEncodingParametersSetScaleResolutionDownBy(
+            nativeEnc,
+            1,
+            valuePtr,
+          );
+          calloc.free(valuePtr);
+        }
+
+        // maxFramerate
+        final maxFramerate = enc['maxFramerate'] as num?;
+        if (maxFramerate != null) {
+          final valuePtr = calloc<Double>();
+          valuePtr.value = maxFramerate.toDouble();
+          _lib.rtpEncodingParametersSetMaxFramerate(nativeEnc, 1, valuePtr);
+          calloc.free(valuePtr);
+        }
+
+        // scalabilityMode
+        final scalabilityMode = enc['scalabilityMode'] as String?;
+        if (scalabilityMode != null) {
+          final modeUtf8 = scalabilityMode.toNativeUtf8();
+          _lib.rtpEncodingParametersSetScalabilityMode(
+            nativeEnc,
+            1,
+            modeUtf8.cast<Char>(),
+            modeUtf8.length,
+          );
+          calloc.free(modeUtf8);
+        }
+      }
+    } else {
+      _emitDebug(
+        'native: simulcast encodings count mismatch: existing=$existingSize offer=${encodings.length}',
+      );
+    }
+
+    // libwebrtc_c 0.150.1 以降、SetParameters は out_rtc_error 形式へ変わった。
+    final errorPtr = calloc<Pointer<WebrtcRTCErrorUnique>>();
+    _lib.rtpSenderSetParameters(_videoRtpSender!, params, errorPtr);
+    final errMsg = rtcErrorMessage(_lib, errorPtr.value);
+    if (errMsg != null) {
+      _emitDebug('native: set_sender_parameters_failed: $errMsg');
+    } else {
+      _emitDebug('native: simulcast encodings applied');
+    }
+    calloc.free(errorPtr);
+    _lib.rtpParametersDelete(params);
+  }
+
+  // ---------------------------------------------------------------------------
+  // PeerConnection Observer コールバック
+  // ---------------------------------------------------------------------------
+
+  /// `PeerConnectionState` 変更を debug / state イベントへ変換する。
+  ///
+  /// [sessionGeneration] は `_ensurePeerConnection()` でキャプチャされた世代。
+  /// 旧セッション由来の遅延イベントが新 `_sessionGeneration` でタグ付けされるのを防ぐ。
+  void _onConnectionChange(int newState, {int? sessionGeneration}) {
+    final stateName = _pcStateName(newState);
+    _emitDebug('native: pc_state=$stateName');
+
+    if (newState == _consts.pcStateConnected) {
+      _emitState('connected', null, null, sessionGeneration: sessionGeneration);
+    } else if (newState == _consts.pcStateFailed) {
+      // failed は disconnect メッセージを送信しない異常終了として扱う。
+      // closed と同じ disconnected 型で通知し、reason で区別する。
+      _emitState(
+        'disconnected',
+        SoraDisconnectReason.peerConnectionFailed,
+        null,
+        sessionGeneration: sessionGeneration,
+      );
+    } else if (newState == _consts.pcStateClosed) {
+      _emitState(
+        'disconnected',
+        SoraDisconnectReason.peerConnectionClosed,
+        null,
+        sessionGeneration: sessionGeneration,
+      );
+    }
+  }
+
+  // PeerConnection state 変更のイベント変換をテストから直接呼ぶためのラッパー。
+  @visibleForTesting
+  void handleConnectionChangeForTest(int state, {int? sessionGeneration}) {
+    _onConnectionChange(state, sessionGeneration: sessionGeneration);
+  }
+
+  // ICE connection state を debug ログ向け文字列に変換して流す。
+  void _onStandardizedIceConnectionChange(int newState) {
+    _emitDebug(
+      'native: ice_connection_state=${_iceConnectionStateName(newState)}',
+    );
+  }
+
+  // ICE gathering state を debug ログ向け文字列に変換して流す。
+  void _onIceGatheringChange(int newState) {
+    _emitDebug(
+      'native: ice_gathering_state=${_iceGatheringStateName(newState)}',
+    );
+  }
+
+  // C コールバックブリッジから malloc 済み文字列で ICE candidate を受け取る
+  void _onIceCandidateExtracted(
+    Pointer<Char> sdpPtr,
+    Pointer<Char> midPtr,
+    int mlineIndex,
+  ) {
+    final sdp = sdpPtr == nullptr ? '' : sdpPtr.cast<Utf8>().toDartString();
+    final mid = midPtr == nullptr ? '' : midPtr.cast<Utf8>().toDartString();
+    // C 側で malloc 確保されたメモリを解放する
+    if (sdpPtr != nullptr) malloc.free(sdpPtr);
+    if (midPtr != nullptr) malloc.free(midPtr);
+
+    _emitDebug('native: local_candidate mid=$mid text=$sdp');
+    _emitSignalingMessage({
+      'type': 'candidate',
+      'candidate': sdp,
+      'sdpMid': mid,
+      'sdpMLineIndex': mlineIndex,
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // DataChannel
+  // ---------------------------------------------------------------------------
+
+  // C bridge から渡された `DataChannel` を label ごとの管理スロットへ振り分ける。
+  //
+  // 不要 label は即 release し、必要 label だけ observer を登録する。
+  void _onDataChannelFromBridge(Pointer<Void> dcPtr, String label) {
+    if (dcPtr == nullptr) return;
+    final dc = Pointer<WebrtcDataChannelInterface>.fromAddress(dcPtr.address);
+
+    if (label == 'notify') {
+      _setupNotifyDataChannel(dc);
+    } else if (label == 'push') {
+      _setupPushDataChannel(dc);
+    } else if (label == 'rpc') {
+      _setupRpcDataChannel(dc);
+    } else if (label == 'stats') {
+      _setupStatsDataChannel(dc);
+    } else if (label == 'signaling') {
+      _setupSignalingDataChannel(dc);
+    } else if (label.startsWith('#')) {
+      _setupCustomDataChannel(dc, label);
+    } else {
+      // 不要な DataChannel は解放する
+      _lib.dataChannelRelease(dc);
+    }
+  }
+
+  // DataChannel の observer 登録を行う。
+  //
+  // 成功時は DcBridgeContext ポインタを返す。
+  // 失敗時は dc を release して消費し、追加済み NativeCallable を閉じる。
+  Pointer<Void>? _configureDataChannelObserver(
+    Pointer<WebrtcDataChannelInterface> dc,
+    String label,
+    List<NativeCallable<dynamic>> callables,
+  ) {
+    if (_observerBridge == null) {
+      _releaseDataChannelOnSetupFailure(dc);
+      return null;
+    }
+    final ncStateChange = NativeCallable<Void Function(Pointer<Void>)>.listener(
+      (Pointer<Void> _) => _handleDataChannelState(dc, label),
+    );
+    final ncMessage =
+        NativeCallable<
+          Void Function(Pointer<Uint8>, Int32, Int32, Pointer<Void>)
+        >.listener((
+          Pointer<Uint8> dataPtr,
+          int len,
+          int isBinary,
+          Pointer<Void> _,
+        ) {
+          if (dataPtr == nullptr) {
+            _onEvent('data_channel_message', {
+              'label': label,
+              'isBinary': isBinary != 0,
+              'data': Uint8List(0),
+            });
+            return;
+          }
+          final bytes = len > 0
+              ? Uint8List.fromList(dataPtr.asTypedList(len))
+              : Uint8List(0);
+          if (len > 0) {
+            malloc.free(dataPtr);
+          }
+          _onEvent('data_channel_message', {
+            'label': label,
+            'isBinary': isBinary != 0,
+            'data': bytes,
+          });
+        });
+    final registeredCallables = <NativeCallable<dynamic>>[
+      ncStateChange,
+      ncMessage,
+    ];
+    callables.addAll(registeredCallables);
+
+    final ctx = _lib.soraObserverBridgeSetupDc(
+      _observerBridge!,
+      dc,
+      ncStateChange.nativeFunction,
+      ncMessage.nativeFunction,
+      nullptr,
+    );
+    if (ctx == nullptr) {
+      _cleanupDataChannelSetupCallables(callables, registeredCallables);
+      _releaseDataChannelOnSetupFailure(dc);
+      return null;
+    }
+    return ctx;
+  }
+
+  /// 単一 DataChannel の unregister / release / NativeCallable 解放。
+  void _cleanupSingleDataChannel(_DataChannelResources res) {
+    if (res.dc != null && res.ctx != null) {
+      _lib.soraObserverBridgeDestroyDc(res.ctx!, res.dc!);
+    } else if (res.dc != null) {
+      _lib.dataChannelUnregisterObserver(res.dc!);
+    }
+    if (res.dc != null) {
+      _lib.dataChannelRelease(res.dc!);
+    }
+    for (final nc in res.callables) {
+      nc.close();
+    }
+    res.callables.clear();
+    res.dc = null;
+    res.ctx = null;
+  }
+
+  /// setup 失敗時に追加済み NativeCallable だけを閉じる。
+  void _cleanupDataChannelSetupCallables(
+    List<NativeCallable<dynamic>> owner,
+    List<NativeCallable<dynamic>> registeredCallables,
+  ) {
+    for (final nc in registeredCallables) {
+      owner.remove(nc);
+      nc.close();
+    }
+  }
+
+  /// 登録済み NativeCallable を閉じ、保持リストから取り除く。
+  void _cleanupNativeCallablesFromRegistries(
+    List<NativeCallable<dynamic>> callables,
+  ) {
+    for (final nc in callables) {
+      nc.close();
+      _nativeCallables.remove(nc);
+      _notifyDc.callables.remove(nc);
+      _pushDc.callables.remove(nc);
+      for (final res in _customDataChannels.values) {
+        res.callables.remove(nc);
+      }
+      _rpcDc.callables.remove(nc);
+      _statsDc.callables.remove(nc);
+      _signalingDc.callables.remove(nc);
+    }
+  }
+
+  /// 管理スロットへ DataChannel を登録し、setup 失敗時は空に戻す。
+  void _setupManagedDataChannel(
+    _DataChannelResources res,
+    Pointer<WebrtcDataChannelInterface> dc,
+    String label,
+  ) {
+    _cleanupSingleDataChannel(res);
+    res.dc = dc;
+
+    final ctx = _configureDataChannelObserver(dc, label, res.callables);
+    if (ctx == null) {
+      res.dc = null;
+      res.ctx = null;
+      return;
+    }
+
+    res.ctx = ctx;
+    _handleDataChannelState(dc, label);
+  }
+
+  /// notify DataChannel を observer 登録込みで初期化する。
+  void _setupNotifyDataChannel(Pointer<WebrtcDataChannelInterface> dc) {
+    _setupManagedDataChannel(_notifyDc, dc, 'notify');
+  }
+
+  /// push DataChannel を observer 登録込みで初期化する。
+  void _setupPushDataChannel(Pointer<WebrtcDataChannelInterface> dc) {
+    _setupManagedDataChannel(_pushDc, dc, 'push');
+  }
+
+  /// rpc DataChannel を observer 登録込みで初期化する。
+  void _setupRpcDataChannel(Pointer<WebrtcDataChannelInterface> dc) {
+    _setupManagedDataChannel(_rpcDc, dc, 'rpc');
+  }
+
+  /// stats DataChannel を observer 登録込みで初期化する。
+  void _setupStatsDataChannel(Pointer<WebrtcDataChannelInterface> dc) {
+    _setupManagedDataChannel(_statsDc, dc, 'stats');
+  }
+
+  // カスタム label の DataChannel を map へ登録し observer を設定する。
+  void _setupCustomDataChannel(
+    Pointer<WebrtcDataChannelInterface> dc,
+    String label,
+  ) {
+    // 既存エントリがあれば先に解放する (固定 label 系と防御方針を揃える)
+    final old = _customDataChannels[label];
+    if (old != null) {
+      _cleanupSingleDataChannel(old);
+    }
+
+    final res = _DataChannelResources();
+    res.dc = dc;
+    _customDataChannels[label] = res;
+
+    final ctx = _configureDataChannelObserver(dc, label, res.callables);
+    if (ctx == null) {
+      _customDataChannels.remove(label);
+      res.dc = null;
+      res.ctx = null;
+      return;
+    }
+
+    res.ctx = ctx;
+    _handleDataChannelState(dc, label);
+  }
+
+  void _releaseDataChannelOnSetupFailure(
+    Pointer<WebrtcDataChannelInterface> dc,
+  ) {
+    _lib.dataChannelRelease(dc);
+  }
+
+  /// signaling DataChannel を observer 登録込みで初期化する。
+  void _setupSignalingDataChannel(Pointer<WebrtcDataChannelInterface> dc) {
+    _setupManagedDataChannel(_signalingDc, dc, 'signaling');
+  }
+
+  // 現在の DataChannel state を読み、state 遷移を Dart 側へ通知する。
+  void _handleDataChannelState(
+    Pointer<WebrtcDataChannelInterface> dc,
+    String label,
+  ) {
+    notifyDataChannelStateForTest(_lib.dataChannelState(dc), label);
+  }
+
+  // DataChannel の state をイベントへ変換して通知する。
+  //
+  // open はデータチャネル利用開始の通知として、closing / closed は
+  // シグナリング用 DataChannel の異常終了検出に使う。
+  @visibleForTesting
+  void notifyDataChannelStateForTest(int state, String label) {
+    if (state == _consts.dcStateOpen) {
+      _onEvent('data_channel_open', {'label': label});
+    } else if (state == _consts.dcStateClosing) {
+      _onEvent('data_channel_closing', {'label': label});
+    } else if (state == _consts.dcStateClosed) {
+      _onEvent('data_channel_closed', {'label': label});
+    }
+  }
+
+  // signaling DataChannel へバイナリメッセージを送信する。
+  //
+  // `dataChannelSend` は呼び出し時点のメモリ参照しか持たない前提で、
+  // Dart 側で一時バッファを確保して送信後すぐ解放する。
+  void sendSignalingMessage(Uint8List data) {
+    if (_signalingDc.dc == null) return;
+    final ptr = malloc<Uint8>(data.length);
+    ptr.asTypedList(data.length).setAll(0, data);
+    _lib.dataChannelSend(_signalingDc.dc!, ptr, data.length, 1);
+    malloc.free(ptr);
+  }
+
+  // rpc DataChannel へバイナリメッセージを送信する。
+  void sendRpcMessage(Uint8List data) {
+    if (_rpcDc.dc == null) return;
+    final ptr = malloc<Uint8>(data.length);
+    ptr.asTypedList(data.length).setAll(0, data);
+    _lib.dataChannelSend(_rpcDc.dc!, ptr, data.length, 1);
+    malloc.free(ptr);
+  }
+
+  // stats DataChannel へバイナリメッセージを送信する。
+  void sendStatsMessage(Uint8List data) {
+    if (_statsDc.dc == null) return;
+    final ptr = malloc<Uint8>(data.length);
+    ptr.asTypedList(data.length).setAll(0, data);
+    _lib.dataChannelSend(_statsDc.dc!, ptr, data.length, 1);
+    malloc.free(ptr);
+  }
+
+  // 任意 label の DataChannel へバイナリメッセージを送信する。
+  void sendCustomDataChannelMessage(String label, Uint8List data) {
+    final res = _customDataChannels[label];
+    final dc = res?.dc;
+    if (dc == null) return;
+    final ptr = malloc<Uint8>(data.length);
+    ptr.asTypedList(data.length).setAll(0, data);
+    _lib.dataChannelSend(dc, ptr, data.length, 1);
+    malloc.free(ptr);
+  }
+
+  // C bridge から受け取った malloc 済みデバッグ文字列を Dart ログへ流す。
+  void _onDebugFromBridge(Pointer<Char> msgPtr) {
+    if (msgPtr == nullptr) return;
+    final msg = msgPtr.cast<Utf8>().toDartString();
+    malloc.free(msgPtr);
+    _emitDebug(msg);
+  }
+
+  /// notify DataChannel とその observer callback をまとめて解放する。
+  void _cleanupNotifyDataChannel() {
+    _cleanupSingleDataChannel(_notifyDc);
+  }
+
+  /// push DataChannel とその observer callback をまとめて解放する。
+  void _cleanupPushDataChannel() {
+    _cleanupSingleDataChannel(_pushDc);
+  }
+
+  /// rpc DataChannel とその observer callback をまとめて解放する。
+  void _cleanupRpcDataChannel() {
+    _cleanupSingleDataChannel(_rpcDc);
+  }
+
+  /// stats DataChannel とその observer callback をまとめて解放する。
+  void _cleanupStatsDataChannel() {
+    _cleanupSingleDataChannel(_statsDc);
+  }
+
+  /// カスタム DataChannel 群をすべて unregister / release する。
+  void _cleanupCustomDataChannels() {
+    for (final res in _customDataChannels.values) {
+      _cleanupSingleDataChannel(res);
+    }
+    _customDataChannels.clear();
+  }
+
+  // signaling DataChannel とその observer callback をまとめて解放する。
+  void _cleanupSignalingDataChannel() {
+    _cleanupSingleDataChannel(_signalingDc);
+  }
+
+  // ---------------------------------------------------------------------------
+  // イベント発行
+  // ---------------------------------------------------------------------------
+
+  // state 変更イベントを統一フォーマットで Dart 側へ流す。
+  void _emitState(
+    String state,
+    String? reason,
+    String? message, {
+    int? sessionGeneration,
+  }) {
+    final event = <String, Object?>{'state': state};
+    if (reason != null) {
+      event['reason'] = reason;
+    }
+    if (message != null) {
+      event['message'] = message;
+    }
+    if (sessionGeneration != null) {
+      event['session_generation'] = sessionGeneration;
+    }
+    _onEvent('state_changed', event);
+  }
+
+  // デバッグ用の文字列メッセージを Dart 側へ流す。
+  void _emitDebug(String message) {
+    _onEvent('debug_message', {'message': message});
+  }
+
+  // signaling 相当のメッセージ payload を Dart 側へ流す。
+  void _emitSignalingMessage(Map<String, Object?> message) {
+    _onEvent('signaling_message', {'message': message});
+  }
+
+  // ---------------------------------------------------------------------------
+  // 状態名変換ヘルパー
+  // ---------------------------------------------------------------------------
+
+  // runtime の `PeerConnectionState` 数値を表示用文字列へ変換する。
+  String _pcStateName(int state) {
+    if (state == _consts.pcStateNew) return 'new';
+    if (state == _consts.pcStateConnecting) return 'connecting';
+    if (state == _consts.pcStateConnected) return 'connected';
+    if (state == _consts.pcStateFailed) return 'failed';
+    if (state == _consts.pcStateClosed) return 'closed';
+    return 'unknown';
+  }
+
+  // ICE connection state の概算名を debug 表示用に返す。
+  static String _iceConnectionStateName(int state) {
+    // debug 出力用。値はランタイムだが概算で表示する。
+    const names = [
+      'new',
+      'checking',
+      'connected',
+      'completed',
+      'failed',
+      'disconnected',
+      'closed',
+      'max',
+    ];
+    if (state >= 0 && state < names.length) return names[state];
+    return 'unknown';
+  }
+
+  // ICE gathering state の概算名を debug 表示用に返す。
+  static String _iceGatheringStateName(int state) {
+    const names = ['new', 'gathering', 'complete'];
+    if (state >= 0 && state < names.length) return names[state];
+    return 'unknown';
+  }
+
+  // プラットフォーム既定のビデオエンコーダーファクトリを返す
+  //
+  // iOS / macOS / Android ではプラットフォーム既定ファクトリを優先し、
+  // 取得できない場合のみ built-in にフォールバックする。
+  static Pointer<WebrtcVideoEncoderFactoryUnique>
+  _createDefaultVideoEncoderFactory() {
+    // Android は Java の既定 factory を native factory へ変換する。
+    if (Platform.isAndroid) {
+      return _createAndroidDefaultVideoEncoderFactory();
+    }
+
+    // iOS / macOS は ObjC の既定 factory (VideoToolbox) を native factory へ変換する。
+    if (Platform.isIOS || Platform.isMacOS) {
+      final objcFactory = sharedLib.objcDefaultVideoEncoderFactoryNew();
+      if (objcFactory == nullptr) {
+        return sharedLib.createBuiltinVideoEncoderFactory();
+      }
+
+      final nativeFactory = sharedLib.objcToNativeVideoEncoderFactory(
+        objcFactory,
+      );
+      sharedLib.objcVideoEncoderFactoryRelease(objcFactory);
+      if (nativeFactory == nullptr) {
+        return sharedLib.createBuiltinVideoEncoderFactory();
+      }
+      return nativeFactory;
+    }
+
+    // それ以外のプラットフォームは built-in factory を使う。
+    return sharedLib.createBuiltinVideoEncoderFactory();
+  }
+
+  // プラットフォーム既定のビデオデコーダーファクトリを返す
+  //
+  // iOS / macOS / Android ではプラットフォーム既定ファクトリを優先し、
+  // 取得できない場合のみ built-in にフォールバックする。
+  static Pointer<WebrtcVideoDecoderFactoryUnique>
+  _createDefaultVideoDecoderFactory() {
+    // Android は Java の既定 factory を native factory へ変換する。
+    if (Platform.isAndroid) {
+      return _createAndroidDefaultVideoDecoderFactory();
+    }
+
+    // iOS / macOS は ObjC の既定 factory (VideoToolbox) を native factory へ変換する。
+    if (Platform.isIOS || Platform.isMacOS) {
+      final objcFactory = sharedLib.objcDefaultVideoDecoderFactoryNew();
+      if (objcFactory == nullptr) {
+        return sharedLib.createBuiltinVideoDecoderFactory();
+      }
+
+      final nativeFactory = sharedLib.objcToNativeVideoDecoderFactory(
+        objcFactory,
+      );
+      sharedLib.objcVideoDecoderFactoryRelease(objcFactory);
+      if (nativeFactory == nullptr) {
+        return sharedLib.createBuiltinVideoDecoderFactory();
+      }
+      return nativeFactory;
+    }
+
+    // それ以外のプラットフォームは built-in factory を使う。
+    return sharedLib.createBuiltinVideoDecoderFactory();
+  }
+
+  /// プラットフォームのビデオデコーダがサポートする [VideoCodecType] の一覧。
+  ///
+  /// 内部で一時的なデコーダファクトリを生成して `GetSupportedFormats` を呼ぶ。
+  /// 戻り値の順序はプラットフォーム依存。
+  static List<VideoCodecType> get supportedVideoCodecTypes {
+    final dec = _createDefaultVideoDecoderFactory();
+    try {
+      final rawDec = sharedLib.videoDecoderFactoryUniqueGet(dec);
+      final formats = sharedLib.videoDecoderFactoryGetSupportedFormats(rawDec);
+      try {
+        final size = sharedLib.sdpVideoFormatVectorSize(formats);
+        final codecs = <VideoCodecType>[];
+        for (var i = 0; i < size; i++) {
+          final format = sharedLib.sdpVideoFormatVectorGet(formats, i);
+          final namePtr = sharedLib.sdpVideoFormatGetName(format);
+          if (namePtr == nullptr) {
+            continue;
+          }
+          final name = namePtr.cast<Utf8>().toDartString();
+          final codecName = name.trim().toUpperCase();
+          final codecType = VideoCodecType.fromValue(codecName);
+          if (codecType != null && !codecs.contains(codecType)) {
+            codecs.add(codecType);
+          }
+        }
+        return codecs;
+      } finally {
+        sharedLib.sdpVideoFormatVectorDelete(formats);
+      }
+    } finally {
+      sharedLib.videoDecoderFactoryUniqueDelete(dec);
+    }
+  }
+
+  // Android の既定ビデオエンコーダーファクトリを JNI 経由で作る。
+  //
+  // Java `DefaultVideoEncoderFactory` を生成して native factory へ変換し、
+  // どこかで失敗した場合は built-in factory にフォールバックする。
+  static Pointer<WebrtcVideoEncoderFactoryUnique>
+  _createAndroidDefaultVideoEncoderFactory() {
+    final env = sharedLib.jniAttachCurrentThreadIfNeeded();
+    if (env == nullptr) {
+      return sharedLib.createBuiltinVideoEncoderFactory();
+    }
+
+    final className = 'org/webrtc/DefaultVideoEncoderFactory'
+        .toNativeUtf8()
+        .cast<Char>();
+    final clazz = sharedLib.jniGetClass(env, className);
+    calloc.free(className);
+    if (clazz == nullptr) {
+      if (sharedLib.jniExceptionCheck(env) != 0) {
+        sharedLib.jniExceptionClear(env);
+      }
+      return sharedLib.createBuiltinVideoEncoderFactory();
+    }
+
+    final ctorName = '<init>'.toNativeUtf8().cast<Char>();
+    final ctorSig = '(Lorg/webrtc/EglBase\$Context;ZZ)V'
+        .toNativeUtf8()
+        .cast<Char>();
+    final ctor = sharedLib.jniGetMethodId(env, clazz, ctorName, ctorSig);
+    calloc.free(ctorName);
+    calloc.free(ctorSig);
+    if (ctor == nullptr) {
+      sharedLib.jniDeleteLocalRef(env, clazz);
+      if (sharedLib.jniExceptionCheck(env) != 0) {
+        sharedLib.jniExceptionClear(env);
+      }
+      return sharedLib.createBuiltinVideoEncoderFactory();
+    }
+
+    final args = calloc<JValue>(3);
+    args[0].l = nullptr;
+    args[1].z = 1;
+    args[2].z = 0;
+    final encoderFactory = sharedLib.jniNewObjectA(env, clazz, ctor, args);
+    calloc.free(args);
+    if (encoderFactory == nullptr) {
+      sharedLib.jniDeleteLocalRef(env, clazz);
+      if (sharedLib.jniExceptionCheck(env) != 0) {
+        sharedLib.jniExceptionClear(env);
+      }
+      return sharedLib.createBuiltinVideoEncoderFactory();
+    }
+
+    final nativeFactory = sharedLib.javaToNativeVideoEncoderFactory(
+      env,
+      encoderFactory,
+    );
+    sharedLib.jniDeleteLocalRef(env, encoderFactory);
+    sharedLib.jniDeleteLocalRef(env, clazz);
+    if (sharedLib.jniExceptionCheck(env) != 0) {
+      sharedLib.jniExceptionClear(env);
+      return sharedLib.createBuiltinVideoEncoderFactory();
+    }
+    if (nativeFactory == nullptr) {
+      return sharedLib.createBuiltinVideoEncoderFactory();
+    }
+    return nativeFactory;
+  }
+
+  // Android の既定ビデオデコーダーファクトリを JNI 経由で作る。
+  //
+  // Java `DefaultVideoDecoderFactory` を native 側へ橋渡しし、
+  // JNI エラー時はすべて built-in factory にフォールバックする。
+  static Pointer<WebrtcVideoDecoderFactoryUnique>
+  _createAndroidDefaultVideoDecoderFactory() {
+    final env = sharedLib.jniAttachCurrentThreadIfNeeded();
+    if (env == nullptr) {
+      return sharedLib.createBuiltinVideoDecoderFactory();
+    }
+
+    final className = 'org/webrtc/DefaultVideoDecoderFactory'
+        .toNativeUtf8()
+        .cast<Char>();
+    final clazz = sharedLib.jniGetClass(env, className);
+    calloc.free(className);
+    if (clazz == nullptr) {
+      if (sharedLib.jniExceptionCheck(env) != 0) {
+        sharedLib.jniExceptionClear(env);
+      }
+      return sharedLib.createBuiltinVideoDecoderFactory();
+    }
+
+    final ctorName = '<init>'.toNativeUtf8().cast<Char>();
+    final ctorSig = '(Lorg/webrtc/EglBase\$Context;)V'
+        .toNativeUtf8()
+        .cast<Char>();
+    final ctor = sharedLib.jniGetMethodId(env, clazz, ctorName, ctorSig);
+    calloc.free(ctorName);
+    calloc.free(ctorSig);
+    if (ctor == nullptr) {
+      sharedLib.jniDeleteLocalRef(env, clazz);
+      if (sharedLib.jniExceptionCheck(env) != 0) {
+        sharedLib.jniExceptionClear(env);
+      }
+      return sharedLib.createBuiltinVideoDecoderFactory();
+    }
+
+    final args = calloc<JValue>(1);
+    args[0].l = nullptr;
+    final decoderFactory = sharedLib.jniNewObjectA(env, clazz, ctor, args);
+    calloc.free(args);
+    if (decoderFactory == nullptr) {
+      sharedLib.jniDeleteLocalRef(env, clazz);
+      if (sharedLib.jniExceptionCheck(env) != 0) {
+        sharedLib.jniExceptionClear(env);
+      }
+      return sharedLib.createBuiltinVideoDecoderFactory();
+    }
+
+    final nativeFactory = sharedLib.javaToNativeVideoDecoderFactory(
+      env,
+      decoderFactory,
+    );
+    sharedLib.jniDeleteLocalRef(env, decoderFactory);
+    sharedLib.jniDeleteLocalRef(env, clazz);
+    if (sharedLib.jniExceptionCheck(env) != 0) {
+      sharedLib.jniExceptionClear(env);
+      return sharedLib.createBuiltinVideoDecoderFactory();
+    }
+    if (nativeFactory == nullptr) {
+      return sharedLib.createBuiltinVideoDecoderFactory();
+    }
+    return nativeFactory;
+  }
+}

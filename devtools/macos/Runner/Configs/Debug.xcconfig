@@ -1,0 +1,6 @@
+#include "../../Flutter/Flutter-Debug.xcconfig"
+#include "Warnings.xcconfig"
+
+// Debug は devtools.debug.dylib から起動エントリポイントを参照するため、
+// exported symbols の制限を外す。
+EXPORTED_SYMBOLS_FILE =

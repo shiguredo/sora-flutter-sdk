@@ -35,6 +35,10 @@
 
 ## 解決方法
 
-- `CHANGELOG.md` の冒頭にあった凡例ブロック (`- CHANGE` / `- ADD` / `- UPDATE` / `- FIX` と各説明の 8 行) を削除し、`# 変更履歴` と `## develop` のみにした。
-- 凡例は `shiguredo-changelog` 規約に無いリポジトリ独自の記述であり、正式リリース前の `CHANGELOG.md` 不記載ルール (`CODEBASE.md`) に触れないため削除した。
-- 将来エントリの記法は本 issue の設計方針に確定させた (`- [種別] 変更内容を〜する` 形式、種別順序 CHANGE → ADD → UPDATE → FIX、エントリ末尾に 2 文字下げの担当者行)。`0070` の FIX エントリは `0096` が所有し、正式リリース後に追記する。
+対応不要として closed にする。
+
+凡例ブロックは `shiguredo-changelog` 規約には無いが、maintainer の判断で `CHANGELOG.md` の冒頭に残す方針とした。直近の削除はいったん取り消され、凡例ありのまま公開する。将来エントリの記法 (形式・種別順序・担当者行) は本 issue の設計方針どおりとする。
+
+## reopened にする理由
+
+maintainer の判断で `CHANGELOG.md` の冒頭凡例 (`- CHANGE` / `- ADD` / `- UPDATE` / `- FIX`) を残す方針に変わった。本 issue の解決方法 (凡例を削除する) が実態と一致しなくなったため、一度 reopened にしてから対応不要として閉じ直す。

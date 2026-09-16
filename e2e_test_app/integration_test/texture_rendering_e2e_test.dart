@@ -387,6 +387,93 @@ void main() {
     },
     skip: !runLocalCameraTest,
   );
+
+  // Linux の local preview Texture は、カメラの初回フレームが到着する前に
+  // Flutter の raster thread から copy_pixels を呼ばれる。
+  // 修正前は copy_pixels が FALSE を返し、Flutter Linux エンジンが
+  // GError 未設定のまま error->message を参照して SIGSEGV していた。
+  //
+  // Linux のネイティブ実装はデバイスを open する前に Texture を登録し、
+  // キャプチャスレッドの完了を待たずに textureId を返す。そのため
+  // 実在しないデバイスを指定すれば、実カメラなしで「Texture はあるが
+  // フレームが一度も到着しない」状態を再現できる。
+  testWidgets(
+    'texture_rendering_local_no_frame: 初回フレーム到着前の local Texture がクラッシュしない',
+    (WidgetTester tester) async {
+      const missingDeviceId = '/dev/sora-e2e-nonexistent-video';
+      LocalMediaStream? stream;
+      LocalVideoTrack? videoTrack;
+      Object? bodyError;
+
+      try {
+        stream = await MediaDevices.getUserMedia(
+          GetUserMediaOptions(
+            audio: false,
+            video: true,
+            videoDeviceId: missingDeviceId,
+            videoWidth: 320,
+            videoHeight: 180,
+            videoFrameRate: 30,
+          ),
+        );
+        videoTrack = stream.currentVideoTrackOrNull;
+        expect(videoTrack, isNotNull, reason: 'camera track が生成されること。');
+
+        // デバイスの open は失敗するが、Texture は登録済みなので ID は返る。
+        final textureId = await videoTrack!.textureId;
+        expect(textureId, greaterThanOrEqualTo(0));
+
+        final boundaryKey = GlobalKey();
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Center(
+                child: RepaintBoundary(
+                  key: boundaryKey,
+                  child: SizedBox(
+                    width: 320,
+                    height: 180,
+                    child: SoraLocalVideoWidget(
+                      textureId: textureId,
+                      mirror: true,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pump(const Duration(seconds: 1));
+        expect(find.byType(Texture), findsOneWidget);
+
+        // raster を明示的に完了させ、copy_pixels が呼ばれても
+        // クラッシュしないことを確認する。
+        final renderObject = boundaryKey.currentContext?.findRenderObject();
+        expect(renderObject, isA<RenderRepaintBoundary>());
+        final image = await (renderObject! as RenderRepaintBoundary).toImage();
+        image.dispose();
+      } catch (e) {
+        bodyError = e;
+        rethrow;
+      } finally {
+        final cleanupErrors = <String>[];
+        await runCleanupStep(
+          cleanupErrors,
+          'videoTrack.dispose',
+          () async => videoTrack?.dispose(),
+        );
+        await runCleanupStep(
+          cleanupErrors,
+          'stream.dispose',
+          () async => stream?.dispose(),
+        );
+        if (cleanupErrors.isNotEmpty && bodyError == null) {
+          throw StateError('Cleanup failed: ${cleanupErrors.join(" | ")}');
+        }
+      }
+    },
+    skip: !Platform.isLinux,
+  );
 }
 
 /// remote Texture にカラーバーが描画されるまで待つ。

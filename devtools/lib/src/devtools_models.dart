@@ -461,6 +461,20 @@ class DevToolsPageNotifier extends ChangeNotifier {
     );
   }
 
+  // 指定 connection ID 群に属するリモートトラックを接続単位で削除する。
+  //
+  // 非対応コーデックなどで `SoraRemoveTrackEvent` が来ないトラックの
+  // 後始末を `connection.destroyed` 通知で行うためのヘルパ。
+  // track 単位の `removeRemoteTrack` との競合は `removeWhere` が冪等なため発生しない。
+  void removeRemoteTracksByConnectionIds(Set<String> connectionIds) {
+    remoteVideos.removeWhere(
+      (video) => connectionIds.contains(video.connectionId),
+    );
+    remoteAudios.removeWhere(
+      (audio) => connectionIds.contains(audio.connectionId),
+    );
+  }
+
   // remote track を追加または更新する。
   void upsertRemoteTrack(RemoteMediaStreamTrack track) {
     if (track.kind == 'video') {

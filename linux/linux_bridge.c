@@ -308,8 +308,8 @@ linux_rendering_sink_copy_pixels(LinuxRenderingSink* sink,
   }
 
   // まだフレームを受信していない場合は 2x2 の黒ピクセルを返す
-  // Flutter の Linux 埋め込みでは copy_pixels が FALSE を返すと
-  // コンポジタがクラッシュするバグがあるため、常に有効なバッファを返す
+  // Flutter Linux エンジンは copy_pixels が FALSE を返すと GError 未設定の
+  // まま error->message を参照してクラッシュするため、常に有効なバッファを返す
   if (sink->i420_buffer == NULL) {
     if (sink->rgba_buffer == NULL) {
       sink->rgba_buffer = (uint8_t*)calloc(16, 1);  // 2x2 x 4 bytes = 16

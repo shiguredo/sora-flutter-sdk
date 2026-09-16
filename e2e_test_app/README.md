@@ -3,9 +3,11 @@
 Sora Flutter SDK の recvonly / sendonly / sendrecv 接続と、2 クライアント間メディア疎通を `integration_test` で検証する最小アプリです。
 加えて、ネイティブプラグインの結合テスト（Sora 接続不要でデバイス列挙等のみを検証するテスト）も含みます。
 
+CI（`.github/workflows/e2e-test.yml`）は macOS / Windows / Linux の 3 環境で接続テストを実行します。`video_codec_e2e_test.dart` は macOS 専用、`macos_camera_runtime_stress_e2e_test.dart` と `windows_audio_device_test.dart` はローカル専用で CI では実行しません。
+
 ## 前提
 
-- **Linux**: プラグインの MethodChannel が未実装のため、接続テストは現状失敗します。CI（`e2e-test.yml`）は macOS で実行します。
+- **Linux**: プラグインの MethodChannel は実装済み。CI（`e2e-test.yml`）の `integration-test-linux` (ubuntu-24.04) で macOS / Windows と同じ接続テストを実行します。
 - **macOS**: 初回ビルド時に Swift Package Manager が `libwebrtc_c.xcframework.zip` を自動取得するため、手動 fetch は不要。アプリの最小デプロイは **15.0**。App Sandbox 有効時は **外向き TCP/TLS（シグナリング）用に `com.apple.security.network.client`** が entitlements に必要（本アプリの `DebugProfile` / `Release` に含める）。
 - **audio track**: `MediaDevices.createAudioTrack()` を使用するテスト（`remote_media_stream_e2e_test.dart`、`local_media_toggle_e2e_test.dart`）は macOS のマイク入力が必要。entitlements に `com.apple.security.device.microphone` が設定されていること。CI ランナーに物理マイクが無い場合、音声デバイスが存在しない環境ではテストが失敗する可能性がある。
 - **Windows**: プラグインの MethodChannel は実装済み。カメラキャプチャ (0035) と音声デバイス (0036) に対応する。Windows の接続テストは以下の前提で実行する:

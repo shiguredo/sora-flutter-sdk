@@ -1705,6 +1705,9 @@ class _DevToolsPageState extends State<DevToolsPage>
           .map((client) => client.connectionId)
           .toSet();
       _mutateView(() {
+        // SoraRemoveTrackEvent が来ないトラック（answer で拒否されたコーデック等）
+        // も残さないよう、トラックを接続単位で削除する。
+        _pageNotifier.removeRemoteTracksByConnectionIds(candidateIds);
         _pageNotifier.removeRemoteClientsByConnectionIds(candidateIds);
       });
     }

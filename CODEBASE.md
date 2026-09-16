@@ -18,9 +18,3 @@
 
 - canary 版: `canary.py` でバージョン更新とタグ push
 - 安定版: git flow release でバージョン確定とタグ push
-
-## 正式リリース前
-
-**正式リリース前**
-
-- 正式リリース前は変更履歴を `CHANGELOG.md` に残さないこと

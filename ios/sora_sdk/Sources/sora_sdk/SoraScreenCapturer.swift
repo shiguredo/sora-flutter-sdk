@@ -1,6 +1,7 @@
 import CoreMedia
 import Flutter
 import Foundation
+import QuartzCore
 import ReplayKit
 
 @_implementationOnly import CWebrtc
@@ -221,7 +222,8 @@ final class SoraScreenCapturer: @unchecked Sendable {
   private var pendingStartResult: Error?
   private var coordinatorGeneration: UInt64?
   private var lastSentPresentationTimestamp: CMTime?
-  private var lastSentUptime: TimeInterval?
+  // PTS が無効な場合のフレーム間引きに使う単調時刻 (秒) を保持する。
+  private var lastSentMediaTime: TimeInterval?
   private var lastPixelFormatError: (pixelFormat: OSType, channelCode: String)?
   private var disposed = false
 
@@ -418,7 +420,7 @@ final class SoraScreenCapturer: @unchecked Sendable {
         owner = requestedOwner
         self.coordinatorGeneration = coordinatorGeneration
         lastSentPresentationTimestamp = nil
-        lastSentUptime = nil
+        lastSentMediaTime = nil
         lastPixelFormatError = nil
         hasPendingStartResult = false
         pendingStartResult = nil
@@ -724,7 +726,7 @@ final class SoraScreenCapturer: @unchecked Sendable {
           owner = nil
           coordinatorGeneration = nil
           lastSentPresentationTimestamp = nil
-          lastSentUptime = nil
+          lastSentMediaTime = nil
         }
         stateBeforeStopping = nil
         startCallbacks = startCompletions
@@ -743,7 +745,7 @@ final class SoraScreenCapturer: @unchecked Sendable {
         coordinatorGeneration = nil
         stateBeforeStopping = nil
         lastSentPresentationTimestamp = nil
-        lastSentUptime = nil
+        lastSentMediaTime = nil
         startCallbacks = startCompletions
         startCompletions.removeAll()
         hasPendingStartResult = false
@@ -824,16 +826,16 @@ final class SoraScreenCapturer: @unchecked Sendable {
         let last = lastSentPresentationTimestamp,
         last.isValid, !last.isIndefinite
       else {
-        guard let lastSentUptime else { return true }
-        return ProcessInfo.processInfo.systemUptime - lastSentUptime
+        guard let lastSentMediaTime else { return true }
+        return CACurrentMediaTime() - lastSentMediaTime
           >= 1.0 / Double(targetFPS)
       }
       let elapsed = CMTimeSubtract(presentationTimestamp, last)
       guard elapsed.isValid, !elapsed.isIndefinite,
         CMTimeCompare(elapsed, .zero) >= 0
       else {
-        guard let lastSentUptime else { return true }
-        return ProcessInfo.processInfo.systemUptime - lastSentUptime
+        guard let lastSentMediaTime else { return true }
+        return CACurrentMediaTime() - lastSentMediaTime
           >= 1.0 / Double(targetFPS)
       }
       let minimumInterval = CMTime(value: 1, timescale: CMTimeScale(targetFPS))
@@ -843,7 +845,7 @@ final class SoraScreenCapturer: @unchecked Sendable {
 
   private func markFrameSent(_ presentationTimestamp: CMTime) {
     withStateLock {
-      lastSentUptime = ProcessInfo.processInfo.systemUptime
+      lastSentMediaTime = CACurrentMediaTime()
       if presentationTimestamp.isValid && !presentationTimestamp.isIndefinite {
         lastSentPresentationTimestamp = presentationTimestamp
       } else {
@@ -1090,7 +1092,8 @@ final class SoraScreenCapturer: @unchecked Sendable {
         return Int64(seconds * 1_000_000.0)
       }
     }
-    return Int64(ProcessInfo.processInfo.systemUptime * 1_000_000.0)
+    // PTS が無効な場合は、フレーム間引きと同じ単調時刻からメディアタイムスタンプを作る。
+    return Int64(CACurrentMediaTime() * 1_000_000.0)
   }
 
   private func notifyPixelFormatError(

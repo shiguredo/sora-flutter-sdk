@@ -11,6 +11,11 @@
 
 ## develop
 
+### misc
+
+- [UPDATE] iOS の画面キャプチャの時刻取得を `CACurrentMediaTime()` に変更する
+  - @zztkm
+
 ## 2026.1.0
 
 **リリース日**: 2026-09-16

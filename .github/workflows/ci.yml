@@ -440,6 +440,23 @@ jobs:
           # 現行の native dependency 配布は iphoneos 向けのため、署名なし実機 build で成立性を確認する。
           flutter build ios --release --no-codesign --no-pub
 
+      - name: Verify iOS SystemBootTime API removal
+        working-directory: devtools
+        run: |
+          set -euo pipefail
+          # 自前 Swift コードのオブジェクトに systemUptime の参照が残っていないことを確認する。
+          # libwebrtc_c は静的ライブラリとして _mach_absolute_time を参照するため、
+          # 最終バイナリではなく sora_sdk.o を対象にする。
+          sora_sdk_object="$(find build/ios -name 'sora_sdk.o' -print -quit)"
+          if [[ -z "${sora_sdk_object}" ]]; then
+            echo "sora_sdk.o was not found under build/ios." >&2
+            exit 1
+          fi
+          if nm -u "${sora_sdk_object}" | grep -Fq '_objc_msgSend$systemUptime'; then
+            echo "sora_sdk.o still references systemUptime." >&2
+            exit 1
+          fi
+
       - name: Build devtools macOS app
         working-directory: devtools
         run: |

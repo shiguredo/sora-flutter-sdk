@@ -49,6 +49,9 @@ let package = Package(
         .product(name: "FlutterFramework", package: "FlutterFramework"),
       ],
       path: "Sources/sora_sdk",
+      resources: [
+        .process("Resources/PrivacyInfo.xcprivacy")
+      ],
       linkerSettings: [
         .linkedLibrary("c++"),
         .linkedLibrary("c++abi"),

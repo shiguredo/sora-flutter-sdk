@@ -11,6 +11,8 @@
 
 ## develop
 
+- [ADD] iOS の PrivacyInfo.xcprivacy を同梱する
+  - @zztkm
 - [UPDATE] iOS の画面キャプチャの時刻取得を `CACurrentMediaTime()` に変更する
   - @zztkm
 

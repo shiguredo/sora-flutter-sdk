@@ -15,6 +15,8 @@
 
 - [UPDATE] iOS の画面キャプチャの時刻取得を `CACurrentMediaTime()` に変更する
   - @zztkm
+- [UPDATE] Required Reason API の再導入を検出する CI 検査を追加する
+  - @zztkm
 
 ## 2026.1.0
 

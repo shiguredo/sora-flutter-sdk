@@ -826,21 +826,27 @@ final class SoraScreenCapturer: @unchecked Sendable {
         let last = lastSentPresentationTimestamp,
         last.isValid, !last.isIndefinite
       else {
-        guard let lastSentMediaTime else { return true }
-        return CACurrentMediaTime() - lastSentMediaTime
-          >= 1.0 / Double(targetFPS)
+        return shouldSendFrameWithMediaTime()
       }
       let elapsed = CMTimeSubtract(presentationTimestamp, last)
       guard elapsed.isValid, !elapsed.isIndefinite,
         CMTimeCompare(elapsed, .zero) >= 0
       else {
-        guard let lastSentMediaTime else { return true }
-        return CACurrentMediaTime() - lastSentMediaTime
-          >= 1.0 / Double(targetFPS)
+        return shouldSendFrameWithMediaTime()
       }
       let minimumInterval = CMTime(value: 1, timescale: CMTimeScale(targetFPS))
       return CMTimeCompare(elapsed, minimumInterval) >= 0
     }
+  }
+
+  /// 前回送信したフレームの単調時刻と targetFPS から今回フレームを送信するかを判定します。
+  ///
+  /// PTS が無効・不定、または PTS が巻き戻ったフレームのフォールバックで使用します。
+  /// 呼び出し元は `withStateLock` の区間内で呼び出すこと。
+  private func shouldSendFrameWithMediaTime() -> Bool {
+    guard let lastSentMediaTime else { return true }
+    return CACurrentMediaTime() - lastSentMediaTime
+      >= 1.0 / Double(targetFPS)
   }
 
   private func markFrameSent(_ presentationTimestamp: CMTime) {

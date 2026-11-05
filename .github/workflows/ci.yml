@@ -440,20 +440,59 @@ jobs:
           # 現行の native dependency 配布は iphoneos 向けのため、署名なし実機 build で成立性を確認する。
           flutter build ios --release --no-codesign --no-pub
 
-      - name: Verify iOS SystemBootTime API removal
+      - name: Verify iOS Required Reason API symbols
         working-directory: devtools
         run: |
           set -euo pipefail
-          # 自前 Swift コードのオブジェクトに systemUptime の参照が残っていないことを確認する。
-          # libwebrtc_c は静的ライブラリとして _mach_absolute_time を参照するため、
-          # 最終バイナリではなく sora_sdk.o を対象にする。
+          # 自前 Swift コードのオブジェクトに Required Reason API の参照が残っていないことを確認する。
+          # libwebrtc_c を静的リンクする最終バイナリには WebRTC 由来のシンボルが残るため、
+          # 自前 Swift コードだけを含む sora_sdk.o を対象にする。
+          # systemUptime などの Objective-C プロパティは selector stub として
+          # _objc_msgSend$... に現れる。
           sora_sdk_object="$(find build/ios -name 'sora_sdk.o' -print -quit)"
           if [[ -z "${sora_sdk_object}" ]]; then
             echo "sora_sdk.o was not found under build/ios." >&2
             exit 1
           fi
-          if nm -u "${sora_sdk_object}" | grep -Fq '_objc_msgSend$systemUptime'; then
-            echo "sora_sdk.o still references systemUptime." >&2
+          if ! symbols="$(nm -u "${sora_sdk_object}")"; then
+            echo "nm failed for ${sora_sdk_object}." >&2
+            exit 1
+          fi
+          if matched="$(printf '%s\n' "${symbols}" | grep -E '^_(getattrlist|getattrlistbulk|fgetattrlist|getattrlistat|stat|fstat|fstatat|lstat|mach_absolute_time|statfs|statvfs|fstatfs|fstatvfs)$|^_NS(FileCreationDate|FileModificationDate|FileSystemFreeSize|FileSystemSize|URLCreationDateKey|URLContentModificationDateKey|URLVolumeAvailableCapacityKey|URLVolumeAvailableCapacityForImportantUsageKey|URLVolumeAvailableCapacityForOpportunisticUsageKey|URLVolumeTotalCapacityKey)$|^_OBJC_CLASS_\$_NSUserDefaults$|SwiftUI10AppStorageV|^_objc_msgSend\$(systemUptime|activeInputModes|fileModificationDate)$')"; then
+            echo "Required Reason API symbols are referenced in sora_sdk.o:" >&2
+            printf '%s\n' "${matched}" >&2
+            exit 1
+          fi
+
+      - name: Verify iOS Required Reason API sources
+        run: |
+          set -euo pipefail
+          # sora_sdk の Swift ソースに Required Reason API の利用が残っていないことを確認する。
+          # 行コメントは利用ではないため除外する。
+          # 一覧にない同名 API を誤検出した場合は、この step に除外条件を追加する。
+          # pathspec が 0 件に一致したまま成功しないよう、先に対象のファイル数を確認する。
+          count=$(git ls-files -- ':(glob)ios/sora_sdk/Sources/**/*.swift' ':(glob)macos/sora_sdk/Sources/**/*.swift' | wc -l | tr -d ' ')
+          if [ "$count" -eq 0 ]; then
+            echo 'Error: the pathspec matches no tracked file under ios/sora_sdk/Sources and macos/sora_sdk/Sources.' >&2
+            exit 1
+          fi
+          pattern='creationDate|creationDateKey|modificationDate|fileModificationDate|contentModificationDateKey|getattrlist|getattrlistbulk|fgetattrlist|getattrlistat|stat|fstat|fstatat|lstat|systemUptime|mach_absolute_time|volumeAvailableCapacityKey|volumeAvailableCapacityForImportantUsageKey|volumeAvailableCapacityForOpportunisticUsageKey|volumeTotalCapacityKey|systemFreeSize|systemSize|statfs|statvfs|fstatfs|fstatvfs|activeInputModes|UserDefaults|AppStorage'
+          set +e
+          found=$(git grep -n -w -E "$pattern" -- ':(glob)ios/sora_sdk/Sources/**/*.swift' ':(glob)macos/sora_sdk/Sources/**/*.swift')
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
+            echo "git grep failed (exit $status)." >&2
+            exit 1
+          fi
+          violations=$(
+            printf '%s\n' "$found" \
+              | grep -v -E ':[0-9]+:[[:space:]]*//' \
+              | grep -v '^$' || true
+          )
+          if [ -n "$violations" ]; then
+            echo 'Error: Required Reason API is used in sora_sdk sources:' >&2
+            printf '%s\n' "$violations" >&2
             exit 1
           fi
 

@@ -11,10 +11,11 @@
 
 ## develop
 
-### misc
-
 - [UPDATE] iOS の画面キャプチャの時刻取得を `CACurrentMediaTime()` に変更する
   - @zztkm
+
+### misc
+
 - [UPDATE] Required Reason API の再導入を検出する CI 検査を追加する
   - @zztkm
 

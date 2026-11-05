@@ -49,6 +49,17 @@ let package = Package(
         .product(name: "FlutterFramework", package: "FlutterFramework"),
       ],
       path: "Sources/sora_sdk",
+      // libwebrtc_c は静的ライブラリであり、SwiftPM の binaryTarget は
+      // static xcframework の resources をアプリへ届けない。そのため
+      // WebRTC 由来の Required Reason API の宣言を SDK 側で同梱する。
+      // PrivacyInfo.xcprivacy は shiguredo-webrtc-build の WebRTC.xcframework.zip に
+      // 含まれる WebRTC.framework/PrivacyInfo.xcprivacy をそのまま同梱する。
+      // 対象バージョンは scripts/native_deps.json の webrtc を参照し、
+      // 更新時は同じバージョンの manifest と差分を確認する。
+      // libwebrtc_c の実際のシンボルは build-apple の検査で確認する。
+      resources: [
+        .process("Resources/PrivacyInfo.xcprivacy")
+      ],
       linkerSettings: [
         .linkedLibrary("c++"),
         .linkedLibrary("c++abi"),

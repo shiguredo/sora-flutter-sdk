@@ -440,6 +440,122 @@ jobs:
           # 現行の native dependency 配布は iphoneos 向けのため、署名なし実機 build で成立性を確認する。
           flutter build ios --release --no-codesign --no-pub
 
+      - name: Verify iOS Required Reason API symbols
+        working-directory: devtools
+        run: |
+          set -euo pipefail
+          # 自前 Swift コードのオブジェクトに Required Reason API の参照が残っていないことを確認する。
+          # libwebrtc_c を静的リンクする最終バイナリには WebRTC 由来のシンボルが残るため、
+          # 自前 Swift コードだけを含む sora_sdk.o を対象にする。
+          # systemUptime などの Objective-C プロパティは selector stub として
+          # _objc_msgSend$... に現れる。
+          sora_sdk_object="$(find build/ios -name 'sora_sdk.o' -print -quit)"
+          if [[ -z "${sora_sdk_object}" ]]; then
+            echo "sora_sdk.o was not found under build/ios." >&2
+            exit 1
+          fi
+          if ! symbols="$(nm -u "${sora_sdk_object}")"; then
+            echo "nm failed for ${sora_sdk_object}." >&2
+            exit 1
+          fi
+          if matched="$(printf '%s\n' "${symbols}" | grep -E '^_(getattrlist|getattrlistbulk|fgetattrlist|getattrlistat|stat|fstat|fstatat|lstat|mach_absolute_time|statfs|statvfs|fstatfs|fstatvfs)$|^_NS(FileCreationDate|FileModificationDate|FileSystemFreeSize|FileSystemSize|URLCreationDateKey|URLContentModificationDateKey|URLVolumeAvailableCapacityKey|URLVolumeAvailableCapacityForImportantUsageKey|URLVolumeAvailableCapacityForOpportunisticUsageKey|URLVolumeTotalCapacityKey)$|^_OBJC_CLASS_\$_NSUserDefaults$|SwiftUI10AppStorageV|^_objc_msgSend\$(systemUptime|activeInputModes|fileModificationDate)$')"; then
+            echo "Required Reason API symbols are referenced in sora_sdk.o:" >&2
+            printf '%s\n' "${matched}" >&2
+            exit 1
+          fi
+
+      - name: Verify iOS Required Reason API sources
+        run: |
+          set -euo pipefail
+          # sora_sdk の Swift ソースに Required Reason API の利用が残っていないことを確認する。
+          # 行コメントは利用ではないため除外する。
+          # 一覧にない同名 API を誤検出した場合は、この step に除外条件を追加する。
+          # pathspec が 0 件に一致したまま成功しないよう、先に対象のファイル数を確認する。
+          count=$(git ls-files -- ':(glob)ios/sora_sdk/Sources/**/*.swift' ':(glob)macos/sora_sdk/Sources/**/*.swift' | wc -l | tr -d ' ')
+          if [ "$count" -eq 0 ]; then
+            echo 'Error: the pathspec matches no tracked file under ios/sora_sdk/Sources and macos/sora_sdk/Sources.' >&2
+            exit 1
+          fi
+          pattern='creationDate|creationDateKey|modificationDate|fileModificationDate|contentModificationDateKey|getattrlist|getattrlistbulk|fgetattrlist|getattrlistat|stat|fstat|fstatat|lstat|systemUptime|mach_absolute_time|volumeAvailableCapacityKey|volumeAvailableCapacityForImportantUsageKey|volumeAvailableCapacityForOpportunisticUsageKey|volumeTotalCapacityKey|systemFreeSize|systemSize|statfs|statvfs|fstatfs|fstatvfs|activeInputModes|UserDefaults|AppStorage'
+          set +e
+          found=$(git grep -n -w -E "$pattern" -- ':(glob)ios/sora_sdk/Sources/**/*.swift' ':(glob)macos/sora_sdk/Sources/**/*.swift')
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
+            echo "git grep failed (exit $status)." >&2
+            exit 1
+          fi
+          violations=$(
+            printf '%s\n' "$found" \
+              | grep -v -E ':[0-9]+:[[:space:]]*//' \
+              | grep -v '^$' || true
+          )
+          if [ -n "$violations" ]; then
+            echo 'Error: Required Reason API is used in sora_sdk sources:' >&2
+            printf '%s\n' "$violations" >&2
+            exit 1
+          fi
+
+      - name: Verify iOS privacy manifest
+        working-directory: devtools
+        run: |
+          set -euo pipefail
+          app="build/ios/iphoneos/Runner.app"
+          if [[ ! -d "${app}" ]]; then
+            echo "Runner.app was not found at ${app}." >&2
+            exit 1
+          fi
+
+          # SDK の resource bundle に manifest が同梱されていることを確認する。
+          sdk_manifest="$(find "${app}" -type f -path '*sora_sdk*.bundle/PrivacyInfo.xcprivacy' -print -quit)"
+          if [[ -z "${sdk_manifest}" ]]; then
+            echo "PrivacyInfo.xcprivacy for sora_sdk was not found in Runner.app." >&2
+            exit 1
+          fi
+          plutil -lint "${sdk_manifest}"
+
+          # 本 SDK が宣言すべきカテゴリが含まれていることを確認する。
+          sdk_categories="$(plutil -convert json -o - "${sdk_manifest}" | jq -r '.NSPrivacyAccessedAPITypes[]?.NSPrivacyAccessedAPIType')"
+          for category in \
+            NSPrivacyAccessedAPICategorySystemBootTime \
+            NSPrivacyAccessedAPICategoryFileTimestamp; do
+            if ! grep -qx "${category}" <<<"${sdk_categories}"; then
+              echo "Missing required reason API category in sora_sdk manifest: ${category}" >&2
+              exit 1
+            fi
+          done
+
+          # アプリ内の全 manifest の宣言を集約する。
+          all_categories="$(
+            find "${app}" -name 'PrivacyInfo.xcprivacy' -type f -print0 |
+              while IFS= read -r -d '' manifest; do
+                plutil -convert json -o - "${manifest}" |
+                  jq -r '.NSPrivacyAccessedAPITypes[]?.NSPrivacyAccessedAPIType'
+              done |
+              sort -u
+          )"
+
+          # 最終バイナリに残る required reason API のシンボルとカテゴリの対応を確認する。
+          scan_result="$( (nm -u "${app}/Runner"; strings -a "${app}/Runner") )"
+          check_category() {
+            local category="$1"
+            shift
+            local symbol
+            for symbol in "$@"; do
+              if grep -qw -- "${symbol}" <<<"${scan_result}"; then
+                if ! grep -qx "${category}" <<<"${all_categories}"; then
+                  echo "Undeclared required reason API category: ${category} (symbol: ${symbol})" >&2
+                  exit 1
+                fi
+              fi
+            done
+          }
+          check_category NSPrivacyAccessedAPICategorySystemBootTime _mach_absolute_time systemUptime
+          check_category NSPrivacyAccessedAPICategoryFileTimestamp _stat _fstat _fstatat _lstat _getattrlist _getattrlistbulk _fgetattrlist _getattrlistat
+          check_category NSPrivacyAccessedAPICategoryDiskSpace _statfs _statvfs _fstatfs _fstatvfs
+          check_category NSPrivacyAccessedAPICategoryActiveKeyboards activeInputModes
+          check_category NSPrivacyAccessedAPICategoryUserDefaults _NSUserDefaults
+
       - name: Build devtools macOS app
         working-directory: devtools
         run: |

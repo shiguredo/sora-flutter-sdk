@@ -27,7 +27,7 @@ sora-ios-sdk の 0199 (SystemBootTime に分類される Required Reason API の
 - `CACurrentMediaTime()` は現在の Apple の Required Reason API 一覧に含まれていない。Apple のドキュメント上は `mach_absolute_time()` を秒に換算した値であるため、一覧の趣旨に照らした再検討が必要になった場合は、本 issue では実装を進めず pending にしてユーザーに判断を仰ぐ。この前提は sora-ios-sdk の 0199 と同じである。
 - 公開 API は変更しない。Dart 側の挙動も変えない。
 - `.github/workflows/ci.yml` の `build-apple` ジョブで Required Reason API の再導入を検査する。検査は 2 段構えとし、Release ビルド後の `sora_sdk.o` の未定義シンボルと `ios/sora_sdk/Sources` / `macos/sora_sdk/Sources` の Swift ソースを対象にする。対象カテゴリは SystemBootTime だけでなく FileTimestamp / DiskSpace / ActiveKeyboards / UserDefaults を含む 5 カテゴリとする。libwebrtc_c が `_mach_absolute_time` を参照するため、最終バイナリ `Runner` ではなく自前 Swift コードのオブジェクトを対象にする。オブジェクトのパスはビルド成果物に合わせて `find` で特定し、オブジェクトが見つからない場合と `nm` が失敗した場合は step を失敗させる。ソース検査は行コメントを除外し、対象ファイル数が 0 件の場合と `git grep` が失敗した場合も step を失敗させる。
-- `CHANGELOG.md` の `## develop` に `### misc` を追加し、`[UPDATE]` で時刻取得 API の変更と CI 検査の追加を追記する。
+- `CHANGELOG.md` の `## develop` に `[UPDATE]` で時刻取得 API の変更を追記し、CI 検査の追加は `### misc` に追記する。
 
 ## 変更対象
 
@@ -52,7 +52,7 @@ sora-ios-sdk の 0199 (SystemBootTime に分類される Required Reason API の
 
 - `ios/sora_sdk/Sources/sora_sdk/SoraScreenCapturer.swift` の `SoraScreenCapturer` で `ProcessInfo.processInfo.systemUptime` を `CACurrentMediaTime()` に置き換え、`import QuartzCore` を追加した。`lastSentUptime` を `lastSentMediaTime` に改名し、関連コメントを実態に合わせた。フレーム間引きのフォールバック判定は `shouldSendFrameWithMediaTime()` に切り出した。PTS が無効な場合の間引き動作、メディアタイムスタンプのフォールバック、公開 API は変えていない
 - `.github/workflows/ci.yml` の `build-apple` に 2 つの検査 step を追加した。1 つは Release ビルド後の `sora_sdk.o` を `nm -u` して Required Reason API のシンボルが無いことを確認し、もう 1 つは `ios/sora_sdk/Sources` と `macos/sora_sdk/Sources` の Swift ソースを `git grep` して API の利用が無いことを確認する。どちらも 5 カテゴリを対象とし、ソース検査は行コメントを除外する。オブジェクトが見つからない場合、`nm` が失敗した場合、対象ファイルが 0 件の場合、`git grep` が失敗した場合は step を失敗させる
-- `CHANGELOG.md` の `## develop` の `### misc` に、時刻取得 API の変更と CI 検査の追加を `[UPDATE]` で追記した
+- `CHANGELOG.md` の `## develop` に時刻取得 API の変更を、`### misc` に CI 検査の追加を `[UPDATE]` で追記した
 
 ### 検証
 

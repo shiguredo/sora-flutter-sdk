@@ -75,7 +75,7 @@ flutter pub add sora_sdk
 
 ## Privacy Manifest
 
-iOS 向けには Required Reason API の利用理由を宣言した `PrivacyInfo.xcprivacy` を同梱しています。この SDK の分については、アプリ側の privacy manifest に追記する必要はありません。
+iOS 向けには Required Reason API の利用理由を宣言した `PrivacyInfo.xcprivacy` を同梱しています。libwebrtc_c を静的ライブラリとしてリンクするため、WebRTC 由来の宣言も SDK 側に含めています。この SDK の分については、アプリ側の privacy manifest に追記する必要はありません。
 
 アプリ本体のコードや他の SDK が Required Reason API を利用する場合は、アプリ側の privacy manifest に追記が必要です。
 

@@ -49,6 +49,9 @@ let package = Package(
         .product(name: "FlutterFramework", package: "FlutterFramework"),
       ],
       path: "Sources/sora_sdk",
+      // libwebrtc_c は静的ライブラリであり、SwiftPM の binaryTarget は
+      // static xcframework の resources をアプリへ届けない。そのため
+      // WebRTC 由来の Required Reason API の宣言を SDK 側で同梱する。
       resources: [
         .process("Resources/PrivacyInfo.xcprivacy")
       ],

@@ -2,7 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
 	Sora Flutter SDK の iOS 実装が利用する Required Reason API を宣言する。
-	libwebrtc_c は静的ライブラリのため manifest を同梱できず、SDK 側で WebRTC 由来の分も宣言する。
+	libwebrtc_c は静的ライブラリで、SwiftPM の binaryTarget は static xcframework の
+	resources をアプリへ届けないため、WebRTC 由来の宣言を SDK 側で同梱する。
 -->
 <plist version="1.0">
 <dict>

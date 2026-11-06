@@ -3,7 +3,7 @@
 - Created: 2026-11-06
 - Completed: {YYYY-MM-DD}
 - Branch: feature/fix-redirect-close-race
-- Polished: {YYYY-MM-DD}
+- Polished: 2026-11-06
 
 ## 目的
 
@@ -25,22 +25,22 @@ Sora のクラスター構成では、シグナリング接続時に `type: redi
 
 ## 設計方針
 
-- close の処理も受信メッセージと同じ tail に連結し、受信順に処理する。`onDone` から直接 `_handleWebSocketDone` を呼ばず、`_enqueueWebSocketMessage` と同様のヘルパで `webSocketMessageTail` に append する。これにより redirect メッセージの処理 (`webSocketChannel` の null 化) が完了してから close が評価される。
+- close の処理も受信メッセージと同じ tail に連結し、受信順に処理する。`onDone` から直接 `_handleWebSocketDone` を呼ばず、`_enqueueWebSocketMessage` と同様のヘルパで `webSocketMessageTail` に append する。これにより redirect メッセージの処理 (`webSocketChannel` の null 化) が完了してから close が評価される。`onDone` の登録箇所は `_connectWebSocket`、`_handleRedirectMessage`、テスト専用の `injectSignalingWebSocketForTest` の 3 箇所があるため、すべて同じ enqueue ヘルパ経由に揃える。`onError` は 0077 の既存挙動を維持し、本 issue では `onDone` のみを tail に連結する。
 - `webSocketMessageTail` は redirect をまたいで単一チェーンを維持する既存方針 (0077) を踏襲する。old / new channel のメッセージと close が同じ順序で処理される。
 - close の処理順を遅らせても、切断状態の確定が pending メッセージの処理後になるだけで問題ない。タイムアウトや異常終了の経路は既存のまま維持する。
 - 「reason が REDIRECT の close を一律無視する」ような理由文字列依存の判定は行わない。他の 1000 close と区別できず、サーバー側の理由文字列変更にも弱いため、あくまで受信順で解決する。
-- 回帰テストは `dart:io` の `HttpServer` + `WebSocketTransformer` で実 WebSocket サーバーを立て、redirect メッセージ送信直後に close するサーバーに対して `connect()` が redirect 先で成功することを検証する。既存の redirect テストは `handleRedirectMessageForTest` を直接呼ぶため、stream 経由の close 順序を exercise していない。
+- 回帰テストは `dart:io` の `HttpServer` + `WebSocketTransformer` で実 WebSocket サーバーを立て、初期サーバーがクライアントの connect メッセージを受信してから redirect メッセージを送り、その直後に `close(1000, "REDIRECT")` で閉じる。redirect 先のサーバーが redirect フラグ付き connect メッセージを受信したことを確認したうえで、テストから `handleWebrtcEventForTest` で `state_changed` の `connected` を注入し、`connect()` が redirect 先で成功することを検証する。`handleWebrtcEventForTest` は実 `_handleWebrtcEvent` を呼ぶテストフックであり、モックやスタブではない。既存の redirect テストは `handleRedirectMessageForTest` を直接呼ぶため、stream 経由の close 順序を exercise していない。
 - redirect 失敗時の `SoraConnectionErrorEvent` と異常終了 (0072)、および tail 直列化 (0077) の既存挙動を壊さない。
 
 ## 完了条件
 
 - [ ] redirect メッセージ直後に close するサーバーに対して、`connect()` が redirect 先で成功する
-- [ ] close が redirect 処理より先に届いても `PeerConnection disconnected before connected` にならない
+- [ ] close の `onDone` が redirect メッセージの処理より先に発火しても `PeerConnection disconnected before connected` にならない
 - [ ] redirect ではない通常のサーバー主導 close の扱いが変わらない
-- [ ] redirect 失敗時のエラー通知と異常終了の挙動が変わらない
-- [ ] 実 WebSocket サーバーを使った回帰テストが追加され、モックやスタブを使用していない
+- [ ] redirect 失敗時の `SoraConnectionErrorEvent` と異常終了の既存経路 (0072) が維持される
+- [ ] 実 WebSocket サーバーを使った回帰テストが追加され、モックやスタブを使用していない (`handleWebrtcEventForTest` による `connected` 注入は実 `_handleWebrtcEvent` を呼ぶテストフックであり、モックやスタブではない)
 - [ ] `flutter analyze --fatal-infos` と関連テストが成功する
-- [ ] `CHANGELOG.md` は正式リリース前のため追記しない (`CODEBASE.md` の規約に従う)
+- [ ] `CHANGELOG.md` の `## develop` に `[FIX]` エントリを追記する (`shiguredo-changelog` と `CODEBASE.md` の規約に従う)
 
 ## 関連 issue
 

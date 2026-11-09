@@ -793,6 +793,145 @@ void main() {
         }
       },
     );
+
+    test(
+      'redirect 直後に WebSocket が close しても connect() が redirect 先で成功する',
+      () async {
+        // issue 0180 の回帰テスト。
+        // Sora のクラスター構成は redirect メッセージを送った直後に旧
+        // WebSocket を close(1000, 'REDIRECT') する。onDone を同期で処理すると、
+        // 受信済みでキューに積まれた redirect メッセージより close が先に評価され、
+        // redirect が「サーバー主導の切断」として扱われ、connect() が
+        // `PeerConnection disconnected before connected` で失敗する。
+        // 実 WebSocket サーバーを 2 台立て、connect() が redirect 先で成功する
+        // ことを検証する。モックやスタブは使わない。
+        final receivedRedirectConnect = Completer<Map<String, Object?>>();
+        // redirect 先。redirect フラグ付き connect メッセージを捕捉する。
+        final redirectServer = await HttpServer.bind(
+          InternetAddress.loopbackIPv4,
+          0,
+        );
+        redirectServer.listen((request) async {
+          if (!WebSocketTransformer.isUpgradeRequest(request)) {
+            request.response.statusCode = HttpStatus.badRequest;
+            await request.response.close();
+            return;
+          }
+          final socket = await WebSocketTransformer.upgrade(request);
+          socket.listen((message) {
+            if (message is! String) {
+              return;
+            }
+            final decoded = jsonDecode(message);
+            if (decoded is Map<String, Object?> &&
+                decoded['type'] == 'connect' &&
+                !receivedRedirectConnect.isCompleted) {
+              receivedRedirectConnect.complete(decoded);
+            }
+          });
+        });
+        final redirectUrl =
+            'ws://${redirectServer.address.host}:${redirectServer.port}';
+
+        // redirect 元。クライアントの connect メッセージを受けてから redirect を
+        // 送り、直後に close する。Sora サーバーと同じ順序と近接が再現条件。
+        final sourceServer = await HttpServer.bind(
+          InternetAddress.loopbackIPv4,
+          0,
+        );
+        sourceServer.listen((request) async {
+          if (!WebSocketTransformer.isUpgradeRequest(request)) {
+            request.response.statusCode = HttpStatus.badRequest;
+            await request.response.close();
+            return;
+          }
+          final socket = await WebSocketTransformer.upgrade(request);
+          socket.listen((message) {
+            if (message is! String) {
+              return;
+            }
+            final decoded = jsonDecode(message);
+            if (decoded is! Map<String, Object?> ||
+                decoded['type'] != 'connect') {
+              return;
+            }
+            socket.add(
+              jsonEncode(<String, Object?>{
+                'type': 'redirect',
+                'location': redirectUrl,
+              }),
+            );
+            // Sora サーバーと同じく、redirect メッセージの直後に旧 WebSocket を
+            // close する。この近接が本 issue の再現条件。
+            unawaited(socket.close(1000, 'REDIRECT'));
+          });
+        });
+        final sourceUrl =
+            'ws://${sourceServer.address.host}:${sourceServer.port}';
+
+        final connection = SoraConnection.createForTest(
+          config: SoraConnectionConfig(
+            signalingUrls: <String>[sourceUrl],
+            channelId: 'test-channel',
+            role: SoraRole.recvonly,
+          ),
+          clientId: 1,
+          eventChannelName: 'test-event-channel',
+        );
+        final debugMessages = <String>[];
+        final errors = <SoraConnectionErrorEvent>[];
+        final debugSub = connection.debugMessages.listen(debugMessages.add);
+        final sub = connection.events.listen((event) {
+          if (event is SoraConnectionErrorEvent) {
+            errors.add(event);
+          }
+        });
+        try {
+          final connectFuture = connection.connect();
+
+          // redirect 先へ redirect フラグ付き connect メッセージが届けば
+          // redirect 処理は完了している。
+          final connectMessage = await receivedRedirectConnect.future.timeout(
+            const Duration(seconds: 15),
+          );
+          expect(connectMessage['redirect'], isTrue);
+
+          // native の PeerConnection connected 通知を注入して connect() を完了させる。
+          // `handleWebrtcEventForTest` は実 `_handleWebrtcEvent` を呼ぶテストフックであり、
+          // モックやスタブではない。
+          await connection.handleWebrtcEventForTest(
+            'state_changed',
+            const <String, Object?>{'state': 'connected'},
+          );
+          await connectFuture.timeout(const Duration(seconds: 15));
+          // emit はマイクロタスク経由のため、保留分を処理してから判定する。
+          await pumpEventQueue();
+
+          // 接続失敗の通知が出ていないこと。
+          expect(errors, isEmpty);
+          // 旧 channel の close がサーバー主導の切断として扱われていないこと。
+          expect(
+            debugMessages.where(
+              (message) => message.contains('triggering server_disconnect'),
+            ),
+            isEmpty,
+            reason: 'redirect 直後の close を server_disconnect として扱わないこと',
+          );
+          // redirect 先の WebSocket が現役 transport になっていること。
+          expect(
+            connection.signalingHasActiveTransportForTest,
+            isTrue,
+            reason: 'redirect 先の WebSocket が現役 transport であること',
+          );
+        } finally {
+          await debugSub.cancel();
+          await sub.cancel();
+          await disposeConnection(connection);
+          await sourceServer.close(force: true);
+          await redirectServer.close(force: true);
+        }
+      },
+    );
   }, skip: ffiTestEnvironment.skipReason);
 
   group('SoraConnection WebSocket シグナリングメッセージ順序', () {

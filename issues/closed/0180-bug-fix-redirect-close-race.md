@@ -1,7 +1,7 @@
 # redirect 直後の WebSocket close が redirect 処理より先に処理されて接続に失敗するバグを修正する
 
 - Created: 2026-11-06
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-11-09
 - Branch: feature/fix-redirect-close-race
 - Polished: 2026-11-06
 
@@ -41,6 +41,22 @@ Sora のクラスター構成では、シグナリング接続時に `type: redi
 - [ ] 実 WebSocket サーバーを使った回帰テストが追加され、モックやスタブを使用していない (`handleWebrtcEventForTest` による `connected` 注入は実 `_handleWebrtcEvent` を呼ぶテストフックであり、モックやスタブではない)
 - [ ] `flutter analyze --fatal-infos` と関連テストが成功する
 - [ ] `CHANGELOG.md` の `## develop` に `[FIX]` エントリを追記する (`shiguredo-changelog` と `CODEBASE.md` の規約に従う)
+
+## 解決方法
+
+WebSocket の close (onDone) も受信メッセージと同じ tail に連結し、受信順に処理するようにした。
+
+- `_SoraConnectionSignaling._enqueueWebSocketClose` を追加し、`_handleWebSocketDone` を `SignalingSessionState.webSocketMessageTail` の末尾で実行する
+- onDone を登録する 3 箇所 (`_connectWebSocket` / `_handleRedirectMessage` / `injectSignalingWebSocketForTest`) をすべて同じ enqueue 経由に揃え、onDone から `_handleWebSocketDone` を直接呼ばないようにした
+- `SignalingSessionState.webSocketMessageTail` のコメントに、close も同じ tail に載ることを明記した
+
+確認:
+
+- 実 WebSocket サーバーを 2 台立てた回帰テストを追加した。redirect 元はクライアントの connect メッセージを受けてから redirect を送り、その直後に `close(1000, "REDIRECT")` で閉じる。redirect 先が redirect フラグ付き connect を受信したあと、`handleWebrtcEventForTest` で `state_changed` の `connected` を注入し、`connect()` が成功することを検証する
+- 回帰テストは修正前のコードでは `Bad state: PeerConnection disconnected before connected` で失敗し、修正後は成功することを確認した
+- `flutter analyze --fatal-infos lib test` が通ることを確認した
+- `test/sora_connection_test.dart` の FFI 依存テスト 33 件が成功することを確認した
+- E2E Test (本ブランチ, run 42553306026) で 46 ジョブすべて成功することを確認した
 
 ## 関連 issue
 

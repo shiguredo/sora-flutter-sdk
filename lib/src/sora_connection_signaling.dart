@@ -46,7 +46,11 @@ extension _SoraConnectionSignaling on SoraConnection {
             _handleWebSocketError(error, stackTrace, channel);
           },
           onDone: () {
-            _handleWebSocketDone(channel);
+            // close の処理もメッセージと同じ tail に積み、受信順を保証する。
+            // onDone から同期で `_handleWebSocketDone` を呼ぶと、受信済みで
+            // キューに残っている redirect メッセージより close が先に評価され、
+            // redirect が「サーバー主導の切断」として扱われて接続に失敗する。
+            _enqueueWebSocketClose(channel);
           },
         );
         _emitDebugMessage('ws connected: $url');
@@ -131,6 +135,11 @@ extension _SoraConnectionSignaling on SoraConnection {
   ///
   /// tail のライフサイクル詳細は `SignalingSessionState.webSocketMessageTail`
   /// のフィールド docstring を参照。
+  ///
+  /// WebSocket の close (`_handleWebSocketDone`) も `_enqueueWebSocketClose` 経由で
+  /// 同じ tail に append する。受信メッセージと close の処理順が入れ替わると、
+  /// redirect 直後に届いた close が redirect 処理より先に評価されて接続が失敗する
+  /// ため、close も tail で直列化する (issue 0180)。
   Future<void> _enqueueWebSocketMessage(Object? message) async {
     final previous =
         _signalingState.webSocketMessageTail ?? Future<void>.value();
@@ -144,6 +153,39 @@ extension _SoraConnectionSignaling on SoraConnection {
       await current;
     } catch (error) {
       _emitDebugMessage('ws message handler failed: $error');
+    }
+  }
+
+  /// WebSocket の close (onDone) をメッセージ処理 tail に append し、
+  /// 受信順に処理する。
+  ///
+  /// `channel.stream.listen` の `onDone` は同期で呼ばれるため、そこから
+  /// `_handleWebSocketDone` を直接実行すると、受信済みでキューに積まれた
+  /// メッセージ (特に redirect) より close が先に処理される。Sora の
+  /// クラスター構成は redirect メッセージの直後に旧 WebSocket を
+  /// `close(1000, 'REDIRECT')` するため、close が先行すると redirect が
+  /// 「サーバー主導の切断」として扱われ、接続待ちが
+  /// `PeerConnection disconnected before connected` で失敗する (issue 0180)。
+  ///
+  /// 直列化のセマンティクスは `_enqueueWebSocketMessage` と同一で、先行処理の
+  /// 失敗でチェーンが停止しないよう `.catchError((_, _) {})` を挟む。
+  /// [name] は `_handleWebSocketDone` のエラーメッセージに含める識別名。
+  Future<void> _enqueueWebSocketClose(
+    WebSocketChannel? channel, {
+    String name = 'WebSocket',
+  }) async {
+    final previous =
+        _signalingState.webSocketMessageTail ?? Future<void>.value();
+    final current = previous
+        .catchError((Object _, StackTrace _) {
+          // 先行メッセージ失敗でチェーン全体が停止しないようにする。
+        })
+        .then((_) => _handleWebSocketDone(channel, name: name));
+    _signalingState.webSocketMessageTail = current;
+    try {
+      await current;
+    } catch (error) {
+      _emitDebugMessage('ws close handler failed: $error');
     }
   }
 
@@ -381,7 +423,8 @@ extension _SoraConnectionSignaling on SoraConnection {
           _handleWebSocketError(error, stackTrace, newChannel);
         },
         onDone: () {
-          _handleWebSocketDone(newChannel, name: 'Redirect WebSocket');
+          // redirect 後の channel も同じ tail で close を受信順に処理する。
+          _enqueueWebSocketClose(newChannel, name: 'Redirect WebSocket');
         },
       );
     } on TimeoutException catch (timeoutError, timeoutStackTrace) {
@@ -500,6 +543,10 @@ extension _SoraConnectionSignaling on SoraConnection {
   }
 
   /// WebSocket の onDone 共通処理。
+  ///
+  /// 本関数は `_enqueueWebSocketClose` 経由でメッセージ処理 tail の末尾から
+  /// 呼ばれる。`onDone` から直接呼ぶと redirect 直後の close が redirect 処理
+  /// より先行して接続が失敗するため、直接呼び出さないこと (issue 0180)。
   ///
   /// [name] はエラーメッセージに含める識別名（通常は 'WebSocket'、redirect 時は 'Redirect WebSocket'）。
   void _handleWebSocketDone(

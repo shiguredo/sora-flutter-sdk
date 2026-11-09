@@ -42,6 +42,10 @@ class SignalingSessionState {
 
   // WebSocket シグナリングメッセージを受信順に処理するための tail Future。
   //
+  // 受信メッセージ (`_enqueueWebSocketMessage`) と close
+  // (`_enqueueWebSocketClose`) の両方を同じ tail に append し、redirect 直後の
+  // close が redirect 処理より先行しないことを保証する (issue 0180)。
+  //
   // ライフサイクル: append と直列化のメカニズムは `_enqueueWebSocketMessage`
   // (`sora_connection_signaling.dart`) を参照。`resetSession()` で null に
   // 戻し、次回セッションへ前回の tail チェーンを持ち越さない。

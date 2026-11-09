@@ -26,6 +26,12 @@ void main() {
 
   final ffiTestEnvironment = prepareFfiTestEnvironment();
 
+  // このファイルのテストはシグナリング層だけを対象にし、実音声デバイスを使わない。
+  // 共有 PeerConnectionFactory の ADM に実デバイスを使うと、音声デバイスの無い
+  // CI の Linux ランナーで初期化に失敗する (AudioDeviceModule init failed: rc=-1)。
+  // そのため全テストの接続設定で useAudioDevice: false (PushAudioDevice) を使う。
+  // 実デバイスを使う経路は E2E テストで検証する。
+
   group('SoraConnection._handleWebrtcEvent の想定外イベント処理', () {
     late WebrtcClient wc;
 
@@ -42,6 +48,7 @@ void main() {
     SoraConnection createConnection() {
       return SoraConnection.createForTest(
         config: const SoraConnectionConfig(
+          useAudioDevice: false,
           signalingUrls: <String>['wss://example.com/signaling'],
           channelId: 'test-channel',
           role: SoraRole.recvonly,
@@ -215,6 +222,7 @@ void main() {
     test('audioStreamingLanguageCode 指定時に connect メッセージへ設定する', () async {
       final connection = createConnection(
         const SoraConnectionConfig(
+          useAudioDevice: false,
           signalingUrls: <String>['wss://example.com/signaling'],
           channelId: 'test-channel',
           role: SoraRole.sendrecv,
@@ -235,6 +243,7 @@ void main() {
     test('audio が false の場合は audio_streaming_language_code を含めない', () async {
       final connection = createConnection(
         const SoraConnectionConfig(
+          useAudioDevice: false,
           signalingUrls: <String>['wss://example.com/signaling'],
           channelId: 'test-channel',
           role: SoraRole.sendrecv,
@@ -257,6 +266,7 @@ void main() {
     test('audioStreamingLanguageCode 未指定の場合は connect メッセージへ含めない', () async {
       final connection = createConnection(
         const SoraConnectionConfig(
+          useAudioDevice: false,
           signalingUrls: <String>['wss://example.com/signaling'],
           channelId: 'test-channel',
           role: SoraRole.sendrecv,
@@ -291,6 +301,7 @@ void main() {
       SoraConnection createConnection() {
         return SoraConnection.createForTest(
           config: const SoraConnectionConfig(
+            useAudioDevice: false,
             signalingUrls: <String>['wss://example.com/signaling'],
             channelId: 'test-channel',
             role: SoraRole.recvonly,
@@ -538,6 +549,7 @@ void main() {
     SoraConnection createConnection({SoraTimeoutOptions? timeoutOptions}) {
       return SoraConnection.createForTest(
         config: SoraConnectionConfig(
+          useAudioDevice: false,
           signalingUrls: <String>[acceptUrl],
           channelId: 'test-channel',
           role: SoraRole.recvonly,
@@ -595,6 +607,7 @@ void main() {
 
       final connection = SoraConnection.createForTest(
         config: SoraConnectionConfig(
+          useAudioDevice: false,
           signalingUrls: <String>[acceptUrl],
           channelId: 'test-channel',
           role: SoraRole.sendrecv,
@@ -871,6 +884,7 @@ void main() {
 
         final connection = SoraConnection.createForTest(
           config: SoraConnectionConfig(
+            useAudioDevice: false,
             signalingUrls: <String>[sourceUrl],
             channelId: 'test-channel',
             role: SoraRole.recvonly,
@@ -948,6 +962,7 @@ void main() {
     SoraConnection createConnection() {
       return SoraConnection.createForTest(
         config: const SoraConnectionConfig(
+          useAudioDevice: false,
           signalingUrls: <String>['wss://example.com/signaling'],
           channelId: 'test-channel',
           role: SoraRole.recvonly,
@@ -1221,6 +1236,7 @@ void main() {
     SoraConnection createConnection() {
       return SoraConnection.createForTest(
         config: const SoraConnectionConfig(
+          useAudioDevice: false,
           signalingUrls: <String>['wss://example.com/signaling'],
           channelId: 'test-channel',
           role: SoraRole.sendonly,
@@ -1304,6 +1320,7 @@ void main() {
     SoraConnection createConnection() {
       return SoraConnection.createForTest(
         config: SoraConnectionConfig(
+          useAudioDevice: false,
           signalingUrls: <String>[acceptUrl],
           channelId: 'test-channel',
           role: SoraRole.recvonly,
@@ -1528,6 +1545,7 @@ void main() {
     SoraConnection createConnection() {
       return SoraConnection.createForTest(
         config: const SoraConnectionConfig(
+          useAudioDevice: false,
           signalingUrls: <String>['wss://example.com/signaling'],
           channelId: 'test-channel',
           role: SoraRole.recvonly,

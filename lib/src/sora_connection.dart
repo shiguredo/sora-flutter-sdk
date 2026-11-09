@@ -2001,7 +2001,7 @@ class SoraConnection {
   /// 実 WebSocket サーバー相手に確立した channel を `_signalingState` に
   /// 反映し、`_connectWebSocket` が本番で登録するのと同一形式の subscription
   /// (onData: `_enqueueWebSocketMessage` / onError: `_handleWebSocketError`
-  /// / onDone: `_handleWebSocketDone`) を新規に登録する。
+  /// / onDone: `_enqueueWebSocketClose`) を新規に登録する。
   ///
   /// **本番との差分**: `_connectWebSocket` は `connectingWebSocketChannel` に
   /// 一旦セットしてから `channel.ready` 成功後に `webSocketChannel` へ promote
@@ -2019,7 +2019,8 @@ class SoraConnection {
         _handleWebSocketError(error, stackTrace, channel);
       },
       onDone: () {
-        _handleWebSocketDone(channel);
+        // 本番の `_connectWebSocket` と同じく、close も tail で直列化する。
+        _enqueueWebSocketClose(channel);
       },
     );
   }

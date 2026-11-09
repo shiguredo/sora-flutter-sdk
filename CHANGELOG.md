@@ -15,6 +15,8 @@
   - @zztkm
 - [UPDATE] iOS の画面キャプチャの時刻取得を `CACurrentMediaTime()` に変更する
   - @zztkm
+- [FIX] redirect 直後に WebSocket が close されると接続に失敗するバグを修正する
+  - @zztkm
 
 ### misc
 

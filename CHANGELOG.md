@@ -9,7 +9,9 @@
 - FIX
   - バグ修正
 
-## develop
+## 2026.2.0
+
+**リリース日**: 2026-11-09
 
 - [ADD] iOS の PrivacyInfo.xcprivacy を同梱する
   - @zztkm
@@ -22,6 +24,8 @@
 
 - [ADD] E2E テストの結果を Slack に通知するジョブを追加する
   - @zztkm
+- [UPDATE] WebRTC client の worker thread を network thread に統一する
+  - @melpon
 - [UPDATE] Required Reason API の再導入を検出する CI 検査を追加する
   - @zztkm
 

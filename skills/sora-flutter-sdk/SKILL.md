@@ -13,7 +13,7 @@ WebRTC SFU Sora 向け Flutter SDK。WebRTC のコアロジックは `dart:ffi` 
 libwebrtc を直接呼び出す Dart 側に実装し、カメラキャプチャと映像レンダリングは
 プラットフォーム側が担当する。
 
-- パッケージ: `sora_sdk` 2026.1.0
+- パッケージ: `sora_sdk` 2026.2.0
 - 対応 Sora: 2025.2.0+
 - 環境: Flutter 3.44.0+ / Dart SDK 3.10.0+
 

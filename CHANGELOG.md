@@ -14,8 +14,11 @@
 **リリース日**: 2026-11-09
 
 - [ADD] iOS の PrivacyInfo.xcprivacy を同梱する
+  - Sora Flutter SDK 内の Required Reason API の利用理由を SDK 側で宣言する
   - @zztkm
 - [UPDATE] iOS の画面キャプチャの時刻取得を `CACurrentMediaTime()` に変更する
+  - Required Reason API に分類される `ProcessInfo.processInfo.systemUptime` の利用をなくすため
+  - 公開 API と Dart 側の挙動は変わらない
   - @zztkm
 - [FIX] redirect 直後に WebSocket が close されると接続に失敗するバグを修正する
   - @zztkm

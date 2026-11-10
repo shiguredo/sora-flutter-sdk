@@ -432,3 +432,22 @@ jobs:
           # xvfb-run で仮想ディスプレイ上にアプリを起動し、ヘッドレス CI 環境でも
           # Flutter Linux の E2E テストを実行できるようにする
           xvfb-run -a flutter test "${{ matrix.test.target }}" -d linux
+
+  # E2E テストの結果を Slack に通知する。失敗時と、失敗後の復旧時に通知する。
+  # 別ジョブの失敗は action が GitHub API 経由で検出するため、status には job.status を渡す。
+  # ワークフロー全体がキャンセルされた場合は通知しないので `!cancelled()` で判定する。
+  # action が使う gh / jq / curl は ubuntu-slim に導入済みで、GitHub API の読み取りに
+  # 必要な actions: read / contents: read もワークフロー全体の permissions で付与済み。
+  slack_notify:
+    name: Slack Notify
+    needs: [ integration-test-macos, integration-test-windows, integration-test-linux ]
+    runs-on: ubuntu-slim
+    if: ${{ !cancelled() }}
+    steps:
+      - name: Slack Notification
+        uses: shiguredo/github-actions/.github/actions/slack-notify@main
+        with:
+          status: ${{ job.status }}
+          slack_webhook: ${{ secrets.SLACK_WEBHOOK }}
+          slack_channel: sora-flutter-sdk
+          notify_mode: failure_and_fixed

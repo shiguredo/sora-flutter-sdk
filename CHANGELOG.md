@@ -11,7 +11,7 @@
 
 ## 2026.2.0
 
-**リリース日**: 2026-11-09
+**リリース日**: 2026-11-10
 
 - [ADD] iOS の PrivacyInfo.xcprivacy を同梱する
   - Sora Flutter SDK 内の Required Reason API の利用理由を SDK 側で宣言する

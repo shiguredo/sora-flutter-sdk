@@ -1,0 +1,98 @@
+plugins {
+    id 'com.android.library'
+}
+
+group 'jp.shiguredo.sora_sdk'
+version '1.0-SNAPSHOT'
+
+def libwebrtcCDir = file("${projectDir}/../third_party/libwebrtc-c")
+def libwebrtcCBuildDir = file("${libwebrtcCDir}/build-android_arm64")
+def packageRootDir = file("${projectDir}/..")
+def soraHwasanEnabled = project.findProperty('sora.hwasan') == 'true'
+def soraUbsanEnabled = project.findProperty('sora.ubsan') == 'true'
+
+def resolveDartExecutable() {
+    def flutterSdkPath = project.findProperty('flutter.sdk') ?: System.getenv('FLUTTER_ROOT')
+    if (flutterSdkPath != null) {
+        def flutterBinDart = new File(flutterSdkPath, 'bin/dart')
+        if (flutterBinDart.exists()) {
+            return flutterBinDart.absolutePath
+        }
+
+        def cachedDart = new File(flutterSdkPath, 'bin/cache/dart-sdk/bin/dart')
+        if (cachedDart.exists()) {
+            return cachedDart.absolutePath
+        }
+    }
+
+    return 'dart'
+}
+
+tasks.register('fetchNativeDeps', Exec) {
+    // Flutter SDK 同梱の Dart を優先し、見つからない場合のみ PATH 上の dart を利用する。
+    workingDir packageRootDir
+    commandLine resolveDartExecutable(), 'run', 'scripts/fetch_native_deps.dart', 'android_arm64'
+}
+
+tasks.named('preBuild') {
+    dependsOn tasks.named('fetchNativeDeps')
+}
+
+android {
+    namespace 'jp.shiguredo.sora_sdk'
+    compileSdkVersion 34
+    ndkVersion "28.2.13676358"
+
+    defaultConfig {
+        minSdkVersion 29
+        consumerProguardFiles 'consumer-rules.pro'
+
+        externalNativeBuild {
+            cmake {
+                def cmakeArgs = [
+                    "-DANDROID_ABI=arm64-v8a",
+                    "-DANDROID_PLATFORM=29",
+                    "-DANDROID_NATIVE_API_LEVEL=29",
+                    "-DLIBWEBRTC_C_DIR=${libwebrtcCDir}",
+                    "-DLIBWEBRTC_C_BUILD_DIR=${libwebrtcCBuildDir}",
+                    "-DANDROID_STL=${soraHwasanEnabled ? 'c++_shared' : 'c++_static'}",
+                    "-DSORA_SDK_ENABLE_HWASAN=${soraHwasanEnabled ? 'ON' : 'OFF'}",
+                    "-DSORA_SDK_ENABLE_UBSAN=${soraUbsanEnabled ? 'ON' : 'OFF'}"
+                ]
+
+                arguments(cmakeArgs as String[])
+            }
+        }
+
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main.java.srcDirs += 'src/main/kotlin'
+    }
+
+    externalNativeBuild {
+        cmake {
+            path file('src/main/cpp/CMakeLists.txt')
+        }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}
+
+dependencies {
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation fileTree(dir: "${libwebrtcCBuildDir}/_deps/webrtc/jar", include: ['webrtc.jar'])
+}

@@ -20,6 +20,8 @@
 
 ### misc
 
+- [ADD] E2E テストの結果を Slack に通知するジョブを追加する
+  - @zztkm
 - [UPDATE] Required Reason API の再導入を検出する CI 検査を追加する
   - @zztkm
 

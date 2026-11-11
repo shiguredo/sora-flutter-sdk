@@ -1,7 +1,7 @@
 # iOS に PrivacyInfo.xcprivacy を同梱する
 
 - Created: 2026-11-04
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-11-11
 - Branch: feature/ios-required-reason-api
 - Polished: {YYYY-MM-DD}
 
@@ -60,6 +60,28 @@ sora-ios-sdk は WebRTC を dynamic framework (WebRTC.framework) として取り
 - [ ] `build-apple` に上記の検査 step が追加され、CI が成功する
 - [ ] README と CHANGELOG.md が更新されている
 - [ ] モックやスタブを使用していない
+
+## 解決方法
+
+iOS 向けに Required Reason API の利用理由を宣言した manifest を SDK 側で同梱し、最終バイナリから検出されるカテゴリが宣言でカバーされていることを CI で検査するようにした。
+
+- `ios/sora_sdk/Sources/sora_sdk/Resources/PrivacyInfo.xcprivacy` を追加した。SystemBootTime に `35F9.1` と `8FFB.1`、FileTimestamp に `C617.1` を宣言し、`NSPrivacyTracking` を `false`、`NSPrivacyTrackingDomains` と `NSPrivacyCollectedDataTypes` を空にした。内容は libwebrtc_c 0.150.3 が同梱する WebRTC.framework の manifest と揃えた
+- `ios/sora_sdk/Package.swift` の `sora_sdk` target に `resources: [.process("Resources/PrivacyInfo.xcprivacy")]` を追加した。libwebrtc_c は静的ライブラリで、SwiftPM の binaryTarget は resources をアプリへ届けないため SDK 側で同梱する必要がある。この制約と manifest の出典、更新時の確認方法をコメントで残した
+- `.github/workflows/ci.yml` の `build-apple` に `Verify iOS privacy manifest` を追加した。`Runner.app` の `sora_sdk` の resource bundle に manifest が含まれること、`plutil -lint` が通ること、SystemBootTime と FileTimestamp が宣言されていること、`Runner` を `nm -u` と `strings` で走査して検出したシンボルのカテゴリがアプリ内の manifest の宣言で全てカバーされていることを検査する
+- `CHANGELOG.md` の 2026.2.0 に `[ADD]` で追記した
+- `README.md` には追記しない。README は複数プラットフォームを横断する構成であり、iOS 単独プラットフォーム向けの情報をインストール手順の直後に載せない方針とした
+
+### 検証
+
+- `plutil -lint ios/sora_sdk/Sources/sora_sdk/Resources/PrivacyInfo.xcprivacy` が成功する
+- Release ビルドの `Runner.app/sora_sdk_sora_sdk.bundle/PrivacyInfo.xcprivacy` に manifest が含まれ、宣言カテゴリが SystemBootTime と FileTimestamp である
+- `Runner.app/Runner` から `_mach_absolute_time` と `_stat` を検出し、どちらも同梱した manifest の宣言でカバーされている
+- PR #34 (run 41960941544) の CI、develop の最新 CI、2026.2.0 のリリース CI で `Build Apple` が成功している
+- 公開済みの pub.dev の 2026.2.0 に manifest と `Package.swift` の `resources` 宣言が含まれ、内容がリポジトリと一致する
+
+### 残作業
+
+- App Store Connect へアプリをアップロードし、SystemBootTime と FileTimestamp について ITMS-91053 が出ないことを確認する。設計方針どおり実装後の別作業とする
 
 ## 関連
 

@@ -52,6 +52,7 @@ final class ObservedConnection {
       <SoraDataChannelEvent>[];
   final List<SoraDataChannelMessage> dataChannelMessages =
       <SoraDataChannelMessage>[];
+  final List<Map<String, Object?>> receivedOffers = <Map<String, Object?>>[];
   final List<Map<String, Object?>> switchedEvents = <Map<String, Object?>>[];
   final List<Map<String, Object?>> notifyEvents = <Map<String, Object?>>[];
   final List<Map<String, Object?>> pushEvents = <Map<String, Object?>>[];
@@ -120,6 +121,15 @@ final class ObservedConnection {
 
     if (event is SoraDataChannelMessageEvent) {
       dataChannelMessages.add(event.message);
+      return;
+    }
+
+    if (event is SoraSignalingMessageEvent) {
+      final signalingEvent = event.event;
+      if (signalingEvent.direction == 'received' &&
+          signalingEvent.data?['type'] == 'offer') {
+        receivedOffers.add(signalingEvent.data!);
+      }
       return;
     }
 
@@ -415,6 +425,25 @@ final class ObservedConnection {
     );
   }
 
+  /// 最初に受信した offer の data を待つ。
+  ///
+  /// offer の data_channels / rpc_methods を見て、RPC を払い出しているか
+  /// 判定するために使う。RPC テストは 1 接続 1 offer を前提とする。
+  Future<Map<String, Object?>> waitForOffer(
+    WidgetTester tester, {
+    required Duration timeout,
+  }) async {
+    return _waitForCondition<Map<String, Object?>>(
+      tester,
+      source: receivedOffers,
+      predicate: (_) => true,
+      timeout: timeout,
+      buildTimeoutMessage: () => 'Timed out while waiting for offer on $name. '
+          'receivedOffers=${receivedOffers.length} '
+          'milestones=$milestones',
+    );
+  }
+
   /// event_type が connection.created で、指定 connectionId に一致する
   /// SoraNotifyEvent を待つ。
   ///
@@ -493,6 +522,7 @@ final class ObservedConnection {
         'removeTrackEvents=$removeTrackEvents '
         'dataChannelOpenEvents=${dataChannelOpenEvents.map((e) => e.label).toList()} '
         'dataChannelMessages=${dataChannelMessages.length} '
+        'receivedOffers=${receivedOffers.length} '
         'switchedEvents=${switchedEvents.length} '
         'notifyEvents=${notifyEvents.length} '
         'pushEvents=${pushEvents.length} '

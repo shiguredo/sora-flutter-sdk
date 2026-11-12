@@ -1658,6 +1658,11 @@ class SoraConnection {
 
   /// JSON-RPC リクエストを rpc DataChannel 経由で送信する
   ///
+  /// DataChannel シグナリングを有効にした接続でのみ送信できる。Sora サーバー側の
+  /// `data_channel_rpc` 有効化と、認証成功時の `rpc_methods` の払い出しが必要。
+  /// `rpc` ラベルの DataChannel が open してから呼ぶこと。open 前に呼ぶと要求は
+  /// 送信されず、`timeout` 未指定では切断まで Future が完了しない。
+  ///
   /// [options] の `notification` が `true` の場合は応答を待たずに `null` を
   /// 返す。
   ///
@@ -1667,6 +1672,8 @@ class SoraConnection {
   /// - Sora が JSON-RPC の error を返した場合は [SoraRpcError]。
   /// - [options] の `timeout` を指定していて、その時間内に応答が返らない
   ///   場合は [TimeoutException]。
+  /// - 切断時に未完了だったリクエストのうち、notification 以外は
+  ///   [SoraRpcError] (code: -1, message: 'Disconnected')。
   Future<Object?> rpc(
     String method, {
     Object? params,

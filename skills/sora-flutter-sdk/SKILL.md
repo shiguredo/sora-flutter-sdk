@@ -269,8 +269,18 @@ final result = await connection.rpc('method',
 // notification: const SoraRpcOptions(notification: true)
 ```
 
+RPC は DataChannel シグナリングを有効にした接続でのみ動作する。
+Sora サーバー側の `data_channel_rpc` 有効化と、認証成功時の `rpc_methods` の
+払い出しが必要になる。
+`rpc` ラベルの DataChannel が open してから `rpc()` を呼ぶこと。
+open 前に呼ぶと要求は送信されず、`timeout` 未指定では切断まで Future が
+完了しない。
+
 `SoraRpcOptions.timeout` を指定して応答が無い場合は `TimeoutException`、
 Sora がエラーを返した場合は `SoraRpcError` になる。
+`notification: true` は応答を待たずに `null` を返す。
+切断時に未完了だった notification 以外のリクエストは
+`SoraRpcError(code: -1, message: 'Disconnected')` になる。
 
 ### 外部映像トラック
 

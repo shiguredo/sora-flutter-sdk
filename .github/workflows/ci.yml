@@ -21,6 +21,7 @@ on:
       - "macos/**"
       - "windows/**"
       - "devtools/**"
+      - "e2e_test_app/**"
       - "lib/**"
       - "prek.toml"
       - "pubspec.yaml"
@@ -908,6 +909,18 @@ jobs:
         run: |
           set -euo pipefail
           flutter pub get
+
+      - name: Analyze e2e_test_app
+        working-directory: e2e_test_app
+        run: |
+          set -euo pipefail
+          flutter analyze --fatal-infos lib integration_test test
+
+      - name: Test e2e_test_app
+        working-directory: e2e_test_app
+        run: |
+          set -euo pipefail
+          flutter test test
 
       - name: Build e2e_test_app Linux app
         working-directory: e2e_test_app

@@ -34,6 +34,7 @@ dev_dependencies:
     sdk: flutter
   integration_test:
     sdk: flutter
+  crypto: ^3.0.6
   flutter_lints: ^6.0.0
 
 # For information on the generic Dart part of this file, see the

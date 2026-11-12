@@ -3,7 +3,7 @@
 Sora Flutter SDK の recvonly / sendonly / sendrecv 接続と、2 クライアント間メディア疎通を `integration_test` で検証する最小アプリです。
 加えて、ネイティブプラグインの結合テスト（Sora 接続不要でデバイス列挙等のみを検証するテスト）も含みます。
 
-CI（`.github/workflows/e2e-test.yml`）は macOS / Windows / Linux の 3 環境で接続テストを実行します。`video_codec_e2e_test.dart` は macOS 専用、`macos_camera_runtime_stress_e2e_test.dart` と `windows_audio_device_test.dart` はローカル専用で CI では実行しません。
+CI（`.github/workflows/e2e-test.yml`）は macOS / Windows / Linux の 3 環境で接続テストを実行します。`video_codec_e2e_test.dart` は macOS 専用、`macos_camera_runtime_stress_e2e_test.dart` と `windows_audio_device_test.dart` と `rpc_e2e_test.dart` はローカル専用で CI では実行しません。
 
 ## 前提
 
@@ -20,13 +20,20 @@ CI（`.github/workflows/e2e-test.yml`）は macOS / Windows / Linux の 3 環境
 
 | 変数 | 説明 |
 |------|------|
-| `TEST_SECRET_KEY` | 接続 metadata 用（JWT 文字列、JSON オブジェクト文字列、または平文トークン） |
+| `TEST_SECRET_KEY` | 接続 metadata 用。通常 E2E は JWT 文字列 / JSON オブジェクト文字列 / 平文トークンを使う。RPC E2E 全体では raw shared secret のみ可（RPC JWT テストの署名鍵、`rpc_disconnect_pending` の raw access_token に使う） |
 | `TEST_SIGNALING_URLS` | シグナリング URL をカンマまたは空白区切り（例: `wss://a/signaling,wss://b/signaling`） |
 | `TEST_CHANNEL_ID_PREFIX` | チャンネル ID のプレフィックス。CI では `GITHUB_RUN_ID` と OS 名を連結し、ローカルでは時刻でユニーク化する |
 | `TEST_SEND_DURATION` | （任意）sendonly / sendrecv テストの送信継続秒数（例: `60`） |
 | `TEST_MACOS_CAMERA_STRESS_ROUNDS` | （任意）macOS 実カメラストレス E2E の反復回数。未指定時は `10` |
 | `TEST_PUSH_EXPECTED_TYPE` | （任意）notify metadata テストで push 受信を確認する場合、期待する `event_type` 値を設定する |
 | `TEST_ENABLE_CAMERA_TEXTURE_E2E` | （任意）`true` の場合、実カメラを使う local Texture E2E を実行する |
+| `TEST_RPC_SUCCESS_METHOD` | RPC JWT を使うテスト全体で使うメソッド（RPC JWT テストで必須。未設定時はスキップ。例: `2025.2.0/PutSignalingNotifyMetadata`） |
+| `TEST_RPC_SUCCESS_PARAMS_JSON` | （RPC JWT テストで必須。未設定時はスキップ）RPC JWT を使うテストの params JSON |
+| `TEST_RPC_SUCCESS_EXPECTED_JSON` | （RPC JWT テストで必須。未設定時はスキップ）RPC JWT を使うテストの正常応答の期待 result JSON |
+| `TEST_RPC_ERROR_PARAMS_JSON` | （任意）RPC JWT を使うテストの error response 用 params JSON。未指定時は success params に `invalid_param` を足す |
+| `TEST_RPC_ERROR_EXPECTED_CODE` | （任意）RPC JWT を使うテストの error response の期待 code |
+| `TEST_RPC_ERROR_EXPECTED_MESSAGE` | （任意）RPC JWT を使うテストの error response の期待 message |
+| `TEST_RPC_ERROR_EXPECTED_DATA_JSON` | （任意）RPC JWT を使うテストの error response の期待 data JSON |
 
 接続失敗系 E2E の前提:
 
@@ -39,6 +46,24 @@ DataChannel signaling E2E の前提:
 - `dataChannelSignaling` を有効にした接続テスト（`custom_data_channel_e2e_test.dart`）は、DataChannel signaling に対応した Sora サーバーが必要。
 - サーバー側で `data_channel_signaling` が有効になっていない場合、`SoraSwitchedEvent` が発火せずテストがタイムアウトする。
 - `ignoreDisconnectWebSocket: true` の接続維持テスト（`connection_failure_e2e_test.dart`）は、switched 送信後に WebSocket を閉じる Sora サーバーが必要。
+
+RPC E2E（`rpc_e2e_test.dart`）の前提:
+
+- iOS SDK の RPC E2E と同じテストサーバーと `TEST_SECRET_KEY` を使う。
+- 接続先の Sora で `data_channel_rpc` が有効（既定 true）で、認証成功時に `rpc_methods` が払い出される必要がある。
+- `TEST_RPC_SUCCESS_METHOD` に `2025.2.0/PutSignalingNotifyMetadata` を指定する場合、テストサーバーで `signaling_notify_metadata_ext` を有効（既定 false）にし、`signaling_notify_metadata_ext` の初期値（authz webhook が払い出す値）を `{}` にしておくこと。初期値が空でない場合、`TEST_RPC_SUCCESS_EXPECTED_JSON` には設定後の metadata 全体を指定する。
+- `TEST_SECRET_KEY` は RPC E2E 全体で raw shared secret のみ可。RPC JWT テストでは HS256 の署名鍵、`rpc_disconnect_pending` では raw access_token として使う。既存 E2E の `metadataFromSecretKey()` は JWT 風の値を裸の文字列で返すため、RPC E2E では使わず、`metadata: {"access_token": "<JWT>"}` を組み立てる。
+- テストサーバーは JWT の private claims の `rpc_methods` を検証し、認証成功時の RPC 許可に反映する必要がある。通常の Sora では動作しない。
+- RPC JWT を使うテストは `dataChannelSignaling: true` と `ignoreDisconnectWebSocket: true` を指定し、`switched` と `rpc` ラベルの DataChannel open を待つ。接続は `no_media` を避けるため recvonly で音声・映像を有効にし、ローカル stream は使わない。
+- 正常応答は単一接続で呼べる `2025.2.0/PutSignalingNotifyMetadata` を推奨例とする。`2025.2.0/RequestSimulcastRid`、`2025.2.0/RequestSpotlightRid`、`2025.2.0/ResetSpotlightRid` は simulcast 用の追加 claims または spotlight 用の接続設定が必要なため、このテストでは扱わない。
+- `PutSignalingNotifyMetadata` は result が設定後の metadata 全体なので完全一致で比較する。それ以外のメソッドは Map のキー部分一致、List の要素数・各要素、スカラーの一致を比較する。error response の code は未指定でも 0 以外、message は非空を確認し、指定した code / message / data は完全一致で比較する。
+- `TEST_RPC_ERROR_PARAMS_JSON` を指定しない場合、success params に `invalid_param` を足す。success params が JSON オブジェクトでない場合は `{"invalid_param": true}` を送る。
+- `rpc_disconnect_pending` テストは RPC JWT を使わず、`metadata: {"access_token": TEST_SECRET_KEY}` を raw の access_token として送り、`dataChannelSignaling: false` で接続する。`TEST_RPC_SUCCESS_*` は不要。offer に `rpc` ラベルまたは空でない `rpc_methods` がある場合は、pending と応答のレースを避けるためスキップする。
+- `rpc_disconnect_in_flight` テストは RPC JWT と `TEST_RPC_SUCCESS_*` を使い、`dataChannelSignaling: true` で接続して rpc DataChannel open 後に `rpc()` と `disconnect()` を競合させる。10 秒以内の終端だけを確認し、終端理由は問わない。
+- error テストは SDK が code を補完した -1 をサーバーエラーとして扱わない。サーバーが -1 を返す場合は `TEST_RPC_ERROR_EXPECTED_CODE=-1` を指定する。
+- error テストは、サーバーが不正 params を拒否しなかった場合に理由付きでスキップする。
+- `TEST_RPC_SUCCESS_*` が揃っていない場合、RPC JWT を使うテストは理由付きでスキップする。JSON 形式が不正な場合は、設定ミスを隠さないため失敗する。
+- この E2E は CI では実行せず、ローカル検証に限定する。`e2e-test.yml` の matrix には登録しない。
 
 Notify metadata E2E（`notify_metadata_e2e_test.dart`）の前提:
 
@@ -99,8 +124,12 @@ macOS 実カメラストレス E2E（`macos_camera_runtime_stress_e2e_test.dart`
 export TEST_SECRET_KEY='...'
 export TEST_SIGNALING_URLS='wss://...'
 export TEST_CHANNEL_ID_PREFIX='e2e-local-'
+export TEST_RPC_SUCCESS_METHOD='2025.2.0/PutSignalingNotifyMetadata'
+export TEST_RPC_SUCCESS_PARAMS_JSON='{"push":false,"metadata":{"e2e":"rpc"}}'
+export TEST_RPC_SUCCESS_EXPECTED_JSON='{"e2e":"rpc"}'
 cd e2e_test_app
 flutter pub get
+flutter test test
 flutter test integration_test/recvonly_e2e_test.dart -d macos
 flutter test integration_test/sendonly_dummy_video_e2e_test.dart -d macos
 flutter test integration_test/sendrecv_smoke_e2e_test.dart -d macos
@@ -113,6 +142,7 @@ flutter test integration_test/two_party_media_e2e_test.dart -d macos
 flutter test integration_test/video_codec_e2e_test.dart -d macos
 flutter test integration_test/notify_metadata_e2e_test.dart -d macos
 flutter test integration_test/custom_data_channel_e2e_test.dart -d macos
+flutter test integration_test/rpc_e2e_test.dart -d macos
 flutter test integration_test/remote_media_stream_e2e_test.dart -d macos
 flutter test integration_test/local_media_toggle_e2e_test.dart -d macos
 flutter test integration_test/bundle_id_isolation_e2e_test.dart -d macos
